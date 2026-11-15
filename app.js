@@ -323,12 +323,36 @@ function recalcReportsCogs(){
 }
 
 function renderLists(){
-  const rate=getRate(),newCnt=db.skus.filter(s=>s.isNew||s.usd===0).length,al=document.getElementById('new-sku-alert');
+  const rate=getRate();
+  const newCnt=db.skus.filter(s=>s.isNew||s.usd===0).length;
+  const al=document.getElementById('new-sku-alert');
   if(al){al.classList.toggle('hidden',newCnt===0);al.textContent='⚠️ Новых ШК без себестоимости: '+newCnt;}
-  document.getElementById('tb-skus').innerHTML=db.skus.map(s=>'<tr class="'+(s.isNew||s.usd===0?'row-new-sku':'')+'"><td class="bold">'+s.name+'</td><td>'+s.art+'</td><td>'+s.col+'</td><td>'+s.siz+'</td><td>'+s.bc+'</td><td><span class="badge '+(s.isNew?'badge-amber':'badge-blue')+'">'+s.src+'</span></td><td class="num" style="background:#ecfdf5"><input type="number" step="0.01" class="inline-edit" value="'+s.usd+'" onchange="updateSkuUsd(\''+s.id+'\',this.value)"> $</td><td class="num bold" style="background:#eff6ff;color:#1e40af">'+fmtR(s.usd*rate)+'</td><td><button class="btn" onclick="applyModelUsd(\''+s.art+'\','+s.usd+')">На всю модель</button></td><td><button class="btn btn-danger" onclick="db.skus=db.skus.filter(x=>x.id!==\''+s.id+'\');save();render()">✕</button></td></tr>').join('');
+
+  document.getElementById('tb-skus').innerHTML=db.skus.map(s=>
+    '<tr class="'+(s.isNew||s.usd===0?'row-new-sku':'')+'">' +
+    '<td class="bold">'+s.name+'</td><td>'+s.art+'</td><td>'+s.col+'</td><td>'+s.siz+'</td><td>'+s.bc+'</td>' +
+    '<td><span class="badge '+(s.isNew?'badge-amber':'badge-blue')+'">'+s.src+'</span></td>' +
+    '<td class="num" style="background:#ecfdf5"><input type="number" step="0.01" class="inline-edit" value="'+s.usd+'" onchange="updateSkuUsd(\''+s.id+'\',this.value)"> $</td>' +
+    '<td class="num bold" style="background:#eff6ff;color:#1e40af">'+fmtR(s.usd*rate)+'</td>' +
+    '<td><button class="btn" onclick="applyModelUsd(\''+s.art+'\','+s.usd+')">На всю модель</button></td>' +
+    '<td><button class="btn btn-danger" onclick="db.skus=db.skus.filter(x=>x.id!==\''+s.id+'\');save();render()">✕</button></td></tr>'
+  ).join('');
+
   document.getElementById('rep-cnt').textContent=db.reports.length+' отчётов';
-  document.getElementById('tb-reps').innerHTML=db.reports.map(r=>{const p=://log-r.com-r.cogs;return '<tr><td>'+r.yr+'-'+r.mo+'</td><td class="bold">'+r.org+'</td><td>'+r.mp+'</td><td class="num">'+fmtR(r.rev)+'</td><td class="num text-red">'+fmtR(r.ret)+'</td><td class="num">'+fmtR(r.ads)+'</td><td class="num">'+fmtR(r.log)+'</td><td class="num">'+fmtR(r.com)+'</td><td class="num">'+fmtR(r.cogs)+'</td><td class="num bold '+(p>=0?'text-green':'text-red')+'">'+fmtR(p)+'</td><td><button class="btn btn-danger" onclick="db.reports=db.reports.filter(x=>x.id!==\''+r.id+'\');save();render()">✕</button></td></tr>';}).join('');
-  document.getElementById('tb-accs').innerHTML=db.accs.map(a=>'<tr><td class="bold">'+a.art+'</td><td>'+a.name+'</td><td class="num">'+a.qty+'</td><td class="num">'+fmtU(a.usd)+'</td><td class="num bold text-green">'+fmtU(a.qty*a.usd)+'</td><td><button class="btn btn-danger" onclick="db.accs=db.accs.filter(x=>x.id!==\''+a.id+'\');save();render()">✕</button></td></tr>').join('');
+  document.getElementById('tb-reps').innerHTML=db.reports.map(r=>{
+    const p=://log-r.com-r.cogs;
+    return '<tr><td>'+r.yr+'-'+r.mo+'</td><td class="bold">'+r.org+'</td><td>'+r.mp+'</td>' +
+      '<td class="num">'+fmtR(r.rev)+'</td><td class="num text-red">'+fmtR(r.ret)+'</td>' +
+      '<td class="num">'+fmtR(r.ads)+'</td><td class="num">'+fmtR(r.log)+'</td><td class="num">'+fmtR(r.com)+'</td><td class="num">'+fmtR(r.cogs)+'</td>' +
+      '<td class="num bold '+(p>=0?'text-green':'text-red')+'">'+fmtR(p)+'</td>' +
+      '<td><button class="btn btn-danger" onclick="db.reports=db.reports.filter(x=>x.id!==\''+r.id+'\');save();render()">✕</button></td></tr>';
+  }).join('');
+
+  document.getElementById('tb-accs').innerHTML=db.accs.map(a=>
+    '<tr><td class="bold">'+a.art+'</td><td>'+a.name+'</td><td class="num">'+a.qty+'</td><td class="num">'+fmtU(a.usd)+'</td>' +
+    '<td class="num bold text-green">'+fmtU(a.qty*a.usd)+'</td>' +
+    '<td><button class="btn btn-danger" onclick="db.accs=db.accs.filter(x=>x.id!==\''+a.id+'\');save();render()">✕</button></td></tr>'
+  ).join('');
 
     const opNames={FAB_IN:'🧵 Пошив на фабрике',TO_WAY:'🚚 Отправка в путь',TO_RF:'🏢 Приёмка склад РФ',DEFECT:'❌ Брак (убыток)',REWORK_IN:'🔧 В переработку',REWORK_OUT:'✅ Из переработки на склад'};
   document.getElementById('tb-stk').innerHTML=db.stockMoves.map(m=>
