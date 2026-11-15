@@ -355,13 +355,15 @@ function renderLists(){
     '<td class="num bold text-green">'+fmtU(a.qty*a.usd)+'</td>' +
     '<td><button class="btn btn-danger" onclick="db.accs=db.accs.filter(x=>x.id!==\''+a.id+'\');save();render()">✕</button></td></tr>'
   ).join('');
-
-  const opNames={FAB_IN:'🧵 Пошив на фабрике',TO_WAY:'🚚 Отправка в путь',TO_RF:'🏢 Приёмка склад РФ',DEFECT:'❌ Брак (убыток)',REWORK_IN:'🔧 В переработку',REWORK_OUT:'✅ Из переработки на склад'};
-  document.getElementById('tb-stk').innerHTML=db.stockMoves.map(m=>
-    '<tr><td class="bold">'+m.dt+'</td><td class="bold">'+m.item+'</td><td>'+(opNames[m.op]||m.op)+'</td>' +
-    '<td class="num">'+m.qty+'</td><td class="num">'+fmtU(m.usd)+'</td><td class="num bold">'+fmtR(m.qty*m.usd*rate)+'</td>' +
-    '<td><button class="btn btn-danger" onclick="db.stockMoves=db.stockMoves.filter(x=>x.id!==\''+m.id+'\');save();render()">✕</button></td></tr>'
-  ).join('');
+  
+    const opNames={
+    FAB_IN:'Пошив на фабрике',
+    TO_WAY:'Отправка в путь',
+    TO_RF:'Приемка склад РФ',
+    DEFECT:'Брак (убыток)',
+    REWORK_IN:'В переработку',
+    REWORK_OUT:'Из переработки на склад'
+  };
 
   const allWals=db.orgs.map(o=>({id:o.id,name:o.name+' ('+o.bank+')',cur:'RUB'})).concat(db.cashWallets);
   document.getElementById('dds-kpis').innerHTML=allWals.map(w=>{
