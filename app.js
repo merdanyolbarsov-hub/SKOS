@@ -337,7 +337,6 @@ function renderLists(){
     '<td><button class="btn" onclick="applyModelUsd(\''+s.art+'\','+s.usd+')">На всю модель</button></td>' +
     '<td><button class="btn btn-danger" onclick="db.skus=db.skus.filter(x=>x.id!==\''+s.id+'\');save();render()">✕</button></td></tr>'
   ).join('');
-
   document.getElementById('rep-cnt').textContent=db.reports.length+' отчётов';
   document.getElementById('tb-reps').innerHTML=db.reports.map(r=>{
     const p=://log-r.com-r.cogs;
