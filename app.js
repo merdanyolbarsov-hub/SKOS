@@ -392,18 +392,69 @@ function renderLists(){
     '<td><button class="btn btn-danger" onclick="db.orgs=db.orgs.filter(x=>x.id!==\''+o.id+'\');save();render()">✕</button></td></tr>'
   ).join('');
 }
-
-
-function addSku(e){e.preventDefault();const bc=document.getElementById('s-bc').value.trim();if(db.skus.some(s=>s.bc===bc))return alert('Этот ШК уже есть!');db.skus.unshift({id:'s_'+Date.now(),name:document.getElementById('s-name').value,art:document.getElementById('s-art').value,col:document.getElementById('s-col').value||'—',siz:document.getElementById('s-siz').value||'—',bc,usd:Number(document.getElementById('s-usd').value),src:'Вручную',isNew:false});e.target.reset();save();render();}
-function addAcc(e){e.preventDefault();db.accs.unshift({id:'a_'+Date.now(),art:document.getElementById('ac-art').value,name:document.getElementById('ac-name').value,qty:Number(document.getElementById('ac-qty').value),usd:Number(document.getElementById('ac-usd').value)});e.target.reset();save();render();}
-function addStockMove(e){e.preventDefault();db.stockMoves.unshift({id:'m_'+Date.now(),dt:new Date().toISOString().slice(0,10),item:document.getElementById('st-item').value,op:document.getElementById('st-op').value,qty:Number(document.getElementById('st-qty').value),usd:Number(document.getElementById('st-usd').value)});e.target.reset();save();render();}
-function addManualDds(e){e.preventDefault();const t=document.getElementById('d-type').value,a=Number(document.getElementById('d-amt').value);db.dds.unshift({id:'d_'+Date.now(),date:document.getElementById('d-date').value,wal:document.getElementById('d-wal').value,cat:document.getElementById('d-cat').value,amt:t==='IN'?a:-a});e.target.reset();save();render();}
-function addTax(e){e.preventDefault();db.taxes.unshift({id:'t_'+Date.now(),org:document.getElementById('tx-org').value,type:document.getElementById('tx-type').value,yr:document.getElementById('tx-yr').value,kv:Number(document.getElementById('tx-kv').value),amt:Number(document.getElementById('tx-amt').value)});e.target.reset();save();render();}
-function addExp(e){e.preventDefault();db.expenses.unshift({id:'e_'+Date.now(),org:document.getElementById('ex-org').value,cat:document.getElementById('ex-cat').value,tit:document.getElementById('ex-tit').value,amt:Number(document.getElementById('ex-amt').value),cur:document.getElementById('ex-cur').value,yr:document.getElementById('ex-yr').value,mo:document.getElementById('ex-mo').value});e.target.reset();save();render();}
-function addSupOp(e){e.preventDefault();db.supOps.unshift({id:'p_'+Date.now(),name:document.getElementById('sp-name').value,type:document.getElementById('sp-type').value,amt:Number(document.getElementById('sp-amt').value),cur:document.getElementById('sp-cur').value});e.target.reset();save();render();}
-function addAsset(e){e.preventDefault();db.assets.unshift({id:'as_'+Date.now(),name:document.getElementById('as-name').value,cost:Number(document.getElementById('as-cost').value),mos:Number(document.getElementById('as-mos').value)});e.target.reset();save();render();}
-function addOrg(e){e.preventDefault();db.orgs.push({id:'o_'+Date.now(),name:document.getElementById('og-name').value,bank:document.getElementById('og-bank').value});e.target.reset();save();render();}
-function saveMan(e){e.preventDefault();db.reports.unshift({id:'r_'+Date.now(),org:document.getElementById('mn-org').value,mp:document.getElementById('mn-mp').value,yr:document.getElementById('mn-yr').value,mo:document.getElementById('mn-mo').value,rev:Number(document.getElementById('mn-rev').value),ret:Number(document.getElementById('mn-ret').value),ads:Number(document.getElementById('mn-ads').value),log:Number(document.getElementById('mn-log').value),com:Number(document.getElementById('mn-com').value),cogs:Number(document.getElementById('mn-cog').value),bo:Number(document.getElementById('mn-bo').value)});save();closeModals();render();}
+function addSku(e){
+  e.preventDefault();
+  const bc=document.getElementById('s-bc').value.trim();
+  if(db.skus.some(s=>s.bc===bc))return alert('Этот ШК уже есть!');
+  db.skus.unshift({
+    id:'s_'+Date.now(),
+    name:document.getElementById('s-name').value,
+    art:document.getElementById('s-art').value,
+    col:document.getElementById('s-col').value||'—',
+    siz:document.getElementById('s-siz').value||'—',
+    bc:bc,
+    usd:Number(document.getElementById('s-usd').value),
+    src:'Вручную',
+    isNew:false
+  });
+  e.target.reset();save();render();
+}
+function addAcc(e){
+  e.preventDefault();
+  db.accs.unshift({id:'a_'+Date.now(),art:document.getElementById('ac-art').value,name:document.getElementById('ac-name').value,qty:Number(document.getElementById('ac-qty').value),usd:Number(document.getElementById('ac-usd').value)});
+  e.target.reset();save();render();
+}
+function addStockMove(e){
+  e.preventDefault();
+  db.stockMoves.unshift({id:'m_'+Date.now(),dt:new Date().toISOString().slice(0,10),item:document.getElementById('st-item').value,op:document.getElementById('st-op').value,qty:Number(document.getElementById('st-qty').value),usd:Number(document.getElementById('st-usd').value)});
+  e.target.reset();save();render();
+}
+function addManualDds(e){
+  e.preventDefault();
+  const t=document.getElementById('d-type').value,a=Number(document.getElementById('d-amt').value);
+  db.dds.unshift({id:'d_'+Date.now(),date:document.getElementById('d-date').value,wal:document.getElementById('d-wal').value,cat:document.getElementById('d-cat').value,amt:t==='IN'?a:-a});
+  e.target.reset();save();render();
+}
+function addTax(e){
+  e.preventDefault();
+  db.taxes.unshift({id:'t_'+Date.now(),org:document.getElementById('tx-org').value,type:document.getElementById('tx-type').value,yr:document.getElementById('tx-yr').value,kv:Number(document.getElementById('tx-kv').value),amt:Number(document.getElementById('tx-amt').value)});
+  e.target.reset();save();render();
+}
+function addExp(e){
+  e.preventDefault();
+  db.expenses.unshift({id:'e_'+Date.now(),org:document.getElementById('ex-org').value,cat:document.getElementById('ex-cat').value,tit:document.getElementById('ex-tit').value,amt:Number(document.getElementById('ex-amt').value),cur:document.getElementById('ex-cur').value,yr:document.getElementById('ex-yr').value,mo:document.getElementById('ex-mo').value});
+  e.target.reset();save();render();
+}
+function addSupOp(e){
+  e.preventDefault();
+  db.supOps.unshift({id:'p_'+Date.now(),name:document.getElementById('sp-name').value,type:document.getElementById('sp-type').value,amt:Number(document.getElementById('sp-amt').value),cur:document.getElementById('sp-cur').value});
+  e.target.reset();save();render();
+}
+function addAsset(e){
+  e.preventDefault();
+  db.assets.unshift({id:'as_'+Date.now(),name:document.getElementById('as-name').value,cost:Number(document.getElementById('as-cost').value),mos:Number(document.getElementById('as-mos').value)});
+  e.target.reset();save();render();
+}
+function addOrg(e){
+  e.preventDefault();
+  db.orgs.push({id:'o_'+Date.now(),name:document.getElementById('og-name').value,bank:document.getElementById('og-bank').value});
+  e.target.reset();save();render();
+}
+function saveMan(e){
+  e.preventDefault();
+  db.reports.unshift({id:'r_'+Date.now(),org:document.getElementById('mn-org').value,mp:document.getElementById('mn-mp').value,yr:document.getElementById('mn-yr').value,mo:document.getElementById('mn-mo').value,rev:Number(document.getElementById('mn-rev').value),ret:Number(document.getElementById('mn-ret').value),ads:Number(document.getElementById('mn-ads').value),log:Number(document.getElementById('mn-log').value),com:Number(document.getElementById('mn-com').value),cogs:Number(document.getElementById('mn-cog').value),bo:Number(document.getElementById('mn-bo').value)});
+  save();closeModals();render();
+}
 function exportJson(){const a=document.createElement('a');a.href='data:text/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(db));a.download='SKOS_3_Backup.json';a.click();}
 function importJson(ev){const f=ev.target.files;if(!f)return;const r=new FileReader();r.onload=e=>{try{db=Object.assign(db,JSON.parse(e.target.result));save();onPerChange();alert('База загружена!');}catch(err){alert('Ошибка файла');}};r.readAsText(f);}
 function saveCloudCfg(){db.cloud={url:document.getElementById('sb-url').value.trim(),key:document.getElementById('sb-key').value.trim(),pin:document.getElementById('sb-pin').value.trim()||'2026'};save();syncCloud(true);}
@@ -417,3 +468,5 @@ async function syncCloud(manual){
   }catch(e){if(manual)alert('Ошибка связи с облаком: '+e.message);}
 }
 window.addEventListener('DOMContentLoaded',()=>{init();syncCloud(false);});
+
+
