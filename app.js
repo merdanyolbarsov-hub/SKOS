@@ -83,12 +83,13 @@ function searchSku(q){
   const f=db.skus.find(s=>s.bc.toLowerCase().includes(v)||s.art.toLowerCase().includes(v)||s.name.toLowerCase().includes(v));
   box.innerHTML=f?'<span class="badge badge-green">'+f.name+' ('+f.art+') • '+fmtU(f.usd)+' / '+fmtR(f.usd*getRate())+'</span>':'<span class="badge badge-red">Не найдено</span>';
 }
+
 function onRepFile(ev){
-  const f=ev.target.files;if(!f)return;
+  const f=ev.target.files[0];if(!f)return;
   const r=new FileReader();
   r.onload=e=>{
     const lines=e.target.result.split(/\r?\n/).filter(l=>l.trim());
-    const sep=lines.includes(';')?';':',';
+    const sep=lines[0].includes(';')?';':',';
     let hdrIdx=0;
     for(let i=0;i<Math.min(25,lines.length);i++){
       if(lines[i].toLowerCase().match(/баркод|штрих|sku|артикул|реализовал|доставлено|выручка/)){hdrIdx=i;break;}
@@ -117,7 +118,6 @@ function onRepFile(ev){
   };
   r.readAsText(f,'UTF-8');
 }
-
 function runRepImport(){
   const org=document.getElementById('up-org').value,mp=document.getElementById('up-mp').value,yr=document.getElementById('up-yr').value,mo=document.getElementById('up-mo').value,per=yr+'-'+mo;
   if(db.locked[per])return alert('Месяц закрыт!');
@@ -230,9 +230,10 @@ function calcPeriodStats(yr,mo,orgF){
   reps.forEach(r=>{rev+=r.rev;ret+=r.ret;ads+=r.ads;log+=r.log;com+=r.com;cogs+=r.cogs;boSum+=r.bo;});
   const mpProf=rev-ads-log-com-cogs;
   let taxMonth=0;
+  const kvMap={1:['01','02','03'],2:['04','05','06'],3:['07','08','09'],4:['10','11','12']};
   db.taxes.forEach(t=>{
     if((yr==='ALL'||t.yr===yr)&&(orgF==='ALL'||t.org===orgF)){
-      const kvM={1:['01','02','03'],2:['04','05','06'],3:['07','08','09'],4:['10','11','12']}[t.kv]||[];
+      const kvM=kvMap[t.kv]||[];
       if(mo==='ALL')taxMonth+=t.amt;else if(kvM.includes(mo))taxMonth+=(t.amt/3);
     }
   });
@@ -270,14 +271,16 @@ function render(){
     const os=calcPeriodStats(yr,mo,on);
     const bIds=db.orgs.filter(o=>o.name===on).map(o=>o.id);
     const bBal=db.dds.filter(d=>bIds.includes(d.wal)).reduce((s,d)=>s+d.amt,0);
-    return '<tr><td class="bold">'+on+'</td><td class="num bold">'+fmtR(os.rev)+'</td><td class="num text-red">'+fmtR(os.ret)+'</td><td class="num">'+fmtR(os.ads+os.log+os.com)+'</td><td class="num">'+fmtR(os.cogs)+'</td><td class="num">'+fmtR(os.taxMonth)+'</td><td class="num">'+fmtR(os.expRub)+'</td><td class="num bold '+(os.net>=0?'text-green':'text-red')+'">'+fmtR(os.net)+'</td><td class="num bold">'+fmtR(bBal)+'</td></tr>';
+    const nc=os.net>=0?'text-green':'text-red';
+    return '<tr><td class="bold">'+on+'</td><td class="num bold">'+fmtR(os.rev)+'</td><td class="num text-red">'+fmtR(os.ret)+'</td><td class="num">'+fmtR(os.ads+os.log+os.com)+'</td><td class="num">'+fmtR(os.cogs)+'</td><td class="num">'+fmtR(os.taxMonth)+'</td><td class="num">'+fmtR(os.expRub)+'</td><td class="num bold '+nc+'">'+fmtR(os.net)+'</td><td class="num bold">'+fmtR(bBal)+'</td></tr>';
   }).join('');
 
   document.getElementById('tb-mps').innerHTML=['WB','OZON','YM'].map(m=>{
     const sub=db.reports.filter(r=>(yr==='ALL'||r.yr===yr)&&(mo==='ALL'||r.mo===mo)&&(orgF==='ALL'||r.org===orgF)&&r.mp===m);
     const r=sub.reduce((a,b)=>a+b.rev,0),rt=sub.reduce((a,b)=>a+b.ret,0),ad=sub.reduce((a,b)=>a+b.ads,0),lg=sub.reduce((a,b)=>a+b.log,0),cm=sub.reduce((a,b)=>a+b.com,0),cg=sub.reduce((a,b)=>a+b.cogs,0);
     const pr=r-ad-lg-cm-cg,bo=sub.length?Math.round(sub.reduce((a,b)=>a+b.bo,0)/sub.length)+'%':'—';
-    return '<tr><td class="bold">'+m+'</td><td class="num bold">'+fmtR(r)+'</td><td class="num text-red">'+fmtR(rt)+'</td><td class="num">'+fmtR(ad)+'</td><td class="num">'+fmtR(lg)+'</td><td class="num">'+fmtR(cm)+'</td><td class="num">'+fmtR(cg)+'</td><td class="num">'+bo+'</td><td class="num bold '+(pr>=0?'text-green':'text-red')+'">'+fmtR(pr)+'</td></tr>';
+    const pc=pr>=0?'text-green':'text-red';
+    return '<tr><td class="bold">'+m+'</td><td class="num bold">'+fmtR(r)+'</td><td class="num text-red">'+fmtR(rt)+'</td><td class="num">'+fmtR(ad)+'</td><td class="num">'+fmtR(lg)+'</td><td class="num">'+fmtR(cm)+'</td><td class="num">'+fmtR(cg)+'</td><td class="num">'+bo+'</td><td class="num bold '+pc+'">'+fmtR(pr)+'</td></tr>';
   }).join('');
 
   let wf='<div class="wf-row"><span>1. Чистая выручка маркетплейсов</span><span class="bold">'+fmtR(st.rev)+'</span></div><div class="wf-row"><span>− Комиссия, логистика и услуги</span><span class="text-red">−'+fmtR(st.com+st.log)+'</span></div><div class="wf-row"><span>− Реклама и выкупы</span><span class="text-red">−'+fmtR(st.ads)+'</span></div><div class="wf-row"><span>− Себестоимость товаров</span><span class="text-red">−'+fmtR(st.cogs)+'</span></div><div class="wf-row wf-sub"><span>= Маржинальная прибыль площадок</span><span>'+fmtR(st.mpProf)+'</span></div>';
@@ -310,7 +313,9 @@ function renderAbc(){
   document.getElementById('tb-abc').innerHTML=arr.length?arr.map(g=>{
     const sh=totP>0?(Math.max(0,g.prof)/totP)*100:0;cP+=sh;
     const pC=(g.prof>0&&cP<=80)?'A':((g.prof>0&&cP<=95)?'B':'C'),sC=rCls[g.tit+g.det]||'C';
-    return '<tr><td><span class="badge '+(pC==='A'?'badge-green':pC==='B'?'badge-amber':'badge-red')+'">Приб: '+pC+'</span> <span class="badge badge-blue">Прод: '+sC+'</span></td><td class="bold">'+g.tit+'</td><td>'+g.det+'</td><td class="num">'+g.sq+'</td><td class="num text-red">'+g.rq+'</td><td class="num">'+fmtR(g.rev)+'</td><td class="num">'+fmtR(g.cog)+'</td><td class="num bold '+(g.prof>=0?'text-green':'text-red')+'">'+fmtR(g.prof)+'</td><td class="num">'+sh.toFixed(1)+'%</td></tr>';
+    const bCls=pC==='A'?'badge-green':(pC==='B'?'badge-amber':'badge-red');
+    const pCls=g.prof>=0?'text-green':'text-red';
+    return '<tr><td><span class="badge '+bCls+'">Приб: '+pC+'</span> <span class="badge badge-blue">Прод: '+sC+'</span></td><td class="bold">'+g.tit+'</td><td>'+g.det+'</td><td class="num">'+g.sq+'</td><td class="num text-red">'+g.rq+'</td><td class="num">'+fmtR(g.rev)+'</td><td class="num">'+fmtR(g.cog)+'</td><td class="num bold '+pCls+'">'+fmtR(g.prof)+'</td><td class="num">'+sh.toFixed(1)+'%</td></tr>';
   }).join(''):'<tr><td colspan="9" style="text-align:center;padding:16px;color:#94a3b8">Загрузите отчёты WB/Ozon/ЯМ для построения ABC-анализа</td></tr>';
 }
 function updateSkuUsd(id,val){const s=db.skus.find(x=>x.id===id);if(!s)return;s.usd=parseFloat(val)||0;s.isNew=s.usd===0;recalcReportsCogs();save();render();}
@@ -355,8 +360,7 @@ function renderLists(){
     '<td class="num bold text-green">'+fmtU(a.qty*a.usd)+'</td>' +
     '<td><button class="btn btn-danger" onclick="db.accs=db.accs.filter(x=>x.id!==\''+a.id+'\');save();render()">✕</button></td></tr>'
   ).join('');
-  
-    const opNames={
+  const opNames={
     FAB_IN:'Пошив на фабрике',
     TO_WAY:'Отправка в путь',
     TO_RF:'Приемка склад РФ',
@@ -364,6 +368,11 @@ function renderLists(){
     REWORK_IN:'В переработку',
     REWORK_OUT:'Из переработки на склад'
   };
+  document.getElementById('tb-stk').innerHTML=db.stockMoves.map(m=>
+    '<tr><td class="bold">'+m.dt+'</td><td class="bold">'+m.item+'</td><td>'+(opNames[m.op]||m.op)+'</td>' +
+    '<td class="num">'+m.qty+'</td><td class="num">'+fmtU(m.usd)+'</td><td class="num bold">'+fmtR(m.qty*m.usd*rate)+'</td>' +
+    '<td><button class="btn btn-danger" onclick="db.stockMoves=db.stockMoves.filter(x=>x.id!==\''+m.id+'\');save();render()">✕</button></td></tr>'
+  ).join('');
 
   const allWals=db.orgs.map(o=>({id:o.id,name:o.name+' ('+o.bank+')',cur:'RUB'})).concat(db.cashWallets);
   document.getElementById('dds-kpis').innerHTML=allWals.map(w=>{
@@ -418,70 +427,16 @@ function renderLists(){
     '<tr><td class="bold">'+o.name+'</td><td>'+o.bank+'</td><td><button class="btn btn-danger" onclick="db.orgs=db.orgs.filter(x=>x.id!==\''+o.id+'\');save();render()">✕</button></td></tr>'
   ).join('');
 }
-
-function addSku(e){
-  e.preventDefault();
-  const bc=document.getElementById('s-bc').value.trim();
-  if(db.skus.some(s=>s.bc===bc))return alert('Этот ШК уже есть!');
-  db.skus.unshift({
-    id:'s_'+Date.now(),
-    name:document.getElementById('s-name').value,
-    art:document.getElementById('s-art').value,
-    col:document.getElementById('s-col').value||'—',
-    siz:document.getElementById('s-siz').value||'—',
-    bc:bc,
-    usd:Number(document.getElementById('s-usd').value),
-    src:'Вручную',
-    isNew:false
-  });
-  e.target.reset();save();render();
-}
-function addAcc(e){
-  e.preventDefault();
-  db.accs.unshift({id:'a_'+Date.now(),art:document.getElementById('ac-art').value,name:document.getElementById('ac-name').value,qty:Number(document.getElementById('ac-qty').value),usd:Number(document.getElementById('ac-usd').value)});
-  e.target.reset();save();render();
-}
-function addStockMove(e){
-  e.preventDefault();
-  db.stockMoves.unshift({id:'m_'+Date.now(),dt:new Date().toISOString().slice(0,10),item:document.getElementById('st-item').value,op:document.getElementById('st-op').value,qty:Number(document.getElementById('st-qty').value),usd:Number(document.getElementById('st-usd').value)});
-  e.target.reset();save();render();
-}
-function addManualDds(e){
-  e.preventDefault();
-  const t=document.getElementById('d-type').value,a=Number(document.getElementById('d-amt').value);
-  db.dds.unshift({id:'d_'+Date.now(),date:document.getElementById('d-date').value,wal:document.getElementById('d-wal').value,cat:document.getElementById('d-cat').value,amt:t==='IN'?a:-a});
-  e.target.reset();save();render();
-}
-function addTax(e){
-  e.preventDefault();
-  db.taxes.unshift({id:'t_'+Date.now(),org:document.getElementById('tx-org').value,type:document.getElementById('tx-type').value,yr:document.getElementById('tx-yr').value,kv:Number(document.getElementById('tx-kv').value),amt:Number(document.getElementById('tx-amt').value)});
-  e.target.reset();save();render();
-}
-function addExp(e){
-  e.preventDefault();
-  db.expenses.unshift({id:'e_'+Date.now(),org:document.getElementById('ex-org').value,cat:document.getElementById('ex-cat').value,tit:document.getElementById('ex-tit').value,amt:Number(document.getElementById('ex-amt').value),cur:document.getElementById('ex-cur').value,yr:document.getElementById('ex-yr').value,mo:document.getElementById('ex-mo').value});
-  e.target.reset();save();render();
-}
-function addSupOp(e){
-  e.preventDefault();
-  db.supOps.unshift({id:'p_'+Date.now(),name:document.getElementById('sp-name').value,type:document.getElementById('sp-type').value,amt:Number(document.getElementById('sp-amt').value),cur:document.getElementById('sp-cur').value});
-  e.target.reset();save();render();
-}
-function addAsset(e){
-  e.preventDefault();
-  db.assets.unshift({id:'as_'+Date.now(),name:document.getElementById('as-name').value,cost:Number(document.getElementById('as-cost').value),mos:Number(document.getElementById('as-mos').value)});
-  e.target.reset();save();render();
-}
-function addOrg(e){
-  e.preventDefault();
-  db.orgs.push({id:'o_'+Date.now(),name:document.getElementById('og-name').value,bank:document.getElementById('og-bank').value});
-  e.target.reset();save();render();
-}
-function saveMan(e){
-  e.preventDefault();
-  db.reports.unshift({id:'r_'+Date.now(),org:document.getElementById('mn-org').value,mp:document.getElementById('mn-mp').value,yr:document.getElementById('mn-yr').value,mo:document.getElementById('mn-mo').value,rev:Number(document.getElementById('mn-rev').value),ret:Number(document.getElementById('mn-ret').value),ads:Number(document.getElementById('mn-ads').value),log:Number(document.getElementById('mn-log').value),com:Number(document.getElementById('mn-com').value),cogs:Number(document.getElementById('mn-cog').value),bo:Number(document.getElementById('mn-bo').value)});
-  save();closeModals();render();
-}
+function addSku(e){e.preventDefault();const bc=document.getElementById('s-bc').value.trim();if(db.skus.some(s=>s.bc===bc))return alert('Этот ШК уже есть!');db.skus.unshift({id:'s_'+Date.now(),name:document.getElementById('s-name').value,art:document.getElementById('s-art').value,col:document.getElementById('s-col').value||'—',siz:document.getElementById('s-siz').value||'—',bc:bc,usd:Number(document.getElementById('s-usd').value),src:'Вручную',isNew:false});e.target.reset();save();render();}
+function addAcc(e){e.preventDefault();db.accs.unshift({id:'a_'+Date.now(),art:document.getElementById('ac-art').value,name:document.getElementById('ac-name').value,qty:Number(document.getElementById('ac-qty').value),usd:Number(document.getElementById('ac-usd').value)});e.target.reset();save();render();}
+function addStockMove(e){e.preventDefault();db.stockMoves.unshift({id:'m_'+Date.now(),dt:new Date().toISOString().slice(0,10),item:document.getElementById('st-item').value,op:document.getElementById('st-op').value,qty:Number(document.getElementById('st-qty').value),usd:Number(document.getElementById('st-usd').value)});e.target.reset();save();render();}
+function addManualDds(e){e.preventDefault();const t=document.getElementById('d-type').value,a=Number(document.getElementById('d-amt').value);db.dds.unshift({id:'d_'+Date.now(),date:document.getElementById('d-date').value,wal:document.getElementById('d-wal').value,cat:document.getElementById('d-cat').value,amt:t==='IN'?a:-a});e.target.reset();save();render();}
+function addTax(e){e.preventDefault();db.taxes.unshift({id:'t_'+Date.now(),org:document.getElementById('tx-org').value,type:document.getElementById('tx-type').value,yr:document.getElementById('tx-yr').value,kv:Number(document.getElementById('tx-kv').value),amt:Number(document.getElementById('tx-amt').value)});e.target.reset();save();render();}
+function addExp(e){e.preventDefault();db.expenses.unshift({id:'e_'+Date.now(),org:document.getElementById('ex-org').value,cat:document.getElementById('ex-cat').value,tit:document.getElementById('ex-tit').value,amt:Number(document.getElementById('ex-amt').value),cur:document.getElementById('ex-cur').value,yr:document.getElementById('ex-yr').value,mo:document.getElementById('ex-mo').value});e.target.reset();save();render();}
+function addSupOp(e){e.preventDefault();db.supOps.unshift({id:'p_'+Date.now(),name:document.getElementById('sp-name').value,type:document.getElementById('sp-type').value,amt:Number(document.getElementById('sp-amt').value),cur:document.getElementById('sp-cur').value});e.target.reset();save();render();}
+function addAsset(e){e.preventDefault();db.assets.unshift({id:'as_'+Date.now(),name:document.getElementById('as-name').value,cost:Number(document.getElementById('as-cost').value),mos:Number(document.getElementById('as-mos').value)});e.target.reset();save();render();}
+function addOrg(e){e.preventDefault();db.orgs.push({id:'o_'+Date.now(),name:document.getElementById('og-name').value,bank:document.getElementById('og-bank').value});e.target.reset();save();render();}
+function saveMan(e){e.preventDefault();db.reports.unshift({id:'r_'+Date.now(),org:document.getElementById('mn-org').value,mp:document.getElementById('mn-mp').value,yr:document.getElementById('mn-yr').value,mo:document.getElementById('mn-mo').value,rev:Number(document.getElementById('mn-rev').value),ret:Number(document.getElementById('mn-ret').value),ads:Number(document.getElementById('mn-ads').value),log:Number(document.getElementById('mn-log').value),com:Number(document.getElementById('mn-com').value),cogs:Number(document.getElementById('mn-cog').value),bo:Number(document.getElementById('mn-bo').value)});save();closeModals();render();}
 function exportJson(){const a=document.createElement('a');a.href='data:text/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(db));a.download='SKOS_3_Backup.json';a.click();}
 function importJson(ev){const f=ev.target.files;if(!f)return;const r=new FileReader();r.onload=e=>{try{db=Object.assign(db,JSON.parse(e.target.result));save();onPerChange();alert('База загружена!');}catch(err){alert('Ошибка файла');}};r.readAsText(f);}
 function saveCloudCfg(){db.cloud={url:document.getElementById('sb-url').value.trim(),key:document.getElementById('sb-key').value.trim(),pin:document.getElementById('sb-pin').value.trim()||'2026'};save();syncCloud(true);}
@@ -495,5 +450,3 @@ async function syncCloud(manual){
   }catch(e){if(manual)alert('Ошибка связи с облаком: '+e.message);}
 }
 window.addEventListener('DOMContentLoaded',()=>{init();syncCloud(false);});
-
-
