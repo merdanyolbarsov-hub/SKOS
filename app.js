@@ -338,16 +338,15 @@ function renderLists(){
     '<td><button class="btn btn-danger" onclick="db.skus=db.skus.filter(x=>x.id!==\''+s.id+'\');save();render()">✕</button></td></tr>'
   ).join('');
   
-  document.getElementById('rep-cnt').textContent=db.reports.length+' отчётов';
-  document.getElementById('tb-reps').innerHTML=db.reports.map(r=>{
-    const p=://log-r.com-r.cogs;
-    return '<tr><td>'+r.yr+'-'+r.mo+'</td><td class="bold">'+r.org+'</td><td>'+r.mp+'</td>' +
-      '<td class="num">'+fmtR(r.rev)+'</td><td class="num text-red">'+fmtR(r.ret)+'</td>' +
-      '<td class="num">'+fmtR(r.ads)+'</td><td class="num">'+fmtR(r.log)+'</td><td class="num">'+fmtR(r.com)+'</td><td class="num">'+fmtR(r.cogs)+'</td>' +
-      '<td class="num bold '+(p>=0?'text-green':'text-red')+'">'+fmtR(p)+'</td>' +
-      '<td><button class="btn btn-danger" onclick="db.reports=db.reports.filter(x=>x.id!==\''+r.id+'\');save();render()">✕</button></td></tr>';
-  }).join('');
-
+    document.getElementById('rep-cnt').textContent=db.reports.length+' отчётов';
+  document.getElementById('tb-reps').innerHTML=db.reports.map(r=>
+    '<tr><td>'+r.yr+'-'+r.mo+'</td><td class="bold">'+r.org+'</td><td>'+r.mp+'</td>' +
+    '<td class="num">'+fmtR(r.rev)+'</td><td class="num text-red">'+fmtR(r.ret)+'</td>' +
+    '<td class="num">'+fmtR(r.ads)+'</td><td class="num">'+fmtR(r.log)+'</td><td class="num">'+fmtR(r.com)+'</td><td class="num">'+fmtR(r.cogs)+'</td>' +
+    '<td class="num bold '+((://log-r.com-r.cogs)>=0?'text-green':'text-red')+'">'+fmtR(://log-r.com-r.cogs)+'</td>' +
+    '<td><button class="btn btn-danger" onclick="db.reports=db.reports.filter(x=>x.id!==\''+r.id+'\');save();render()">✕</button></td></tr>'
+  ).join('');
+  
   document.getElementById('tb-accs').innerHTML=db.accs.map(a=>
     '<tr><td class="bold">'+a.art+'</td><td>'+a.name+'</td><td class="num">'+a.qty+'</td><td class="num">'+fmtU(a.usd)+'</td>' +
     '<td class="num bold text-green">'+fmtU(a.qty*a.usd)+'</td>' +
