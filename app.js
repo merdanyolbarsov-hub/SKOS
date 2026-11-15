@@ -346,7 +346,7 @@ function renderLists(){
 
   document.getElementById('rep-cnt').textContent=db.reports.length+' отчётов';
   document.getElementById('tb-reps').innerHTML=db.reports.map(r=>{
-    const p=://log-r.com-r.cogs;
+    const p=r.rev-r.ads-r.log-r.com-r.cogs;
     const pc=p>=0?'text-green':'text-red';
     return '<tr><td>'+r.yr+'-'+r.mo+'</td><td class="bold">'+r.org+'</td><td>'+r.mp+'</td>' +
       '<td class="num">'+fmtR(r.rev)+'</td><td class="num text-red">'+fmtR(r.ret)+'</td>' +
