@@ -442,11 +442,26 @@ function importJson(ev){const f=ev.target.files;if(!f)return;const r=new FileRea
 function saveCloudCfg(){db.cloud={url:document.getElementById('sb-url').value.trim(),key:document.getElementById('sb-key').value.trim(),pin:document.getElementById('sb-pin').value.trim()||'2026'};save();syncCloud(true);}
 async function syncCloud(manual){
   if(!db.cloud.url||!db.cloud.key)return manual?alert('Укажите Project URL и Anon Key в Настройках'):null;
+  const u=db.cloud.url.replace(/\/rest\/v1\/?$/,'').replace(/\/$/,'');
   try{
-    const res=await fetch(db.cloud.url+'/rest/v1/skos_cloud?id=eq.main',{headers:{apikey:db.cloud.key,Authorization:'Bearer '+db.cloud.key}});
+    const res=await fetch(u+'/rest/v1/skos_cloud?id=eq.main',{headers:{apikey:db.cloud.key,Authorization:'Bearer '+db.cloud.key}});
     const rows=await res.json();
-    if(rows&&rows.length&&rows.payload&&Object.keys(rows.payload).length&&!manual){db=Object.assign(db,rows.payload);save();render();}
-    else{await fetch(db.cloud.url+'/rest/v1/skos_cloud?id=eq.main',{method:'PATCH',headers:{apikey:db.cloud.key,Authorization:'Bearer '+db.cloud.key,'Content-Type':'application/json'},body:JSON.stringify({payload:db,updated_at:new Date().toISOString()})});if(manual)alert('Облако SKOS успешно синхронизировано!');}
+    if(rows&&rows.length&&rows[0].payload&&Object.keys(rows[0].payload).length&&!manual){
+      db=Object.assign(db,rows[0].payload);save();render();
+    }else{
+      const wr=await fetch(u+'/rest/v1/skos_cloud',{
+        method:'POST',
+        headers:{
+          apikey:db.cloud.key,
+          Authorization:'Bearer '+db.cloud.key,
+          'Content-Type':'application/json',
+          Prefer:'resolution=merge-duplicates,return=representation'
+        },
+        body:JSON.stringify({id:'main',payload:db,updated_at:new Date().toISOString()})
+      });
+      if(!wr.ok)throw new Error(await wr.text());
+      if(manual)alert('Облако SKOS успешно синхронизировано!');
+    }
   }catch(e){if(manual)alert('Ошибка связи с облаком: '+e.message);}
 }
 window.addEventListener('DOMContentLoaded',()=>{init();syncCloud(false);});
