@@ -64,11 +64,11 @@
     return db.ddsCats;
   }
 
-  function buildCatOptions() {
+  function buildCatOptions(selVal) {
     const cats = ensureCats(), groups = {};
     cats.forEach(c => { (groups[c.grp] = groups[c.grp] || []).push(c.name); });
     return Object.keys(groups).map(g =>
-      `<optgroup label="${g}">${groups[g].map(n => `<option value="${n}">${n}</option>`).join('')}</optgroup>`
+      `<optgroup label="${g}">${groups[g].map(n => `<option value="${n}"${n === selVal ? ' selected' : ''}>${n}</option>`).join('')}</optgroup>`
     ).join('');
   }
 
@@ -85,8 +85,7 @@
       const sig = ensureCats().map(c => c.id).join(',');
       if (s && s.dataset.sig !== sig) {
         const cur = s.value;
-        s.innerHTML = buildCatOptions();
-        if (cur) s.value = cur;
+        s.innerHTML = buildCatOptions(cur);
         s.dataset.sig = sig;
       }
     });
@@ -125,6 +124,7 @@
     if (typeof render === 'function') render();
     alert('Начальные остатки на 01.01.2026 сохранены!');
   };
+
   function renderCatEditorBox(force) {
     const orgTbl = document.getElementById('tb-orgs-set');
     if (!orgTbl || !window.db) return;
@@ -176,6 +176,13 @@
     if (typeof save === 'function') save();
     renderCatEditorBox(true); syncCatSelects();
   };
+  window.changeDdsCat = function (id, newCat) {
+    const d = db.dds.find(x => x.id === id);
+    if (!d) return;
+    d.cat = newCat;
+    if (typeof save === 'function') save();
+    if (typeof render === 'function') render();
+  };
 
   window.toggleOrgArch = function (id) {
     const o = db.orgs.find(x => x.id === id);
@@ -187,13 +194,6 @@
     } else {
       o.archived = false; delete o.closedYear;
     }
-    if (typeof save === 'function') save();
-    if (typeof render === 'function') render();
-  };
-  window.changeDdsCat = function (id, newCat) {
-    const d = db.dds.find(x => x.id === id);
-    if (!d) return;
-    d.cat = newCat;
     if (typeof save === 'function') save();
     if (typeof render === 'function') render();
   };
@@ -215,7 +215,7 @@
     const walId = document.getElementById('dds-wal').value;
     const batches = [...new Set(db.dds.filter(d => d.batchId).map(d => d.batchId))];
     if (batches.length) {
-      const lastId = batches[0];
+      const lastId = batches.at(0);
       const cnt = db.dds.filter(d => d.batchId === lastId).length;
       if (!confirm('Удалить последнюю загрузку (' + cnt + ' операций)?')) return;
       db.dds = db.dds.filter(d => d.batchId !== lastId);
@@ -229,7 +229,17 @@
     if (typeof render === 'function') render();
     alert('Очищено! Теперь можно загрузить выписку заново.');
   };
-    window.importBankCsv = function (ev) {
+
+  window.resetTestData = function () {
+    if (!confirm('Очистить ВСЕ тестовые операции и начать с чистого листа?\n\nНастройки юрлиц, архив ИП, папки статей и облако СОХРАНЯТСЯ.')) return;
+    db.dds = []; db.ddsHashes = {}; db.initBalances = {};
+    db.reports = []; db.itemSales = []; db.taxes = [];
+    db.expenses = []; db.stockMoves = []; db.supOps = []; db.assets = [];
+    if (typeof save === 'function') save();
+    if (typeof render === 'function') render();
+    alert('База очищена! Теперь можно начинать чистовой учёт.');
+  };
+  window.importBankCsv = function (ev) {
     const f = ev.target.files && ev.target.files.item(0); if (!f) return;
     const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
     const r = new FileReader();
@@ -304,11 +314,6 @@
 
         let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы', autoCash = false;
         if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
-        else if (lowFull.match(/озон|интернет решения/)) cat = 'Поступление от Озон';
-        else if (lowFull.match(/яндекс|спичкин/)) cat = 'Поступление от ЯМ';
-        else if (lowDesc.match(/ком\.за выдачу|комисс|обслуживан|рко|пакета услуг/)) cat = 'Комиссия РКО';
-                let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы', autoCash = false;
-        if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
         else if (lowFull.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
         else if (lowFull.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
         else if (lowDesc.match(/ком\.за выдачу|комисс|обслуживан|рко|пакета услуг/)) cat = 'Комиссия РКО';
@@ -326,8 +331,6 @@
         else if (lowDesc.match(/за покупку|за товар|по счету|по счёту|оплата по дог/)) cat = amt >= 0 ? 'Возвраты от поставщиков' : 'Закуп товара RUB';
 
         db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dtCell, wal: walId, cat, amt, note: desc.slice(0, 140), batchId, hash });
-
-        db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dtCell, wal: walId, cat, amt, batchId, hash });
         if (autoCash) {
           db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dtCell, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), batchId });
           toCashRub += Math.abs(amt);
@@ -345,16 +348,6 @@
     };
     r.readAsArrayBuffer(f);
   };
-  window.resetTestData = function () {
-    if (!confirm('Очистить ВСЕ тестовые операции (выписки, начальные остатки, отчёты МП, налоги, расходы) и начать с чистого листа?\n\nНастройки юрлиц, архив ИП, папки статей и облако СОХРАНЯТСЯ.')) return;
-    db.dds = []; db.ddsHashes = {}; db.initBalances = {};
-    db.reports = []; db.itemSales = []; db.taxes = [];
-    db.expenses = []; db.stockMoves = []; db.supOps = []; db.assets = [];
-    if (typeof save === 'function') save();
-    if (typeof render === 'function') render();
-    alert('База очищена! Теперь можно начинать чистовой учёт с выбранного года.');
-  };
-
   window.renderExpFolderStats = function () {
     const wfBox = document.getElementById('wf-box');
     if (!wfBox || !window.db) return;
@@ -455,7 +448,7 @@
       }).join('');
     }
 
-        const tbDds = document.getElementById('tb-dds');
+    const tbDds = document.getElementById('tb-dds');
     if (tbDds) {
       const tbl = tbDds.closest('table');
       if (tbl) tbl.style.display = 'none';
@@ -501,16 +494,15 @@
           const grpHtml = Object.keys(byGrp).map(g => {
             const gItems = byGrp[g];
             const gSum = gItems.reduce((s, x) => s + x.rub, 0);
-            const rowsHtml = gItems.map(({ d, w, rub }) => {
+            const rowsHtml = gItems.map(({ d, w }) => {
               const vs = w.cur === 'USD' ? fmtU(d.amt) : fmtR(d.amt);
               return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:12px;gap:8px">
                 <span style="color:#64748b;min-width:78px">${d.date}</span>
                 <span style="font-weight:600;flex:1">${w.name}</span>
-                                <div style="flex:1.4;min-width:180px">
-                  <select class="select" style="padding:2px 6px;font-size:12px;height:auto;width:100%" onchange="changeDdsCat('${d.id}',this.value)">${buildCatOptions().replace(`value="${d.cat}"`, `value="${d.cat}" selected`)}</select>
+                <div style="flex:1.4;min-width:180px">
+                  <select class="select" style="padding:2px 6px;font-size:12px;height:auto;width:100%" onchange="changeDdsCat('${d.id}',this.value)">${buildCatOptions(d.cat)}</select>
                   ${d.note ? `<div style="font-size:11px;color:#64748b;margin-top:2px;line-height:1.2">${d.note}</div>` : ''}
                 </div>
-
                 <span class="bold ${d.amt >= 0 ? 'text-green' : 'text-red'}" style="min-width:95px;text-align:right">${vs}</span>
                 <span style="white-space:nowrap"><button class="btn" onclick="editDdsRow('${d.id}')">✏️</button> <button class="btn btn-danger" onclick="db.dds=db.dds.filter(x=>x.id!=='${d.id}');save();render()">✕</button></span>
               </div>`;
