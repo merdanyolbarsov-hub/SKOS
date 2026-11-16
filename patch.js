@@ -222,8 +222,8 @@
     if (typeof render === 'function') render();
     alert('Очищено! Теперь можно загрузить выписку заново.');
   };
-      window.importBankCsv = function (ev) {
-    const f = ev.target.files && ev.target.files[0]; if (!f) return;
+        window.importBankCsv = function (ev) {
+    const f = ev.target.files && ev.target.files.item(0); if (!f) return;
     const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
     const r = new FileReader();
     r.onload = e => {
@@ -232,7 +232,7 @@
       if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
       const lines = txt.split(/\r?\n/).filter(l => l.trim());
       if (!lines.length) return alert('Файл пустой');
-      const sep = (lines[0].includes(';') || (lines[1] && lines[1].includes(';'))) ? ';' : (lines[0].includes('\t') ? '\t' : ',');
+      const sep = lines.some(l => l.includes(';')) ? ';' : (lines.some(l => l.includes('\t')) ? '\t' : ',');
       const num = v => parseFloat(String(v || '').replace(/\s+/g, '').replace(',', '.')) || 0;
       let added = 0, skip = 0;
 
@@ -240,22 +240,22 @@
         const c = l.split(sep).map(x => x.replace(/^"|"$/g, '').trim());
         const dts = c.filter(x => /^\d{2}\.\d{2}\.\d{4}$/.test(x));
         if (!dts.length) return;
-        const dtCell = dts[0];
+        const dtCell = dts.at(0);
         const desc = c.join(' '), low = desc.toLowerCase();
         if (low.includes('входящий остаток') || low.includes('исходящий остаток') || low.includes('итого')) return;
 
         let amt = 0;
-        if (c.length >= 16 && /^\d{2}\.\d{2}\.\d{4}$/.test(c[1])) {
-          const vDeb = Math.abs(num(c[14])), vCred = Math.abs(num(c[15]));
-          if (vDeb > 0 && vCred === 0) amt = -vDeb;
-          else if (vCred > 0 && vDeb === 0) amt = vCred;
+        if (c.length >= 16 && /^\d{2}\.\d{2}\.\d{4}$/.test(c.at(1))) {
+          const v14 = Math.abs(num(c.at(14))), v15 = Math.abs(num(c.at(15)));
+          if (v14 > 0 && v15 === 0) amt = -v14;
+          else if (v15 > 0 && v14 === 0) amt = v15;
           else {
-            const tail = c.slice(14).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+[.,]\d{2}$/.test(x.raw) && x.v !== 0);
-            if (tail.length) amt = tail[0].v;
+            const tail = c.slice(14).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw) && x.v !== 0);
+            if (tail.length) amt = tail.at(0).v;
           }
         } else {
-          const decNums = c.slice(1).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+[.,]\d{2}$/.test(x.raw) && x.v !== 0);
-          if (decNums.length) amt = decNums[decNums.length - 1].v;
+          const nums = c.slice(1).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw) && x.v !== 0);
+          if (nums.length) amt = nums.at(-1).v;
         }
         if (!amt) return;
 
