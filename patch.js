@@ -1,4 +1,6 @@
 (function () {
+  const DEFAULT_URL = 'https://supabase.co';
+
   // 1. Обновляем список налогов (добавляем АУСН 8% и 20%)
   const sel = document.getElementById('tx-type');
   if (sel) {
@@ -12,50 +14,87 @@
     ].join('');
   }
 
-  // Вспомогательная функция: забирает URL и Key прямо из полей на экране или из db.cloud
-  function getCloudCredentials() {
-    if (!window.db) window.db = {};
-    if (!db.cloud) db.cloud = {};
-
+  // Находим инпуты URL и Key на странице
+  function findCloudInputs() {
+    let urlInput = null;
+    let keyInput = null;
     const inputs = Array.from(document.querySelectorAll('input'));
     for (const inp of inputs) {
       const val = (inp.value || '').trim();
       const ph = (inp.placeholder || '').toLowerCase();
       if (val.includes('supabase.co') || ph.includes('supabase.co')) {
-        if (val) db.cloud.url = val;
+        urlInput = inp;
       } else if (val.startsWith('eyJ') || ph.includes('eyj')) {
-        if (val) db.cloud.key = val;
+        keyInput = inp;
       }
     }
-
-    return {
-      url: (db.cloud.url || '').trim(),
-      key: (db.cloud.key || '').trim()
-    };
+    return { urlInput, keyInput };
   }
+
+  // Автозаполнение и автосохранение в localStorage при вводе
+  function initCloudFields() {
+    if (!window.db) window.db = {};
+    if (!db.cloud) db.cloud = {};
+
+    const savedUrl = localStorage.getItem('skos_sb_url') || db.cloud.url || DEFAULT_URL;
+    const savedKey = localStorage.getItem('skos_sb_key') || db.cloud.key || '';
+
+    db.cloud.url = savedUrl;
+    if (savedKey) db.cloud.key = savedKey;
+
+    const { urlInput, keyInput } = findCloudInputs();
+    if (urlInput) {
+      if (!urlInput.value || urlInput.value === 'https://supabase.co') {
+        urlInput.value = savedUrl;
+      }
+      urlInput.addEventListener('input', () => {
+        db.cloud.url = urlInput.value.trim();
+        localStorage.setItem('skos_sb_url', db.cloud.url);
+      });
+    }
+    if (keyInput) {
+      if (!keyInput.value && savedKey) {
+        keyInput.value = savedKey;
+      }
+      keyInput.addEventListener('input', () => {
+        db.cloud.key = keyInput.value.trim();
+        localStorage.setItem('skos_sb_key', db.cloud.key);
+      });
+    }
+  }
+
+  initCloudFields();
+  setInterval(initCloudFields, 1500);
 
   // 2. Переопределяем функцию синхронизации с облаком Supabase
   window.syncCloud = async function (manual) {
-    const creds = getCloudCredentials();
+    initCloudFields();
+    const { urlInput, keyInput } = findCloudInputs();
 
-    if (!creds.url || !creds.key) {
+    const url = ((urlInput && urlInput.value) || db.cloud.url || '').trim();
+    const key = ((keyInput && keyInput.value) || db.cloud.key || '').trim();
+
+    if (!url || !key) {
       if (manual) {
         alert('Вставьте длинный ключ Anon Public Key (начинается с eyJ...) во второе поле и нажмите кнопку ещё раз.');
       }
       return null;
     }
 
+    db.cloud.url = url;
+    db.cloud.key = key;
+    localStorage.setItem('skos_sb_url', url);
+    localStorage.setItem('skos_sb_key', key);
     if (typeof save === 'function') save();
 
-    const u = creds.url.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
+    const u = url.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
     const headers = {
-      apikey: creds.key,
-      Authorization: 'Bearer ' + creds.key,
+      apikey: key,
+      Authorization: 'Bearer ' + key,
       'Content-Type': 'application/json'
     };
 
     try {
-      // При нажатии кнопки «Сохранить и синхронизировать» отправляем всю базу в Supabase
       if (manual) {
         const wr = await fetch(u + '/rest/v1/skos_cloud', {
           method: 'POST',
@@ -77,13 +116,14 @@
         return saved;
       }
 
-      // При фоновом чтении подтягиваем данные из облака
       const res = await fetch(u + '/rest/v1/skos_cloud?id=eq.main', { headers });
       if (!res.ok) throw new Error('Чтение: ' + (await res.text()));
       const rows = await res.json();
 
       if (rows && rows.length && rows[0].payload && Object.keys(rows[0].payload).length > 0) {
         Object.assign(db, rows[0].payload);
+        db.cloud.url = url;
+        db.cloud.key = key;
         if (typeof save === 'function') save();
         if (typeof render === 'function') render();
       }
