@@ -12,22 +12,50 @@
     ].join('');
   }
 
+  // Вспомогательная функция: забирает URL и Key прямо из полей на экране или из db.cloud
+  function getCloudCredentials() {
+    if (!window.db) window.db = {};
+    if (!db.cloud) db.cloud = {};
+
+    const inputs = Array.from(document.querySelectorAll('input'));
+    for (const inp of inputs) {
+      const val = (inp.value || '').trim();
+      const ph = (inp.placeholder || '').toLowerCase();
+      if (val.includes('supabase.co') || ph.includes('supabase.co')) {
+        if (val) db.cloud.url = val;
+      } else if (val.startsWith('eyJ') || ph.includes('eyj')) {
+        if (val) db.cloud.key = val;
+      }
+    }
+
+    return {
+      url: (db.cloud.url || '').trim(),
+      key: (db.cloud.key || '').trim()
+    };
+  }
+
   // 2. Переопределяем функцию синхронизации с облаком Supabase
   window.syncCloud = async function (manual) {
-    if (!window.db || !db.cloud || !db.cloud.url || !db.cloud.key) {
-      if (manual) alert('Укажите Project URL и Anon Key в Настройках');
+    const creds = getCloudCredentials();
+
+    if (!creds.url || !creds.key) {
+      if (manual) {
+        alert('Вставьте длинный ключ Anon Public Key (начинается с eyJ...) во второе поле и нажмите кнопку ещё раз.');
+      }
       return null;
     }
 
-    const u = db.cloud.url.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
+    if (typeof save === 'function') save();
+
+    const u = creds.url.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
     const headers = {
-      apikey: db.cloud.key,
-      Authorization: 'Bearer ' + db.cloud.key,
+      apikey: creds.key,
+      Authorization: 'Bearer ' + creds.key,
       'Content-Type': 'application/json'
     };
 
     try {
-      // Если нажата кнопка вручную — принудительно отправляем локальную базу в облако
+      // При нажатии кнопки «Сохранить и синхронизировать» отправляем всю базу в Supabase
       if (manual) {
         const wr = await fetch(u + '/rest/v1/skos_cloud', {
           method: 'POST',
@@ -49,7 +77,7 @@
         return saved;
       }
 
-      // Если вызов автоматический — проверяем облако
+      // При фоновом чтении подтягиваем данные из облака
       const res = await fetch(u + '/rest/v1/skos_cloud?id=eq.main', { headers });
       if (!res.ok) throw new Error('Чтение: ' + (await res.text()));
       const rows = await res.json();
