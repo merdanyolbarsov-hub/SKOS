@@ -222,7 +222,7 @@
     if (typeof render === 'function') render();
     alert('Очищено! Теперь можно загрузить выписку заново.');
   };
-        window.importBankCsv = function (ev) {
+    window.importBankCsv = function (ev) {
     const f = ev.target.files && ev.target.files.item(0); if (!f) return;
     const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
     const r = new FileReader();
@@ -234,28 +234,24 @@
       if (!lines.length) return alert('Файл пустой');
       const sep = lines.some(l => l.includes(';')) ? ';' : (lines.some(l => l.includes('\t')) ? '\t' : ',');
       const num = v => parseFloat(String(v || '').replace(/\s+/g, '').replace(',', '.')) || 0;
-      let added = 0, skip = 0;
+      let added = 0, skip = 0, sampleInfo = '';
 
       lines.forEach((l, idx) => {
         const c = l.split(sep).map(x => x.replace(/^"|"$/g, '').trim());
         const dts = c.filter(x => /^\d{2}\.\d{2}\.\d{4}$/.test(x));
         if (!dts.length) return;
+        if (!sampleInfo) sampleInfo = c.map((val, k) => val ? `[${k}]=${val}` : '').filter(Boolean).join(' | ');
         const dtCell = dts.at(0);
         const desc = c.join(' '), low = desc.toLowerCase();
         if (low.includes('входящий остаток') || low.includes('исходящий остаток') || low.includes('итого')) return;
 
         let amt = 0;
-        if (c.length >= 16 && /^\d{2}\.\d{2}\.\d{4}$/.test(c.at(1))) {
-          const v14 = Math.abs(num(c.at(14))), v15 = Math.abs(num(c.at(15)));
-          if (v14 > 0 && v15 === 0) amt = -v14;
-          else if (v15 > 0 && v14 === 0) amt = v15;
-          else {
-            const tail = c.slice(14).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw) && x.v !== 0);
-            if (tail.length) amt = tail.at(0).v;
-          }
-        } else {
-          const nums = c.slice(1).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw) && x.v !== 0);
-          if (nums.length) amt = nums.at(-1).v;
+        const decs = c.slice(12).map((x, k) => ({ v: num(x), raw: x.replace(/\s+/g, ''), idx: k + 12 })).filter(x => /^[+-]?\d+[.,]\d{2}$/.test(x.raw) && x.v !== 0);
+        if (decs.length >= 2) {
+          const d1 = Math.abs(decs.at(0).v), d2 = Math.abs(decs.at(1).v);
+          amt = d1 > 0 && d2 === 0 ? -d1 : (d2 > 0 && d1 === 0 ? d2 : decs.at(0).v);
+        } else if (decs.length === 1) {
+          amt = decs.at(0).v;
         }
         if (!amt) return;
 
@@ -277,7 +273,7 @@
       ev.target.value = '';
       if (typeof save === 'function') save();
       if (typeof render === 'function') render();
-      alert('Загружено операций: ' + added + ', пропущено дублей: ' + skip);
+      alert('Загружено: ' + added + ', дублей: ' + skip + '\nКолонки 1-й строки:\n' + sampleInfo);
     };
     r.readAsArrayBuffer(f);
   };
