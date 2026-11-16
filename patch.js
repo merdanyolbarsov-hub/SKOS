@@ -190,6 +190,13 @@
     if (typeof save === 'function') save();
     if (typeof render === 'function') render();
   };
+  window.changeDdsCat = function (id, newCat) {
+    const d = db.dds.find(x => x.id === id);
+    if (!d) return;
+    d.cat = newCat;
+    if (typeof save === 'function') save();
+    if (typeof render === 'function') render();
+  };
 
   window.editDdsRow = function (id) {
     const d = db.dds.find(x => x.id === id);
@@ -300,16 +307,25 @@
         else if (lowFull.match(/озон|интернет решения/)) cat = 'Поступление от Озон';
         else if (lowFull.match(/яндекс|спичкин/)) cat = 'Поступление от ЯМ';
         else if (lowDesc.match(/ком\.за выдачу|комисс|обслуживан|рко|пакета услуг/)) cat = 'Комиссия РКО';
-        else if (lowDesc.match(/выдача наличных|снятие по карте|перевод собствен|сбп.*(мавлюда|артем|эльмира|курбан|сахет)/)) {
+                let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы', autoCash = false;
+        if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
+        else if (lowFull.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
+        else if (lowFull.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
+        else if (lowDesc.match(/ком\.за выдачу|комисс|обслуживан|рко|пакета услуг/)) cat = 'Комиссия РКО';
+        else if (lowDesc.match(/выдача наличных|снятие по карте|перевод собствен|мавлюда|артем|эльмира|курбан|сахет/)) {
           cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
           if (amt < 0) autoCash = true;
         }
+        else if (lowDesc.match(/parking|парковк|азс|лукойл|газпром|роснефть|нефть|топлив|мойк|шиномонтаж|автодор/)) cat = 'Авто расходы компании';
+        else if (lowDesc.match(/domodedovo|sheremetyevo|vnukovo|аэропорт|авиа|ржд|отель|гостиниц/)) cat = 'Командировки RUB';
         else if (lowDesc.match(/уфнс|енс|енп|единый налоговый|налог|взнос/)) cat = 'ЕНП';
         else if (lowDesc.match(/1с|мойсклад|битрикс|mpstats|лицензион|подписк/)) cat = 'Программное обеспечение (1С / сервисы)';
         else if (lowDesc.match(/црпт|маркировк|сертификат|честный знак/)) cat = 'Сертификация товара';
         else if (lowDesc.match(/аренд/)) cat = 'Аренда склада';
         else if (lowDesc.match(/доставк|сдэк|пэк|деловые линии|транспорт/)) cat = 'Доставка по РФ до склада';
         else if (lowDesc.match(/за покупку|за товар|по счету|по счёту|оплата по дог/)) cat = amt >= 0 ? 'Возвраты от поставщиков' : 'Закуп товара RUB';
+
+        db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dtCell, wal: walId, cat, amt, note: desc.slice(0, 140), batchId, hash });
 
         db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dtCell, wal: walId, cat, amt, batchId, hash });
         if (autoCash) {
@@ -490,7 +506,11 @@
               return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:12px;gap:8px">
                 <span style="color:#64748b;min-width:78px">${d.date}</span>
                 <span style="font-weight:600;flex:1">${w.name}</span>
-                <span style="flex:1;color:#334155">${d.cat}</span>
+                                <div style="flex:1.4;min-width:180px">
+                  <select class="select" style="padding:2px 6px;font-size:12px;height:auto;width:100%" onchange="changeDdsCat('${d.id}',this.value)">${buildCatOptions().replace(`value="${d.cat}"`, `value="${d.cat}" selected`)}</select>
+                  ${d.note ? `<div style="font-size:11px;color:#64748b;margin-top:2px;line-height:1.2">${d.note}</div>` : ''}
+                </div>
+
                 <span class="bold ${d.amt >= 0 ? 'text-green' : 'text-red'}" style="min-width:95px;text-align:right">${vs}</span>
                 <span style="white-space:nowrap"><button class="btn" onclick="editDdsRow('${d.id}')">✏️</button> <button class="btn btn-danger" onclick="db.dds=db.dds.filter(x=>x.id!=='${d.id}');save();render()">✕</button></span>
               </div>`;
