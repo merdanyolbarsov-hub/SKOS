@@ -1,12 +1,16 @@
 (function () {
   const DEFAULT_URL = 'https://supabase.co';
-  const DEFAULT_DDS_CATS = [
+
+  const INIT_CATS = [
     { grp: 'Поступления', name: 'Поступление от ВБ' },
     { grp: 'Поступления', name: 'Поступление от Озон' },
     { grp: 'Поступления', name: 'Поступление от ЯМ' },
     { grp: 'Поступления', name: 'Поступление от соц. сетей' },
-    { grp: 'Поступления', name: 'Прочие поступления' },
+    { grp: 'Поступления', name: 'Оптовые продажи / Безнал' },
+    { grp: 'Поступления', name: 'Вклады от собственников RUB' },
+    { grp: 'Поступления', name: 'Вклады от собственников USD' },
     { grp: 'Поступления', name: 'Возвраты от поставщиков' },
+    { grp: 'Поступления', name: 'Прочие поступления' },
     { grp: 'Закуп и логистика', name: 'Закуп товара RUB' },
     { grp: 'Закуп и логистика', name: 'Закуп товара USD' },
     { grp: 'Закуп и логистика', name: 'Поставщик товара USD' },
@@ -17,17 +21,17 @@
     { grp: 'Закуп и логистика', name: 'Доставка из Китая' },
     { grp: 'Закуп и логистика', name: 'Доставка из Турции' },
     { grp: 'Закуп и логистика', name: 'Транспортные и курьерские услуги' },
-    { grp: 'Закуп и логистика', name: 'Организация таможенного оформления RUB' },
-    { grp: 'Закуп и логистика', name: 'Организация таможенного оформления USD' },
-    { grp: 'Закуп и логистика', name: 'Федеральная таможенная служба' }
-  ];
-  const MORE_DDS_CATS = [
+    { grp: 'Закуп и логистика', name: 'Таможенное оформление RUB' },
+    { grp: 'Закуп и логистика', name: 'Таможенное оформление USD' },
+    { grp: 'Закуп и логистика', name: 'Федеральная таможенная служба' },
     { grp: 'Зарплата (ФОТ)', name: 'ФОТ склад' },
     { grp: 'Зарплата (ФОТ)', name: 'ФОТ менеджеры' },
     { grp: 'Зарплата (ФОТ)', name: 'ФОТ офис' },
     { grp: 'Зарплата (ФОТ)', name: 'ФОТ собственник' },
     { grp: 'Зарплата (ФОТ)', name: 'Расходы на персонал' },
-    { grp: 'Зарплата (ФОТ)', name: 'Поиск и найм персонала' },
+    { grp: 'Зарплата (ФОТ)', name: 'Поиск и найм персонала' }
+  ];
+  const MORE_CATS = [
     { grp: 'Авто, командировки, офис', name: 'Авто расходы компании' },
     { grp: 'Авто, командировки, офис', name: 'Командировки RUB' },
     { grp: 'Авто, командировки, офис', name: 'Командировки USD' },
@@ -37,7 +41,7 @@
     { grp: 'Авто, командировки, офис', name: 'Аренда склада' },
     { grp: 'Авто, командировки, офис', name: 'Оплата рекламных систем' },
     { grp: 'Авто, командировки, офис', name: 'Маркетинговые подрядчики' },
-    { grp: 'Авто, командировки, офис', name: 'Программное обеспечение' },
+    { grp: 'Авто, командировки, офис', name: 'Программное обеспечение (1С / сервисы)' },
     { grp: 'Авто, командировки, офис', name: 'Административные и юридические услуги' },
     { grp: 'Авто, командировки, офис', name: 'Обучение' },
     { grp: 'Авто, командировки, офис', name: 'Прочие расходы' },
@@ -53,74 +57,72 @@
     { grp: 'Переводы, валюта, ОС', name: 'Выбытие — Перевод между счетами' },
     { grp: 'Переводы, валюта, ОС', name: 'Поступление - Конвертация валют USD' },
     { grp: 'Переводы, валюта, ОС', name: 'Выбытие - Конвертация валют RUB' },
-    { grp: 'Переводы, валюта, ОС', name: 'Вклады от собственников RUB' },
-    { grp: 'Переводы, валюта, ОС', name: 'Вклады от собственников USD' },
     { grp: 'Переводы, валюта, ОС', name: 'Дивиденды' },
     { grp: 'Переводы, валюта, ОС', name: 'Покупка ОС' },
     { grp: 'Переводы, валюта, ОС', name: 'Продажа ОС' },
     { grp: 'Переводы, валюта, ОС', name: 'Ремонт ОС' }
   ];
-  const ALL_INIT_CATS = DEFAULT_DDS_CATS.concat(MORE_DDS_CATS);
+
+  const ALL_CATS = INIT_CATS.concat(MORE_CATS);
   const TAX_LIST = ['АУСН', 'УСН', 'НДС', 'ЕНП', 'Налог на прибыль (ООО)', 'Патент (ПСН)', 'Взносы ИП фикс. + 1%', 'Страховые взносы (сотрудники)', 'НДФЛ', 'Торговый сбор', 'Прочие налоги'];
   const MONTHS_RU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-
   function ensureCats() {
     if (!window.db) return [];
     if (!Array.isArray(db.ddsCats) || !db.ddsCats.length) {
-      db.ddsCats = ALL_INIT_CATS.map((c, i) => ({ id: 'cat_' + i, grp: c.grp, name: c.name }));
+      db.ddsCats = ALL_CATS.map((c, i) => ({ id: 'cat_' + i, grp: c.grp, name: c.name }));
       if (typeof save === 'function') save();
     }
     return db.ddsCats;
   }
 
   function buildCatOptions() {
-    const cats = ensureCats();
-    const groups = {};
+    const cats = ensureCats(), groups = {};
     cats.forEach(c => { (groups[c.grp] = groups[c.grp] || []).push(c.name); });
     return Object.keys(groups).map(g =>
       `<optgroup label="${g}">${groups[g].map(n => `<option value="${n}">${n}</option>`).join('')}</optgroup>`
     ).join('');
   }
 
-  function syncCatInputs() {
+  function syncCatSelects() {
     ['d-cat', 'ex-cat'].forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
       if (el.tagName === 'INPUT') {
         const sel = document.createElement('select');
-        sel.id = id;
-        sel.className = el.className || 'select';
-        sel.required = true;
+        sel.id = id; sel.className = el.className || 'select'; sel.required = true;
         el.replaceWith(sel);
       }
       const s = document.getElementById(id);
-      if (s && s.dataset.cnt !== String(ensureCats().length)) {
+      const sig = ensureCats().map(c => c.id).join(',');
+      if (s && s.dataset.sig !== sig) {
         const cur = s.value;
         s.innerHTML = buildCatOptions();
         if (cur) s.value = cur;
-        s.dataset.cnt = String(ensureCats().length);
+        s.dataset.sig = sig;
       }
     });
   }
+
   function renderInitBalancesBox() {
     const kpiBox = document.getElementById('dds-kpis');
     if (!kpiBox || !window.db) return;
     if (!db.initBalances) db.initBalances = {};
     let box = document.getElementById('skos-init-bal-box');
+    if (box && box.dataset.ready === '1') return;
     if (!box) {
       box = document.createElement('div');
       box.id = 'skos-init-bal-box';
       box.style.cssText = 'margin:12px 0;padding:12px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;';
       kpiBox.parentNode.insertBefore(box, kpiBox.nextSibling);
     }
+    box.dataset.ready = '1';
     const allWals = db.orgs.map(o => ({ id: o.id, name: o.name + ' (' + o.bank + ')', cur: 'RUB' })).concat(db.cashWallets);
-    const rowsHtml = allWals.map(w => {
-      const val = db.initBalances[w.id] || '';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;background:#fff;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;">
+    const rowsHtml = allWals.map(w =>
+      `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;background:#fff;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;">
         <span style="font-size:12px;font-weight:600">${w.name} [${w.cur}]</span>
-        <input type="number" step="0.01" class="input skos-init-inp" data-wal="${w.id}" value="${val}" placeholder="0.00" style="width:120px;text-align:right">
-      </div>`;
-    }).join('');
+        <input type="number" step="0.01" class="input skos-init-inp" data-wal="${w.id}" value="${db.initBalances[w.id] || ''}" placeholder="0.00" style="width:120px;text-align:right">
+      </div>`
+    ).join('');
     box.innerHTML = `<details><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#1e293b">🏦 Входящее сальдо (Начальные остатки счетов и касс на 01.01.2026) — нажмите, чтобы открыть</summary>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:8px;margin-top:10px">${rowsHtml}</div>
       <div style="margin-top:10px;text-align:right"><button type="button" class="btn btn-primary" onclick="saveInitBalances()">💾 Сохранить начальные остатки</button></div>
@@ -129,18 +131,17 @@
 
   window.saveInitBalances = function () {
     if (!db.initBalances) db.initBalances = {};
-    document.querySelectorAll('.skos-init-inp').forEach(inp => {
-      db.initBalances[inp.dataset.wal] = parseFloat(inp.value) || 0;
-    });
+    document.querySelectorAll('.skos-init-inp').forEach(inp => { db.initBalances[inp.dataset.wal] = parseFloat(inp.value) || 0; });
     if (typeof save === 'function') save();
     if (typeof render === 'function') render();
     alert('Начальные остатки на 01.01.2026 сохранены!');
   };
-  function renderCatEditorBox() {
+  function renderCatEditorBox(force) {
     const orgTbl = document.getElementById('tb-orgs-set');
     if (!orgTbl || !window.db) return;
     const parentCard = orgTbl.closest('.card') || orgTbl.parentNode;
     let box = document.getElementById('skos-cat-editor-box');
+    if (box && !force && box.dataset.ready === '1') return;
     if (!box) {
       box = document.createElement('div');
       box.id = 'skos-cat-editor-box';
@@ -148,102 +149,103 @@
       box.style.cssText = 'margin-top:14px;padding:14px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;';
       parentCard.parentNode.insertBefore(box, parentCard.nextSibling);
     }
-    const cats = ensureCats();
-    const groups = [...new Set(cats.map(c => c.grp))];
-    const listHtml = cats.map(c =>
-      `<span style="display:inline-flex;align-items:center;gap:6px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:4px 8px;font-size:12px;">
-        <b>[${c.grp}]</b> ${c.name}
-        <button type="button" onclick="delDdsCat('${c.id}')" style="border:none;background:none;color:#dc2626;font-weight:700;cursor:pointer">✕</button>
-      </span>`
-    ).join('');
-    box.innerHTML = `<div style="font-weight:700;font-size:14px;margin-bottom:8px">📑 Справочник статей ДДС и Расходов (Добавление и удаление)</div>
+    box.dataset.ready = '1';
+    const cats = ensureCats(), groups = [...new Set(cats.map(c => c.grp))];
+    const foldersHtml = groups.map(g => {
+      const items = cats.filter(c => c.grp === g).map(c =>
+        `<span style="display:inline-flex;align-items:center;gap:5px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:6px;padding:3px 8px;font-size:12px;">
+          ${c.name}<button type="button" onclick="delDdsCat('${c.id}')" style="border:none;background:none;color:#dc2626;font-weight:700;cursor:pointer">✕</button>
+        </span>`
+      ).join('');
+      return `<details open style="border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:6px;background:#fcfcfd">
+        <summary style="cursor:pointer;font-weight:700;font-size:12px;color:#1e40af">📁 ${g} (${cats.filter(c => c.grp === g).length})</summary>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${items}</div>
+      </details>`;
+    }).join('');
+    box.innerHTML = `<div style="font-weight:700;font-size:14px;margin-bottom:8px">📑 Справочник статей ДДС по папкам (Добавление и удаление)</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-        <select id="new-cat-grp" class="select" style="width:220px">${groups.map(g => `<option value="${g}">${g}</option>`).join('')}</select>
+        <input id="new-cat-grp" list="grp-list" class="input" placeholder="Папка (выберите или введите новую)..." style="width:240px">
+        <datalist id="grp-list">${groups.map(g => `<option value="${g}">`).join('')}</datalist>
         <input id="new-cat-name" class="input" placeholder="Название новой статьи..." style="flex:1;min-width:200px">
         <button type="button" class="btn btn-primary" onclick="addDdsCat()">+ Добавить статью</button>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;max-height:220px;overflow-y:auto">${listHtml}</div>`;
+      <div>${foldersHtml}</div>`;
   }
 
   window.addDdsCat = function () {
-    const grp = document.getElementById('new-cat-grp').value;
+    const grp = (document.getElementById('new-cat-grp').value || '').trim() || 'Прочее';
     const name = (document.getElementById('new-cat-name').value || '').trim();
     if (!name) return alert('Введите название статьи');
     ensureCats().push({ id: 'cat_' + Date.now(), grp, name });
     document.getElementById('new-cat-name').value = '';
     if (typeof save === 'function') save();
-    renderCatEditorBox();
-    syncCatInputs();
+    renderCatEditorBox(true); syncCatSelects();
   };
 
   window.delDdsCat = function (id) {
     db.ddsCats = ensureCats().filter(c => c.id !== id);
     if (typeof save === 'function') save();
-    renderCatEditorBox();
-    syncCatInputs();
+    renderCatEditorBox(true); syncCatSelects();
   };
+
   window.toggleOrgArch = function (id) {
     const o = db.orgs.find(x => x.id === id);
     if (!o) return;
-    o.archived = !o.archived;
+    if (!o.archived) {
+      const y = prompt('Укажите год закрытия ИП (в этом году оно останется в Сводке, а со следующего скроется):', '2026');
+      if (y === null) return;
+      o.archived = true;
+      o.closedYear = parseInt(y, 10) || 2026;
+    } else {
+      o.archived = false;
+      delete o.closedYear;
+    }
     if (typeof save === 'function') save();
     if (typeof render === 'function') render();
   };
 
-  function patchTaxesAndArchive() {
-    const txType = document.getElementById('tx-type');
-    if (txType && txType.dataset.p !== '1') {
-      txType.innerHTML = TAX_LIST.map(t => `<option value="${t}">${t}</option>`).join('');
-      txType.dataset.p = '1';
-    }
-    const txKv = document.getElementById('tx-kv');
-    if (txKv && txKv.dataset.p !== '1') {
-      const mOpts = MONTHS_RU.map((m, i) => `<option value="M${String(i + 1).padStart(2, '0')}">Месяц: ${m}</option>`).join('');
-      txKv.insertAdjacentHTML('beforeend', `<optgroup label="Помесячно (АУСН / НДФЛ)">${mOpts}</optgroup>`);
-      txKv.dataset.p = '1';
-    }
-  }
-
-  const origRenderLists = window.renderLists;
-  window.renderLists = function () {
-    if (typeof origRenderLists === 'function') origRenderLists();
-    const initB = db.initBalances || {};
-    const allWals = db.orgs.map(o => ({ id: o.id, name: o.name + ' (' + o.bank + ')' + (o.archived ? ' [АРХИВ]' : ''), cur: 'RUB' })).concat(db.cashWallets);
-    const kpiEl = document.getElementById('dds-kpis');
-    if (kpiEl) {
-      kpiEl.innerHTML = allWals.map(w => {
-        const bal = (Number(initB[w.id]) || 0) + db.dds.filter(d => d.wal === w.id).reduce((s, d) => s + d.amt, 0);
-        const vc = w.cur === 'USD' ? 'text-green' : '';
-        const vs = w.cur === 'USD' ? fmtU(bal) : fmtR(bal);
-        return `<div class="kpi-card"><div style="font-size:11px;color:#64748b;font-weight:700">${w.name}</div><div class="kpi-val ${vc}" style="font-size:16px">${vs}</div></div>`;
-      }).join('');
-    }
-    const orgSet = document.getElementById('tb-orgs-set');
-    if (orgSet) {
-      orgSet.innerHTML = db.orgs.map(o =>
-        `<tr><td class="bold">${o.name} ${o.archived ? '<span class="badge badge-amber">Архив</span>' : ''}</td><td>${o.bank}</td>
-        <td><button class="btn" onclick="toggleOrgArch('${o.id}')">${o.archived ? 'Вернуть' : 'В архив'}</button>
-        <button class="btn btn-danger" onclick="db.orgs=db.orgs.filter(x=>x.id!=='${o.id}');save();render()">✕</button></td></tr>`
-      ).join('');
-    }
-    renderInitBalancesBox();
-    renderCatEditorBox();
-    syncCatInputs();
+  window.editDdsRow = function (id) {
+    const d = db.dds.find(x => x.id === id);
+    if (!d) return;
+    const nd = prompt('Дата операции (ДД.ММ.ГГГГ или ГГГГ-ММ-ДД):', d.date);
+    if (nd === null) return;
+    const nc = prompt('Статья ДДС:', d.cat);
+    if (nc === null) return;
+    const na = prompt('Сумма (с минусом если расход, например -15000):', d.amt);
+    if (na === null) return;
+    d.date = nd.trim() || d.date;
+    d.cat = nc.trim() || d.cat;
+    const parsed = parseFloat(String(na).replace(/\s+/g, '').replace(',', '.'));
+    if (!isNaN(parsed)) d.amt = parsed;
+    if (typeof save === 'function') save();
+    if (typeof render === 'function') render();
   };
+  window.undoLastImport = function () {
+    const batches = [...new Set(db.dds.filter(d => d.batchId).map(d => d.batchId))];
+    if (!batches.length) return alert('Нет загруженных выписок для отмены');
+    const lastId = batches;
+    const cnt = db.dds.filter(d => d.batchId === lastId).length;
+    if (!confirm('Отменить последнюю загрузку выписки (' + cnt + ' операций) и очистить их дубли?')) return;
+    db.dds.filter(d => d.batchId === lastId).forEach(d => { if (d.hash) delete db.ddsHashes[d.hash]; });
+    db.dds = db.dds.filter(d => d.batchId !== lastId);
+    if (typeof save === 'function') save();
+    if (typeof render === 'function') render();
+    alert('Удалено операций: ' + cnt);
+  };
+
   window.importBankCsv = function (ev) {
-    const f = ev.target.files[0];
-    if (!f) return;
-    const walId = document.getElementById('dds-wal').value;
+    const f = ev.target.files; if (!f) return;
+    const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
     const r = new FileReader();
     r.onload = e => {
       const lines = e.target.result.split(/\r?\n/).filter(l => l.trim());
       if (lines.length < 2) return;
-      const sep = lines[0].includes(';') ? ';' : ',';
+      const sep = lines.includes(';') ? ';' : ',';
       let added = 0, skip = 0;
       lines.slice(1).forEach((l, idx) => {
         const c = l.split(sep).map(x => x.replace(/^"|"$/g, '').trim());
         if (c.length < 2) return;
-        const dt = c[0], desc = c.join(' '), low = desc.toLowerCase();
+        const dt = c, desc = c.join(' '), low = desc.toLowerCase();
         let amt = 0;
         for (let i = 1; i < c.length; i++) {
           const n = parseFloat(c[i].replace(/\s+/g, '').replace(',', '.'));
@@ -257,10 +259,12 @@
         if (low.match(/вайлдберриз|wildberries/)) cat = 'Поступление от ВБ';
         else if (low.match(/озон|интернет решения/)) cat = 'Поступление от Озон';
         else if (low.match(/яндекс/)) cat = 'Поступление от ЯМ';
+        else if (low.match(/1с|мойсклад|битрикс|mpstats/)) cat = 'Программное обеспечение (1С / сервисы)';
+        else if (low.match(/фтс|тамож|свх/)) cat = 'Федеральная таможенная служба';
         else if (low.match(/уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
         else if (low.match(/комисс|обслуживан|рко/)) cat = 'Комиссия РКО';
         else if (low.match(/перевод|снятие налич|выдача налич/)) cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
-        db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: walId, cat, amt });
+        db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: walId, cat, amt, batchId, hash });
         added++;
       });
       if (typeof save === 'function') save();
@@ -268,6 +272,74 @@
       alert('Загружено: ' + added + ', пропущено дублей: ' + skip);
     };
     r.readAsText(f, 'UTF-8');
+  };
+
+  const origRender = window.render;
+  window.render = function () {
+    if (typeof origRender === 'function') origRender();
+    const yr = document.getElementById('f-yr') ? document.getElementById('f-yr').value : 'ALL';
+    const mo = document.getElementById('f-mo') ? document.getElementById('f-mo').value : 'ALL';
+    const rate = typeof getRate === 'function' ? getRate() : 96.5;
+    const initB = db.initBalances || {};
+
+    const tbOrgs = document.getElementById('tb-orgs');
+    if (tbOrgs && yr !== 'ALL') {
+      const yNum = parseInt(yr, 10);
+      const visNames = [...new Set(db.orgs.filter(o => !o.closedYear || o.closedYear >= yNum).map(o => o.name))];
+      tbOrgs.innerHTML = visNames.map(on => {
+        const os = calcPeriodStats(yr, mo, on);
+        const bIds = db.orgs.filter(o => o.name === on).map(o => o.id);
+        const bBal = bIds.reduce((s, id) => s + (Number(initB[id]) || 0), 0) + db.dds.filter(d => bIds.includes(d.wal)).reduce((s, d) => s + d.amt, 0);
+        const nc = os.net >= 0 ? 'text-green' : 'text-red';
+        return `<tr><td class="bold">${on}</td><td class="num bold">${fmtR(os.rev)}</td><td class="num text-red">${fmtR(os.ret)}</td><td class="num">${fmtR(os.ads + os.log + os.com)}</td><td class="num">${fmtR(os.cogs)}</td><td class="num">${fmtR(os.taxMonth)}</td><td class="num">${fmtR(os.expRub)}</td><td class="num bold ${nc}">${fmtR(os.net)}</td><td class="num bold">${fmtR(bBal)}</td></tr>`;
+      }).join('');
+    }
+
+    const allWals = db.orgs.map(o => ({ id: o.id, name: o.name + ' (' + o.bank + ')' + (o.archived ? ' [Архив ' + (o.closedYear || '') + ']' : ''), cur: 'RUB' })).concat(db.cashWallets);
+    const kpiEl = document.getElementById('dds-kpis');
+    if (kpiEl) {
+      kpiEl.innerHTML = allWals.map(w => {
+        const bal = (Number(initB[w.id]) || 0) + db.dds.filter(d => d.wal === w.id).reduce((s, d) => s + d.amt, 0);
+        return `<div class="kpi-card"><div style="font-size:11px;color:#64748b;font-weight:700">${w.name}</div><div class="kpi-val ${w.cur === 'USD' ? 'text-green' : ''}" style="font-size:16px">${w.cur === 'USD' ? fmtU(bal) : fmtR(bal)}</div></div>`;
+      }).join('');
+    }
+
+    const tbDds = document.getElementById('tb-dds');
+    if (tbDds) {
+      tbDds.innerHTML = db.dds.slice(0, 100).map(d => {
+        const w = allWals.find(x => x.id === d.wal) || { name: d.wal, cur: 'RUB' };
+        const vs = w.cur === 'USD' ? fmtU(d.amt) : fmtR(d.amt);
+        const rs = fmtR(w.cur === 'USD' ? d.amt * rate : d.amt);
+        return `<tr><td>${d.date}</td><td class="bold">${w.name}</td><td>${d.cat}</td><td class="num bold ${d.amt >= 0 ? 'text-green' : 'text-red'}">${vs}</td><td class="num">${rs}</td>
+          <td style="white-space:nowrap"><button class="btn" onclick="editDdsRow('${d.id}')" title="Изменить">✏️</button> <button class="btn btn-danger" onclick="db.dds=db.dds.filter(x=>x.id!=='${d.id}');save();render()">✕</button></td></tr>`;
+      }).join('');
+    }
+
+    const orgSet = document.getElementById('tb-orgs-set');
+    if (orgSet) {
+      orgSet.innerHTML = db.orgs.map(o =>
+        `<tr><td class="bold">${o.name} ${o.archived ? `<span class="badge badge-amber">Закрыто (${o.closedYear || 2026})</span>` : ''}</td><td>${o.bank}</td>
+        <td><button class="btn" onclick="toggleOrgArch('${o.id}')">${o.archived ? 'Вернуть' : 'В архив'}</button>
+        <button class="btn btn-danger" onclick="db.orgs=db.orgs.filter(x=>x.id!=='${o.id}');save();render()">✕</button></td></tr>`
+      ).join('');
+    }
+
+    const ddsWal = document.getElementById('dds-wal');
+    if (ddsWal && !document.getElementById('btn-undo-imp')) {
+      ddsWal.insertAdjacentHTML('afterend', ' <button id="btn-undo-imp" type="button" class="btn" style="margin-left:6px" onclick="undoLastImport()">↩️ Отменить загрузку</button>');
+    }
+
+    const txType = document.getElementById('tx-type');
+    if (txType && txType.dataset.p !== '1') { txType.innerHTML = TAX_LIST.map(t => `<option value="${t}">${t}</option>`).join(''); txType.dataset.p = '1'; }
+    const txKv = document.getElementById('tx-kv');
+    if (txKv && txKv.dataset.p !== '1') {
+      txKv.insertAdjacentHTML('beforeend', `<optgroup label="Помесячно (АУСН / НДФЛ)">${MONTHS_RU.map((m, i) => `<option value="M${String(i + 1).padStart(2, '0')}">Месяц: ${m}</option>`).join('')}</optgroup>`);
+      txKv.dataset.p = '1';
+    }
+
+    renderInitBalancesBox();
+    renderCatEditorBox(false);
+    syncCatSelects();
   };
 
   window.syncCloud = async function (manual) {
@@ -293,8 +365,8 @@
       }
       const res = await fetch(u + '/rest/v1/skos_cloud?id=eq.main', { headers });
       const rows = await res.json();
-      if (rows && rows.length && rows[0].payload && Object.keys(rows[0].payload).length) {
-        Object.assign(db, rows[0].payload);
+      if (rows && rows.length && rows.payload && Object.keys(rows.payload).length) {
+        Object.assign(db, rows.payload);
         db.cloud.url = url; db.cloud.key = key;
         if (typeof save === 'function') save();
         if (typeof render === 'function') render();
@@ -302,13 +374,5 @@
     } catch (e) { if (manual) alert('Ошибка облака: ' + e.message); }
   };
 
-  function bootAll() {
-    ensureCats();
-    syncCatInputs();
-    patchTaxesAndArchive();
-    renderInitBalancesBox();
-    renderCatEditorBox();
-  }
-  bootAll();
-  setInterval(bootAll, 1200);
+  if (typeof render === 'function') render();
 })();
