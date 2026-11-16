@@ -220,7 +220,7 @@
     if (typeof save === 'function') save();
     if (typeof render === 'function') render();
   };
-  window.undoLastImport = function () {
+  window.importBankCsv = function (ev) {
     const batches = [...new Set(db.dds.filter(d => d.batchId).map(d => d.batchId))];
     if (!batches.length) return alert('Нет загруженных выписок для отмены');
     const lastId = batches;
