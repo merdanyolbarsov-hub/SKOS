@@ -232,27 +232,36 @@
     if (typeof render === 'function') render();
     alert('Удалено операций: ' + cnt);
   };
-
   window.importBankCsv = function (ev) {
-    const f = ev.target.files; if (!f) return;
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
     const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
     const r = new FileReader();
     r.onload = e => {
-      const lines = e.target.result.split(/\r?\n/).filter(l => l.trim());
-      if (lines.length < 2) return;
-      const sep = lines.includes(';') ? ';' : ',';
+      const buf = new Uint8Array(e.target.result);
+      let txt = new TextDecoder('utf-8').decode(buf);
+      if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+      const lines = txt.split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) return alert('Файл пустой');
+      const sep = (lines.find(l => l.includes(';')) || lines[0]).includes(';') ? ';' : ',';
       let added = 0, skip = 0;
-      lines.slice(1).forEach((l, idx) => {
+      lines.forEach((l, idx) => {
         const c = l.split(sep).map(x => x.replace(/^"|"$/g, '').trim());
-        if (c.length < 2) return;
-        const dt = c, desc = c.join(' '), low = desc.toLowerCase();
+        const dtCell = c.find(x => /\d{2}\.\d{2}\.\d{4}/.test(x) || /\d{4}-\d{2}-\d{2}/.test(x));
+        if (!dtCell) return;
+        const desc = c.join(' '), low = desc.toLowerCase();
+        if (low.includes('входящий остаток') || low.includes('исходящий остаток') || low.includes('итого')) return;
         let amt = 0;
-        for (let i = 1; i < c.length; i++) {
-          const n = parseFloat(c[i].replace(/\s+/g, '').replace(',', '.'));
-          if (!isNaN(n) && n !== 0) { amt = n; break; }
+        for (let i = 0; i < c.length; i++) {
+          if (c[i] === dtCell) continue;
+          const clean = c[i].replace(/\s+/g, '').replace(',', '.');
+          if (/^[+-]?\d+(\.\d+)?$/.test(clean)) {
+            const n = parseFloat(clean);
+            if (n !== 0) { amt = n; break; }
+          }
         }
         if (!amt) return;
-        const hash = walId + '_' + dt + '_' + amt + '_' + desc.slice(0, 30) + '_' + idx;
+        const hash = walId + '_' + dtCell + '_' + amt + '_' + desc.slice(0, 35) + '_' + idx;
         if (db.ddsHashes[hash]) { skip++; return; }
         db.ddsHashes[hash] = true;
         let cat = 'Прочие расходы';
@@ -264,16 +273,20 @@
         else if (low.match(/уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
         else if (low.match(/комисс|обслуживан|рко/)) cat = 'Комиссия РКО';
         else if (low.match(/перевод|снятие налич|выдача налич/)) cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
-        db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: walId, cat, amt, batchId, hash });
+        db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dtCell, wal: walId, cat, amt, batchId, hash });
         added++;
       });
+      ev.target.value = '';
       if (typeof save === 'function') save();
       if (typeof render === 'function') render();
-      alert('Загружено: ' + added + ', пропущено дублей: ' + skip);
+      if (added === 0 && skip === 0) {
+        alert('Операции не распознаны. Первые 2 строки:\n' + lines.slice(0, 2).join('\n'));
+      } else {
+        alert('Загружено операций: ' + added + ', пропущено дублей: ' + skip);
+      }
     };
-    r.readAsText(f, 'UTF-8');
+    r.readAsArrayBuffer(f);
   };
-
   const origRender = window.render;
   window.render = function () {
     if (typeof origRender === 'function') origRender();
@@ -376,3 +389,5 @@
 
   if (typeof render === 'function') render();
 })();
+
+ 
