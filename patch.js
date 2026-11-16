@@ -222,7 +222,7 @@
     if (typeof render === 'function') render();
     alert('Очищено! Теперь можно загрузить выписку заново.');
   };
-  window.importBankCsv = function (ev) {
+    window.importBankCsv = function (ev) {
     const f = ev.target.files && ev.target.files[0]; if (!f) return;
     const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
     const r = new FileReader();
@@ -231,7 +231,7 @@
       let txt = new TextDecoder('utf-8').decode(buf);
       if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
       const lines = txt.split(/\r?\n/).filter(l => l.trim());
-      if (lines.length < 2) return alert('Файл пустой');
+      if (lines.length < 1) return alert('Файл пустой');
       const sep = (lines.find(l => l.includes(';')) || lines[0]).includes(';') ? ';' : ',';
       const hdrIdx = lines.findIndex(l => l.toLowerCase().match(/сумма|списан|дебет|кредит|приход|расход/));
       const hdr = hdrIdx >= 0 ? lines[hdrIdx].split(sep).map(x => x.replace(/^"|"$/g, '').trim().toLowerCase()) : [];
@@ -241,25 +241,35 @@
       const sumCol = hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц'));
       const num = v => parseFloat(String(v || '').replace(/\s+/g, '').replace(',', '.')) || 0;
       let added = 0, skip = 0;
+
       lines.slice(hdrIdx >= 0 ? hdrIdx + 1 : 0).forEach((l, idx) => {
         const c = l.split(sep).map(x => x.replace(/^"|"$/g, '').trim());
-        const dtCell = (dtCol >= 0 && /\d{2}\.\d{2}\.\d{4}/.test(c[dtCol])) ? c[dtCol] : c.find(x => /^\d{2}\.\d{2}\.\d{4}$/.test(x));
+        const isAlfaLong = c.length > 15 && /^\d{2}\.\d{2}\.\d{4}$/.test(c[1]) && /^\d{2}\.\d{2}\.\d{4}$/.test(c[2]);
+        const dtCell = isAlfaLong ? c[1] : ((dtCol >= 0 && /\d{2}\.\d{2}\.\d{4}/.test(c[dtCol])) ? c[dtCol] : c.find(x => /^\d{2}\.\d{2}\.\d{4}$/.test(x)));
         if (!dtCell) return;
         const desc = c.join(' '), low = desc.toLowerCase();
         if (low.includes('входящий остаток') || low.includes('исходящий остаток') || low.includes('итого')) return;
+
         let amt = 0;
-        if (inCol >= 0 || outCol >= 0) {
+        if (isAlfaLong) {
+          const tailNums = c.slice(14).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw) && x.v !== 0);
+          const v14 = num(c[14]), v15 = num(c[15]);
+          if (v14 > 0 && v15 === 0) amt = -v14;
+          else if (v15 > 0 && v14 === 0) amt = v15;
+          else if (tailNums.length) amt = tailNums[0].v;
+        } else if (inCol >= 0 || outCol >= 0) {
           const vIn = inCol >= 0 ? Math.abs(num(c[inCol])) : 0;
           const vOut = outCol >= 0 ? Math.abs(num(c[outCol])) : 0;
           amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0);
         } else if (sumCol >= 0) {
           amt = num(c[sumCol]);
         } else {
-          const nums = c.slice(1).map((x, i) => ({ v: num(x), raw: x, i })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw.replace(/\s+/g, '')) && x.v !== 0);
+          const nums = c.slice(1).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw) && x.v !== 0);
           if (nums.length) amt = nums[nums.length - 1].v;
         }
         if (!amt) return;
-        const hash = walId + '_' + dtCell + '_' + amt + '_' + desc.slice(-40) + '_' + idx;
+
+        const hash = walId + '_' + dtCell + '_' + amt + '_' + desc.slice(-45) + '_' + idx;
         if (db.ddsHashes[hash]) { skip++; return; }
         db.ddsHashes[hash] = true;
         let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
