@@ -439,15 +439,80 @@
       }).join('');
     }
 
-    const tbDds = document.getElementById('tb-dds');
+        const tbDds = document.getElementById('tb-dds');
     if (tbDds) {
-      tbDds.innerHTML = db.dds.slice(0, 100).map(d => {
-        const w = allWals.find(x => x.id === d.wal) || { name: d.wal, cur: 'RUB' };
-        const vs = w.cur === 'USD' ? fmtU(d.amt) : fmtR(d.amt);
-        const rs = fmtR(w.cur === 'USD' ? d.amt * rate : d.amt);
-        return `<tr><td>${d.date}</td><td class="bold">${w.name}</td><td>${d.cat}</td><td class="num bold ${d.amt >= 0 ? 'text-green' : 'text-red'}">${vs}</td><td class="num">${rs}</td>
-          <td style="white-space:nowrap"><button class="btn" onclick="editDdsRow('${d.id}')" title="Изменить">✏️</button> <button class="btn btn-danger" onclick="db.dds=db.dds.filter(x=>x.id!=='${d.id}');save();render()">✕</button></td></tr>`;
-      }).join('');
+      const tbl = tbDds.closest('table');
+      if (tbl) tbl.style.display = 'none';
+      let treeBox = document.getElementById('skos-dds-tree');
+      if (!treeBox && tbl) {
+        treeBox = document.createElement('div');
+        treeBox.id = 'skos-dds-tree';
+        treeBox.style.marginTop = '12px';
+        tbl.parentNode.insertBefore(treeBox, tbl);
+      }
+      if (treeBox) {
+        const curWalF = (document.getElementById('dds-tree-wal') || {}).value || 'ALL';
+        const cats = ensureCats();
+        const filtered = db.dds.filter(d => curWalF === 'ALL' || d.wal === curWalF);
+        const byMonth = {};
+        filtered.forEach(d => {
+          const s = String(d.date || '');
+          const p = s.includes('.') ? s.split('.') : [];
+          const key = p.length === 3 ? `${p.at(2)}-${p.at(1)}` : s.slice(0, 7);
+          (byMonth[key] = byMonth[key] || []).push(d);
+        });
+        const mKeys = Object.keys(byMonth).sort().reverse();
+        const barHtml = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;padding:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+          <span style="font-size:12px;font-weight:700">Фильтр журнала:</span>
+          <select id="dds-tree-wal" class="select" onchange="render()"><option value="ALL">Все счета и кассы (${db.dds.length})</option>${allWals.map(w => `<option value="${w.id}"${curWalF === w.id ? ' selected' : ''}>${w.name}</option>`).join('')}</select>
+          <button type="button" class="btn" onclick="document.querySelectorAll('#skos-dds-tree details').forEach(el=>el.open=true)">Развернуть всё</button>
+          <button type="button" class="btn" onclick="document.querySelectorAll('#skos-dds-tree details').forEach(el=>el.open=false)">Свернуть всё</button>
+        </div>`;
+        const treeHtml = mKeys.length ? mKeys.map(mk => {
+          const list = byMonth[mk];
+          const [yStr, mStr] = mk.split('-');
+          const mTitle = `${yStr || ''} • ${MONTHS_RU[(parseInt(mStr, 10) || 1) - 1] || mStr}`;
+          let mIn = 0, mOut = 0;
+          const byGrp = {};
+          list.forEach(d => {
+            const w = allWals.find(x => x.id === d.wal) || { name: d.wal, cur: 'RUB' };
+            const rub = d.amt * (w.cur === 'USD' ? rate : 1);
+            if (rub >= 0) mIn += rub; else mOut += Math.abs(rub);
+            const cObj = cats.find(c => c.name === d.cat);
+            const grp = cObj ? cObj.grp : 'Прочие операции';
+            (byGrp[grp] = byGrp[grp] || []).push({ d, w, rub });
+          });
+          const grpHtml = Object.keys(byGrp).map(g => {
+            const gItems = byGrp[g];
+            const gSum = gItems.reduce((s, x) => s + x.rub, 0);
+            const rowsHtml = gItems.map(({ d, w, rub }) => {
+              const vs = w.cur === 'USD' ? fmtU(d.amt) : fmtR(d.amt);
+              return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:12px;gap:8px">
+                <span style="color:#64748b;min-width:78px">${d.date}</span>
+                <span style="font-weight:600;flex:1">${w.name}</span>
+                <span style="flex:1;color:#334155">${d.cat}</span>
+                <span class="bold ${d.amt >= 0 ? 'text-green' : 'text-red'}" style="min-width:95px;text-align:right">${vs}</span>
+                <span style="white-space:nowrap"><button class="btn" onclick="editDdsRow('${d.id}')">✏️</button> <button class="btn btn-danger" onclick="db.dds=db.dds.filter(x=>x.id!=='${d.id}');save();render()">✕</button></span>
+              </div>`;
+            }).join('');
+            return `<details style="margin:6px 0 6px 14px;border:1px solid #e2e8f0;border-radius:6px;background:#fff">
+              <summary style="cursor:pointer;padding:6px 10px;display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:#1e40af">
+                <span>📁 ${g} (${gItems.length})</span>
+                <span class="${gSum >= 0 ? 'text-green' : 'text-red'}">${fmtR(gSum)}</span>
+              </summary>
+              <div>${rowsHtml}</div>
+            </details>`;
+          }).join('');
+          return `<details style="margin-bottom:8px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;padding:4px 8px">
+            <summary style="cursor:pointer;padding:8px;display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:13px;flex-wrap:wrap;gap:8px">
+              <span>📅 ${mTitle} (${list.length} опер.)</span>
+              <span><span class="text-green">+${fmtR(mIn)}</span> &nbsp;|&nbsp; <span class="text-red">−${fmtR(mOut)}</span></span>
+            </summary>
+            <div style="padding-bottom:6px">${grpHtml}</div>
+          </details>`;
+        }).join('') : '<div style="padding:16px;text-align:center;color:#94a3b8;font-size:13px">Операций пока нет</div>';
+        treeBox.innerHTML = barHtml + treeHtml;
+      }
     }
 
     const orgSet = document.getElementById('tb-orgs-set');
