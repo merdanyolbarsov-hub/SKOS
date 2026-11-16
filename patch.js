@@ -222,7 +222,7 @@
     if (typeof render === 'function') render();
     alert('Очищено! Теперь можно загрузить выписку заново.');
   };
-      window.importBankCsv = function (ev) {
+    window.importBankCsv = function (ev) {
     const f = ev.target.files && ev.target.files.item(0); if (!f) return;
     const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
     const r = new FileReader();
@@ -251,14 +251,11 @@
       const normDt = s => /^\d{4}-\d{2}-\d{2}$/.test(s) ? s.split('-').reverse().join('.') : s;
       let fileEndBal = 0;
       rows.forEach(c => {
-        const j = c.join(' ').toLowerCase();
-        if (j.includes('исходящий остаток') || j.includes('исходящее сальдо')) {
-          const n = c.map(num).find(v => v > 0);
-          if (n) fileEndBal = n;
-        }
+        const idxEnd = c.findIndex(x => x.toLowerCase().includes('исходящий остаток') || x.toLowerCase().includes('исходящее сальдо'));
+        if (idxEnd >= 0) { const n = c.slice(idxEnd + 1).map(num).find(v => v > 0); if (n) fileEndBal = n; }
       });
 
-      const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/sum_rur|d_c|списание|зачисление|дата операции|дата|сумма|дебет|кредит/));
+      const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/sum_rur|d_c|списание|зачисление|дата операции|дебет.*кредит|дата.*номер.*контрагент/));
       const hdr = hdrIdx >= 0 ? rows.at(hdrIdx).map(x => x.toLowerCase()) : [];
       const iDc = hdr.indexOf('d_c');
       const iDt = hdr.indexOf('date_oper') >= 0 ? hdr.indexOf('date_oper') : (hdr.indexOf('дата операции') >= 0 ? hdr.indexOf('дата операции') : hdr.findIndex(h => h.includes('дата')));
@@ -268,7 +265,7 @@
       const iText = hdr.indexOf('text70') >= 0 ? hdr.indexOf('text70') : hdr.findIndex(h => h.includes('назначен'));
       const iEndCol = hdr.indexOf('tc_rur');
 
-      let added = 0, skip = 0, sumIn = 0, sumOut = 0;
+      let added = 0, skip = 0, sumIn = 0, sumOut = 0, toCashRub = 0;
       const startRow = hdrIdx >= 0 ? (rows.at(hdrIdx + 1) && rows.at(hdrIdx + 1).join(' ').toLowerCase().includes('id-выписки') ? hdrIdx + 2 : hdrIdx + 1) : 0;
 
       for (let idx = startRow; idx < rows.length; idx++) {
@@ -278,7 +275,7 @@
         const rawDt = (iDt >= 0 && /^(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})$/.test(c.at(iDt))) ? c.at(iDt) : c.find(x => /^(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})$/.test(x));
         if (!rawDt) continue;
         const dtCell = normDt(rawDt);
-        if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого по')) continue;
+        if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого')) continue;
         if (iEndCol >= 0 && num(c.at(iEndCol))) fileEndBal = num(c.at(iEndCol));
 
         let amt = 0;
@@ -288,31 +285,37 @@
         } else if (iIn >= 0 || iOut >= 0) {
           const vIn = iIn >= 0 ? Math.abs(num(c.at(iIn))) : 0, vOut = iOut >= 0 ? Math.abs(num(c.at(iOut))) : 0;
           amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0);
-        } else if (iSum >= 0) {
-          amt = num(c.at(iSum));
-        } else {
-          const nums = c.slice(1).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw) && x.v !== 0);
-          if (nums.length) amt = nums.at(-1).v;
-        }
+        } else if (iSum >= 0) amt = num(c.at(iSum));
         if (!amt) continue;
 
         const desc = iText >= 0 ? (c.at(iText) || c.join(' ')) : c.join(' ');
+        const lowDesc = desc.toLowerCase();
         const hash = walId + '_' + dtCell + '_' + amt + '_' + desc.slice(0, 40) + '_' + idx;
         if (db.ddsHashes[hash]) { skip++; continue; }
         db.ddsHashes[hash] = true;
         if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
 
-        let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
+        let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы', autoCash = false;
         if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
         else if (lowFull.match(/озон|интернет решения/)) cat = 'Поступление от Озон';
         else if (lowFull.match(/яндекс|спичкин/)) cat = 'Поступление от ЯМ';
-        else if (lowFull.match(/1с|мойсклад|битрикс|mpstats|лицензион|подписк/)) cat = 'Программное обеспечение (1С / сервисы)';
-        else if (lowFull.match(/фтс|тамож|свх/)) cat = 'Федеральная таможенная служба';
-        else if (lowFull.match(/уфнс|енс|енп|единый налоговый|налог|взнос/)) cat = 'ЕНП';
-        else if (lowFull.match(/комисс|обслуживан|рко|выдачу нал/)) cat = 'Комиссия РКО';
-        else if (lowFull.match(/перевод|снятие по карте|выдача налич|сбп/)) cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
+        else if (lowDesc.match(/ком\.за выдачу|комисс|обслуживан|рко|пакета услуг/)) cat = 'Комиссия РКО';
+        else if (lowDesc.match(/выдача наличных|снятие по карте|перевод собствен|сбп.*(мавлюда|артем|эльмира|курбан|сахет)/)) {
+          cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
+          if (amt < 0) autoCash = true;
+        }
+        else if (lowDesc.match(/уфнс|енс|енп|единый налоговый|налог|взнос/)) cat = 'ЕНП';
+        else if (lowDesc.match(/1с|мойсклад|битрикс|mpstats|лицензион|подписк/)) cat = 'Программное обеспечение (1С / сервисы)';
+        else if (lowDesc.match(/црпт|маркировк|сертификат|честный знак/)) cat = 'Сертификация товара';
+        else if (lowDesc.match(/аренд/)) cat = 'Аренда склада';
+        else if (lowDesc.match(/доставк|сдэк|пэк|деловые линии|транспорт/)) cat = 'Доставка по РФ до склада';
+        else if (lowDesc.match(/за покупку|за товар|по счету|по счёту|оплата по дог/)) cat = amt >= 0 ? 'Возвраты от поставщиков' : 'Закуп товара RUB';
 
         db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dtCell, wal: walId, cat, amt, batchId, hash });
+        if (autoCash) {
+          db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dtCell, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), batchId });
+          toCashRub += Math.abs(amt);
+        }
         added++;
       }
 
@@ -321,10 +324,21 @@
       if (typeof render === 'function') render();
       const curBal = ((db.initBalances && Number(db.initBalances[walId])) || 0) + db.dds.filter(d => d.wal === walId).reduce((s, d) => s + d.amt, 0);
       const chk = fileEndBal ? (Math.abs(curBal - fileEndBal) < 1 ? ' ✅ Сходится с выпиской!' : ' ⚠️ В выписке: ' + fmtR(fileEndBal)) : '';
-      alert(`Загружено: ${added} (дублей: ${skip})\nПриход: +${fmtR(sumIn)} | Расход: −${fmtR(sumOut)}\nИтоговый остаток: ${fmtR(curBal)}${chk}`);
+      const cashNote = toCashRub > 0 ? `\n💵 В «Наличные RUB (Главный)» зачислено: +${fmtR(toCashRub)}` : '';
+      alert(`Загружено: ${added} (дублей: ${skip})\nПриход: +${fmtR(sumIn)} | Расход: −${fmtR(sumOut)}\nИтоговый остаток: ${fmtR(curBal)}${chk}${cashNote}`);
     };
     r.readAsArrayBuffer(f);
   };
+  window.resetTestData = function () {
+    if (!confirm('Очистить ВСЕ тестовые операции (выписки, начальные остатки, отчёты МП, налоги, расходы) и начать с чистого листа?\n\nНастройки юрлиц, архив ИП, папки статей и облако СОХРАНЯТСЯ.')) return;
+    db.dds = []; db.ddsHashes = {}; db.initBalances = {};
+    db.reports = []; db.itemSales = []; db.taxes = [];
+    db.expenses = []; db.stockMoves = []; db.supOps = []; db.assets = [];
+    if (typeof save === 'function') save();
+    if (typeof render === 'function') render();
+    alert('База очищена! Теперь можно начинать чистовой учёт с выбранного года.');
+  };
+
   window.renderExpFolderStats = function () {
     const wfBox = document.getElementById('wf-box');
     if (!wfBox || !window.db) return;
@@ -341,10 +355,12 @@
     const cats = ensureCats(), groups = [...new Set(cats.map(c => c.grp))];
 
     if (!document.getElementById('ef-wal')) {
+      let yrsHtml = '<option value="ALL">Все года</option>';
+      for (let y = 2020; y <= 2050; y++) yrsHtml += `<option value="${y}"${y === 2026 ? ' selected' : ''}>${y}</option>`;
       box.innerHTML = `<div style="font-weight:700;font-size:14px;margin-bottom:8px">📊 Детализация расходов по папкам и статьям</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
           <select id="ef-wal" class="select" onchange="renderExpFolderStats()"><option value="ALL">Все счета и кассы</option>${allWals.map(w => `<option value="${w.id}">${w.name}</option>`).join('')}</select>
-          <select id="ef-yr" class="select" onchange="renderExpFolderStats()"><option value="ALL">Все года</option><option value="2026" selected>2026</option><option value="2027">2027</option></select>
+          <select id="ef-yr" class="select" onchange="renderExpFolderStats()">${yrsHtml}</select>
           <select id="ef-mo" class="select" onchange="renderExpFolderStats()"><option value="ALL">Все месяцы</option>${MONTHS_RU.map((m, i) => `<option value="${String(i + 1).padStart(2, '0')}">${m}</option>`).join('')}</select>
           <select id="ef-grp" class="select" onchange="renderExpFolderStats()"><option value="ALL">Все папки</option>${groups.map(g => `<option value="${g}">📁 ${g}</option>`).join('')}</select>
           <select id="ef-cat" class="select" onchange="renderExpFolderStats()"><option value="ALL">Все статьи</option>${cats.map(c => `<option value="${c.name}">${c.name}</option>`).join('')}</select>
@@ -361,8 +377,9 @@
       if (d.amt >= 0) return;
       if (fWal !== 'ALL' && d.wal !== fWal) return;
       const mDt = String(d.date || '');
-      const dYr = mDt.includes('.') ? mDt.split('.') : mDt.slice(0, 4);
-      const dMo = mDt.includes('.') ? mDt.split('.') : mDt.slice(5, 7);
+      const parts = mDt.includes('.') ? mDt.split('.') : [];
+      const dYr = parts.length === 3 ? parts.at(2) : mDt.slice(0, 4);
+      const dMo = parts.length === 3 ? parts.at(1) : mDt.slice(5, 7);
       if (fYr !== 'ALL' && dYr !== fYr) return;
       if (fMo !== 'ALL' && dMo !== fMo) return;
       const cObj = cats.find(c => c.name === d.cat);
@@ -384,7 +401,7 @@
     resEl.innerHTML = `<div style="margin-bottom:8px;font-size:13px">Итого по фильтру: <b class="text-red">${fmtR(grandTotal)}</b> (${cnt} операций)</div>` +
       (fKeys.length ? fKeys.map(g => {
         const subs = Object.keys(itemTotals).filter(k => k.startsWith(g + '||')).map(k =>
-          `<div style="display:flex;justify-content:space-between;padding:3px 0 3px 16px;font-size:12px;border-bottom:1px dashed #e2e8f0"><span>${k.split('||')}</span><span class="bold text-red">${fmtR(itemTotals[k])}</span></div>`
+          `<div style="display:flex;justify-content:space-between;padding:3px 0 3px 16px;font-size:12px;border-bottom:1px dashed #e2e8f0"><span>${k.split('||').at(1)}</span><span class="bold text-red">${fmtR(itemTotals[k])}</span></div>`
         ).join('');
         return `<details open style="margin-bottom:6px;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px">
           <summary style="cursor:pointer;display:flex;justify-content:space-between;font-weight:700;font-size:13px"><span>📁 ${g}</span><span class="text-red">${fmtR(folderTotals[g])}</span></summary>
@@ -440,6 +457,10 @@
         <td><button class="btn" onclick="toggleOrgArch('${o.id}')">${o.archived ? 'Вернуть' : 'В архив'}</button>
         <button class="btn btn-danger" onclick="db.orgs=db.orgs.filter(x=>x.id!=='${o.id}');save();render()">✕</button></td></tr>`
       ).join('');
+      if (!document.getElementById('btn-reset-test')) {
+        const card = orgSet.closest('.card') || orgSet.parentNode;
+        card.insertAdjacentHTML('afterend', '<div id="btn-reset-test" class="card" style="margin-top:12px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:13px;font-weight:600;color:#991b1b">Завершили тесты? Очистите операции и начните чистовой учёт с выбранного года:</span><button type="button" class="btn btn-danger" onclick="resetTestData()">🧹 Очистить тестовые данные</button></div>');
+      }
     }
 
     const ddsWal = document.getElementById('dds-wal');
