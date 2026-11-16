@@ -222,7 +222,7 @@
     if (typeof render === 'function') render();
     alert('Очищено! Теперь можно загрузить выписку заново.');
   };
-    window.importBankCsv = function (ev) {
+      window.importBankCsv = function (ev) {
     const f = ev.target.files && ev.target.files[0]; if (!f) return;
     const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
     const r = new FileReader();
@@ -231,41 +231,31 @@
       let txt = new TextDecoder('utf-8').decode(buf);
       if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
       const lines = txt.split(/\r?\n/).filter(l => l.trim());
-      if (lines.length < 1) return alert('Файл пустой');
-      const sep = (lines.find(l => l.includes(';')) || lines[0]).includes(';') ? ';' : ',';
-      const hdrIdx = lines.findIndex(l => l.toLowerCase().match(/сумма|списан|дебет|кредит|приход|расход/));
-      const hdr = hdrIdx >= 0 ? lines[hdrIdx].split(sep).map(x => x.replace(/^"|"$/g, '').trim().toLowerCase()) : [];
-      const dtCol = hdr.findIndex(h => h.includes('дата'));
-      const inCol = hdr.findIndex(h => h.match(/приход|поступлен|кредит/));
-      const outCol = hdr.findIndex(h => h.match(/расход|списан|дебет/));
-      const sumCol = hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц'));
+      if (!lines.length) return alert('Файл пустой');
+      const sep = (lines[0].includes(';') || (lines[1] && lines[1].includes(';'))) ? ';' : (lines[0].includes('\t') ? '\t' : ',');
       const num = v => parseFloat(String(v || '').replace(/\s+/g, '').replace(',', '.')) || 0;
       let added = 0, skip = 0;
 
-      lines.slice(hdrIdx >= 0 ? hdrIdx + 1 : 0).forEach((l, idx) => {
+      lines.forEach((l, idx) => {
         const c = l.split(sep).map(x => x.replace(/^"|"$/g, '').trim());
-        const isAlfaLong = c.length > 15 && /^\d{2}\.\d{2}\.\d{4}$/.test(c[1]) && /^\d{2}\.\d{2}\.\d{4}$/.test(c[2]);
-        const dtCell = isAlfaLong ? c[1] : ((dtCol >= 0 && /\d{2}\.\d{2}\.\d{4}/.test(c[dtCol])) ? c[dtCol] : c.find(x => /^\d{2}\.\d{2}\.\d{4}$/.test(x)));
-        if (!dtCell) return;
+        const dts = c.filter(x => /^\d{2}\.\d{2}\.\d{4}$/.test(x));
+        if (!dts.length) return;
+        const dtCell = dts[0];
         const desc = c.join(' '), low = desc.toLowerCase();
         if (low.includes('входящий остаток') || low.includes('исходящий остаток') || low.includes('итого')) return;
 
         let amt = 0;
-        if (isAlfaLong) {
-          const tailNums = c.slice(14).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw) && x.v !== 0);
-          const v14 = num(c[14]), v15 = num(c[15]);
-          if (v14 > 0 && v15 === 0) amt = -v14;
-          else if (v15 > 0 && v14 === 0) amt = v15;
-          else if (tailNums.length) amt = tailNums[0].v;
-        } else if (inCol >= 0 || outCol >= 0) {
-          const vIn = inCol >= 0 ? Math.abs(num(c[inCol])) : 0;
-          const vOut = outCol >= 0 ? Math.abs(num(c[outCol])) : 0;
-          amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0);
-        } else if (sumCol >= 0) {
-          amt = num(c[sumCol]);
+        if (c.length >= 16 && /^\d{2}\.\d{2}\.\d{4}$/.test(c[1])) {
+          const vDeb = Math.abs(num(c[14])), vCred = Math.abs(num(c[15]));
+          if (vDeb > 0 && vCred === 0) amt = -vDeb;
+          else if (vCred > 0 && vDeb === 0) amt = vCred;
+          else {
+            const tail = c.slice(14).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+[.,]\d{2}$/.test(x.raw) && x.v !== 0);
+            if (tail.length) amt = tail[0].v;
+          }
         } else {
-          const nums = c.slice(1).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw) && x.v !== 0);
-          if (nums.length) amt = nums[nums.length - 1].v;
+          const decNums = c.slice(1).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+[.,]\d{2}$/.test(x.raw) && x.v !== 0);
+          if (decNums.length) amt = decNums[decNums.length - 1].v;
         }
         if (!amt) return;
 
@@ -290,6 +280,73 @@
       alert('Загружено операций: ' + added + ', пропущено дублей: ' + skip);
     };
     r.readAsArrayBuffer(f);
+  };
+  window.renderExpFolderStats = function () {
+    const wfBox = document.getElementById('wf-box');
+    if (!wfBox || !window.db) return;
+    let box = document.getElementById('skos-exp-folders-box');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'skos-exp-folders-box';
+      box.className = 'card';
+      box.style.cssText = 'margin-top:14px;padding:14px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;';
+      wfBox.parentNode.appendChild(box);
+    }
+    const rate = typeof getRate === 'function' ? getRate() : 96.5;
+    const allWals = db.orgs.map(o => ({ id: o.id, name: o.name + ' (' + o.bank + ')', cur: 'RUB' })).concat(db.cashWallets);
+    const cats = ensureCats(), groups = [...new Set(cats.map(c => c.grp))];
+
+    if (!document.getElementById('ef-wal')) {
+      box.innerHTML = `<div style="font-weight:700;font-size:14px;margin-bottom:8px">📊 Детализация расходов по папкам и статьям</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <select id="ef-wal" class="select" onchange="renderExpFolderStats()"><option value="ALL">Все счета и кассы</option>${allWals.map(w => `<option value="${w.id}">${w.name}</option>`).join('')}</select>
+          <select id="ef-yr" class="select" onchange="renderExpFolderStats()"><option value="ALL">Все года</option><option value="2026" selected>2026</option><option value="2027">2027</option></select>
+          <select id="ef-mo" class="select" onchange="renderExpFolderStats()"><option value="ALL">Все месяцы</option>${MONTHS_RU.map((m, i) => `<option value="${String(i + 1).padStart(2, '0')}">${m}</option>`).join('')}</select>
+          <select id="ef-grp" class="select" onchange="renderExpFolderStats()"><option value="ALL">Все папки</option>${groups.map(g => `<option value="${g}">📁 ${g}</option>`).join('')}</select>
+          <select id="ef-cat" class="select" onchange="renderExpFolderStats()"><option value="ALL">Все статьи</option>${cats.map(c => `<option value="${c.name}">${c.name}</option>`).join('')}</select>
+        </div>
+        <div id="ef-res"></div>`;
+    }
+
+    const fWal = document.getElementById('ef-wal').value, fYr = document.getElementById('ef-yr').value;
+    const fMo = document.getElementById('ef-mo').value, fGrp = document.getElementById('ef-grp').value, fCat = document.getElementById('ef-cat').value;
+    const folderTotals = {}, itemTotals = {};
+    let cnt = 0;
+
+    db.dds.forEach(d => {
+      if (d.amt >= 0) return;
+      if (fWal !== 'ALL' && d.wal !== fWal) return;
+      const mDt = String(d.date || '');
+      const dYr = mDt.includes('.') ? mDt.split('.') : mDt.slice(0, 4);
+      const dMo = mDt.includes('.') ? mDt.split('.') : mDt.slice(5, 7);
+      if (fYr !== 'ALL' && dYr !== fYr) return;
+      if (fMo !== 'ALL' && dMo !== fMo) return;
+      const cObj = cats.find(c => c.name === d.cat);
+      const grp = cObj ? cObj.grp : 'Прочие расходы';
+      if (fGrp !== 'ALL' && grp !== fGrp) return;
+      if (fCat !== 'ALL' && d.cat !== fCat) return;
+      const wObj = allWals.find(x => x.id === d.wal);
+      const rub = Math.abs(d.amt) * (wObj && wObj.cur === 'USD' ? rate : 1);
+      folderTotals[grp] = (folderTotals[grp] || 0) + rub;
+      itemTotals[grp + '||' + d.cat] = (itemTotals[grp + '||' + d.cat] || 0) + rub;
+      cnt++;
+    });
+
+    const grandTotal = Object.values(folderTotals).reduce((a, b) => a + b, 0);
+    const fKeys = Object.keys(folderTotals).sort((a, b) => folderTotals[b] - folderTotals[a]);
+    const resEl = document.getElementById('ef-res');
+    if (!resEl) return;
+
+    resEl.innerHTML = `<div style="margin-bottom:8px;font-size:13px">Итого по фильтру: <b class="text-red">${fmtR(grandTotal)}</b> (${cnt} операций)</div>` +
+      (fKeys.length ? fKeys.map(g => {
+        const subs = Object.keys(itemTotals).filter(k => k.startsWith(g + '||')).map(k =>
+          `<div style="display:flex;justify-content:space-between;padding:3px 0 3px 16px;font-size:12px;border-bottom:1px dashed #e2e8f0"><span>${k.split('||')}</span><span class="bold text-red">${fmtR(itemTotals[k])}</span></div>`
+        ).join('');
+        return `<details open style="margin-bottom:6px;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px">
+          <summary style="cursor:pointer;display:flex;justify-content:space-between;font-weight:700;font-size:13px"><span>📁 ${g}</span><span class="text-red">${fmtR(folderTotals[g])}</span></summary>
+          <div style="margin-top:4px">${subs}</div>
+        </details>`;
+      }).join('') : '<div style="font-size:12px;color:#94a3b8">По выбранным фильтрам расходов нет</div>');
   };
   const origRender = window.render;
   window.render = function () {
@@ -354,44 +411,7 @@
       txKv.dataset.p = '1';
     }
 
-    const wfBox = document.getElementById('wf-box');
-    if (wfBox) {
-      let expByCatBox = document.getElementById('skos-exp-folders-box');
-      if (!expByCatBox) {
-        expByCatBox = document.createElement('div');
-        expByCatBox.id = 'skos-exp-folders-box';
-        expByCatBox.className = 'card';
-        expByCatBox.style.cssText = 'margin-top:14px;padding:14px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;';
-        wfBox.parentNode.appendChild(expByCatBox);
-      }
-      const cats = ensureCats(), folderTotals = {}, itemTotals = {};
-      db.dds.forEach(d => {
-        if (d.amt >= 0) return;
-        const mDt = String(d.date || '');
-        const dYr = mDt.includes('.') ? mDt.split('.')[2] : mDt.slice(0, 4);
-        const dMo = mDt.includes('.') ? mDt.split('.')[1] : mDt.slice(5, 7);
-        if (yr !== 'ALL' && dYr !== yr) return;
-        if (mo !== 'ALL' && dMo !== mo) return;
-        const wObj = allWals.find(x => x.id === d.wal);
-        const rub = Math.abs(d.amt) * (wObj && wObj.cur === 'USD' ? rate : 1);
-        const cObj = cats.find(c => c.name === d.cat);
-        const grp = cObj ? cObj.grp : 'Прочие расходы';
-        folderTotals[grp] = (folderTotals[grp] || 0) + rub;
-        itemTotals[grp + '||' + d.cat] = (itemTotals[grp + '||' + d.cat] || 0) + rub;
-      });
-      const fKeys = Object.keys(folderTotals).sort((a, b) => folderTotals[b] - folderTotals[a]);
-      expByCatBox.innerHTML = `<div style="font-weight:700;font-size:14px;margin-bottom:8px">📊 Сводка расходов по папкам и статьям (за выбранный период)</div>` +
-        (fKeys.length ? fKeys.map(g => {
-          const subs = Object.keys(itemTotals).filter(k => k.startsWith(g + '||')).map(k =>
-            `<div style="display:flex;justify-content:space-between;padding:3px 0 3px 16px;font-size:12px;border-bottom:1px dashed #e2e8f0"><span>${k.split('||')[1]}</span><span class="bold text-red">${fmtR(itemTotals[k])}</span></div>`
-          ).join('');
-          return `<details open style="margin-bottom:6px;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px">
-            <summary style="cursor:pointer;display:flex;justify-content:space-between;font-weight:700;font-size:13px"><span>📁 ${g}</span><span class="text-red">${fmtR(folderTotals[g])}</span></summary>
-            <div style="margin-top:4px">${subs}</div>
-          </details>`;
-        }).join('') : '<div style="font-size:12px;color:#94a3b8">За выбранный период расходов в ДДС пока нет</div>');
-    }
-
+    renderExpFolderStats();
     renderInitBalancesBox();
     renderCatEditorBox(false);
     syncCatSelects();
@@ -420,8 +440,8 @@
       }
       const res = await fetch(u + '/rest/v1/skos_cloud?id=eq.main', { headers });
       const rows = await res.json();
-      if (rows && rows.length && rows[0].payload && Object.keys(rows[0].payload).length) {
-        Object.assign(db, rows[0].payload);
+      if (rows && rows.length && rows.payload && Object.keys(rows.payload).length) {
+        Object.assign(db, rows.payload);
         db.cloud.url = url; db.cloud.key = key;
         if (typeof save === 'function') save();
         if (typeof render === 'function') render();
