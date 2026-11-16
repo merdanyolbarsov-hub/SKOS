@@ -232,48 +232,77 @@
       if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
       const lines = txt.split(/\r?\n/).filter(l => l.trim());
       if (!lines.length) return alert('Файл пустой');
-      const sep = lines.some(l => l.includes(';')) ? ';' : (lines.some(l => l.includes('\t')) ? '\t' : ',');
+      const sep = lines.at(0).includes('\t') ? '\t' : (lines.at(0).includes(';') ? ';' : ',');
       const num = v => parseFloat(String(v || '').replace(/\s+/g, '').replace(',', '.')) || 0;
-      let added = 0, skip = 0, sampleInfo = '';
 
-      lines.forEach((l, idx) => {
+      const hdrIdx = lines.findIndex(l => l.toLowerCase().match(/sum_rur|d_c|дата|сумма|дебет|кредит|списан|поступлен/));
+      const hdr = hdrIdx >= 0 ? lines.at(hdrIdx).split(sep).map(x => x.replace(/^"|"$/g, '').trim().toLowerCase()) : [];
+
+      const iDc = hdr.indexOf('d_c');
+      const iSumRur = hdr.indexOf('sum_rur');
+      const iDtOper = hdr.indexOf('date_oper');
+      const iText = hdr.indexOf('text70');
+      const iEndBal = hdr.indexOf('tc_rur');
+
+      const iDt = iDtOper >= 0 ? iDtOper : hdr.findIndex(h => h.includes('дата'));
+      const iIn = hdr.findIndex(h => h.match(/приход|поступлен|кредит/) && !h.includes('ост') && !h.includes('обор'));
+      const iOut = hdr.findIndex(h => h.match(/расход|списан|дебет/) && !h.includes('ост') && !h.includes('обор'));
+      const iSum = iSumRur >= 0 ? iSumRur : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц') || h.includes('сумма док'));
+
+      let added = 0, skip = 0, sumIn = 0, sumOut = 0, fileEndBal = 0;
+      const startRow = hdrIdx >= 0 ? (lines.at(hdrIdx + 1) && lines.at(hdrIdx + 1).toLowerCase().includes('id-выписки') ? hdrIdx + 2 : hdrIdx + 1) : 0;
+
+      lines.slice(startRow).forEach((l, idx) => {
         const c = l.split(sep).map(x => x.replace(/^"|"$/g, '').trim());
-        const dts = c.filter(x => /^\d{2}\.\d{2}\.\d{4}$/.test(x));
-        if (!dts.length) return;
-        if (!sampleInfo) sampleInfo = c.map((val, k) => val ? `[${k}]=${val}` : '').filter(Boolean).join(' | ');
-        const dtCell = dts.at(0);
-        const desc = c.join(' '), low = desc.toLowerCase();
-        if (low.includes('входящий остаток') || low.includes('исходящий остаток') || low.includes('итого')) return;
+        const dtCell = (iDt >= 0 && /\d{2}\.\d{2}\.\d{4}/.test(c.at(iDt))) ? c.at(iDt) : c.find(x => /^\d{2}\.\d{2}\.\d{4}$/.test(x));
+        if (!dtCell) return;
+        const desc = iText >= 0 ? (c.at(iText) || c.join(' ')) : c.join(' ');
+        const low = (desc + ' ' + c.join(' ')).toLowerCase();
+        if (low.includes('входящий остаток') || low.includes('исходящий остаток') || low.includes('итого по')) return;
+        if (iEndBal >= 0 && num(c.at(iEndBal))) fileEndBal = num(c.at(iEndBal));
 
         let amt = 0;
-        const decs = c.slice(12).map((x, k) => ({ v: num(x), raw: x.replace(/\s+/g, ''), idx: k + 12 })).filter(x => /^[+-]?\d+[.,]\d{2}$/.test(x.raw) && x.v !== 0);
-        if (decs.length >= 2) {
-          const d1 = Math.abs(decs.at(0).v), d2 = Math.abs(decs.at(1).v);
-          amt = d1 > 0 && d2 === 0 ? -d1 : (d2 > 0 && d1 === 0 ? d2 : decs.at(0).v);
-        } else if (decs.length === 1) {
-          amt = decs.at(0).v;
+        if (iDc >= 0 && iSum >= 0) {
+          const v = Math.abs(num(c.at(iSum)));
+          const dc = String(c.at(iDc) || '').toUpperCase();
+          amt = dc === 'D' ? -v : (dc === 'C' ? v : 0);
+        } else if (iIn >= 0 || iOut >= 0) {
+          const vIn = iIn >= 0 ? Math.abs(num(c.at(iIn))) : 0;
+          const vOut = iOut >= 0 ? Math.abs(num(c.at(iOut))) : 0;
+          amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0);
+        } else if (iSum >= 0) {
+          amt = num(c.at(iSum));
+        } else {
+          const nums = c.slice(1).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw) && x.v !== 0);
+          if (nums.length) amt = nums.at(-1).v;
         }
         if (!amt) return;
 
-        const hash = walId + '_' + dtCell + '_' + amt + '_' + desc.slice(-45) + '_' + idx;
+        const hash = walId + '_' + dtCell + '_' + amt + '_' + desc.slice(0, 40) + '_' + idx;
         if (db.ddsHashes[hash]) { skip++; return; }
         db.ddsHashes[hash] = true;
+        if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
+
         let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
         if (low.match(/вайлдберриз|wildberries/)) cat = 'Поступление от ВБ';
         else if (low.match(/озон|интернет решения/)) cat = 'Поступление от Озон';
         else if (low.match(/яндекс/)) cat = 'Поступление от ЯМ';
         else if (low.match(/1с|мойсклад|битрикс|mpstats/)) cat = 'Программное обеспечение (1С / сервисы)';
         else if (low.match(/фтс|тамож|свх/)) cat = 'Федеральная таможенная служба';
-        else if (low.match(/уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
-        else if (low.match(/комисс|обслуживан|рко/)) cat = 'Комиссия РКО';
-        else if (low.match(/перевод|снятие налич|выдача налич/)) cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
+        else if (low.match(/уфнс|енс|енп|единый налоговый|налог|взнос/)) cat = 'ЕНП';
+        else if (low.match(/комисс|обслуживан|рко|выдачу нал/)) cat = 'Комиссия РКО';
+        else if (low.match(/перевод|снятие по карте|снятие налич/)) cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
+
         db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dtCell, wal: walId, cat, amt, batchId, hash });
         added++;
       });
+
       ev.target.value = '';
       if (typeof save === 'function') save();
       if (typeof render === 'function') render();
-      alert('Загружено: ' + added + ', дублей: ' + skip + '\nКолонки 1-й строки:\n' + sampleInfo);
+      const curBal = ((db.initBalances && Number(db.initBalances[walId])) || 0) + db.dds.filter(d => d.wal === walId).reduce((s, d) => s + d.amt, 0);
+      const chk = fileEndBal ? (Math.abs(curBal - fileEndBal) < 1 ? ' ✅ Сходится с выпиской!' : ' ⚠️ В выписке: ' + fmtR(fileEndBal)) : '';
+      alert(`Загружено: ${added} (дублей: ${skip})\nПриход: +${fmtR(sumIn)} | Расход: −${fmtR(sumOut)}\nИтоговый остаток: ${fmtR(curBal)}${chk}`);
     };
     r.readAsArrayBuffer(f);
   };
