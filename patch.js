@@ -222,7 +222,7 @@
     if (typeof render === 'function') render();
     alert('Очищено! Теперь можно загрузить выписку заново.');
   };
-    window.importBankCsv = function (ev) {
+      window.importBankCsv = function (ev) {
     const f = ev.target.files && ev.target.files.item(0); if (!f) return;
     const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
     const r = new FileReader();
@@ -230,45 +230,63 @@
       const buf = new Uint8Array(e.target.result);
       let txt = new TextDecoder('utf-8').decode(buf);
       if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
-      const lines = txt.split(/\r?\n/).filter(l => l.trim());
-      if (!lines.length) return alert('Файл пустой');
-      const sep = lines.at(0).includes('\t') ? '\t' : (lines.at(0).includes(';') ? ';' : ',');
+      const firstLine = txt.split(/\r?\n/).find(l => l.replace(/[,;\t]/g, '').trim()) || '';
+      const sep = firstLine.includes('\t') ? '\t' : (firstLine.includes(';') ? ';' : ',');
+
+      const rows = []; let row = [], cell = '', inQ = false;
+      for (let i = 0; i < txt.length; i++) {
+        const ch = txt.at(i), nx = txt.at(i + 1);
+        if (ch === '"') { if (inQ && nx === '"') { cell += '"'; i++; } else inQ = !inQ; }
+        else if (ch === sep && !inQ) { row.push(cell.trim()); cell = ''; }
+        else if ((ch === '\n' || ch === '\r') && !inQ) {
+          if (ch === '\r' && nx === '\n') i++;
+          row.push(cell.trim());
+          if (row.some(x => x !== '')) rows.push(row);
+          row = []; cell = '';
+        } else cell += ch;
+      }
+      if (cell || row.length) { row.push(cell.trim()); if (row.some(x => x !== '')) rows.push(row); }
+
       const num = v => parseFloat(String(v || '').replace(/\s+/g, '').replace(',', '.')) || 0;
+      const normDt = s => /^\d{4}-\d{2}-\d{2}$/.test(s) ? s.split('-').reverse().join('.') : s;
+      let fileEndBal = 0;
+      rows.forEach(c => {
+        const j = c.join(' ').toLowerCase();
+        if (j.includes('исходящий остаток') || j.includes('исходящее сальдо')) {
+          const n = c.map(num).find(v => v > 0);
+          if (n) fileEndBal = n;
+        }
+      });
 
-      const hdrIdx = lines.findIndex(l => l.toLowerCase().match(/sum_rur|d_c|дата|сумма|дебет|кредит|списан|поступлен/));
-      const hdr = hdrIdx >= 0 ? lines.at(hdrIdx).split(sep).map(x => x.replace(/^"|"$/g, '').trim().toLowerCase()) : [];
-
+      const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/sum_rur|d_c|списание|зачисление|дата операции|дата|сумма|дебет|кредит/));
+      const hdr = hdrIdx >= 0 ? rows.at(hdrIdx).map(x => x.toLowerCase()) : [];
       const iDc = hdr.indexOf('d_c');
-      const iSumRur = hdr.indexOf('sum_rur');
-      const iDtOper = hdr.indexOf('date_oper');
-      const iText = hdr.indexOf('text70');
-      const iEndBal = hdr.indexOf('tc_rur');
+      const iDt = hdr.indexOf('date_oper') >= 0 ? hdr.indexOf('date_oper') : (hdr.indexOf('дата операции') >= 0 ? hdr.indexOf('дата операции') : hdr.findIndex(h => h.includes('дата')));
+      const iIn = hdr.findIndex(h => h.match(/зачислен|приход|поступлен|кредит/) && !h.includes('ост') && !h.includes('обор'));
+      const iOut = hdr.findIndex(h => h.match(/списан|расход|дебет/) && !h.includes('ост') && !h.includes('обор'));
+      const iSum = hdr.indexOf('sum_rur') >= 0 ? hdr.indexOf('sum_rur') : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц') || h.includes('сумма док'));
+      const iText = hdr.indexOf('text70') >= 0 ? hdr.indexOf('text70') : hdr.findIndex(h => h.includes('назначен'));
+      const iEndCol = hdr.indexOf('tc_rur');
 
-      const iDt = iDtOper >= 0 ? iDtOper : hdr.findIndex(h => h.includes('дата'));
-      const iIn = hdr.findIndex(h => h.match(/приход|поступлен|кредит/) && !h.includes('ост') && !h.includes('обор'));
-      const iOut = hdr.findIndex(h => h.match(/расход|списан|дебет/) && !h.includes('ост') && !h.includes('обор'));
-      const iSum = iSumRur >= 0 ? iSumRur : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц') || h.includes('сумма док'));
+      let added = 0, skip = 0, sumIn = 0, sumOut = 0;
+      const startRow = hdrIdx >= 0 ? (rows.at(hdrIdx + 1) && rows.at(hdrIdx + 1).join(' ').toLowerCase().includes('id-выписки') ? hdrIdx + 2 : hdrIdx + 1) : 0;
 
-      let added = 0, skip = 0, sumIn = 0, sumOut = 0, fileEndBal = 0;
-      const startRow = hdrIdx >= 0 ? (lines.at(hdrIdx + 1) && lines.at(hdrIdx + 1).toLowerCase().includes('id-выписки') ? hdrIdx + 2 : hdrIdx + 1) : 0;
-
-      lines.slice(startRow).forEach((l, idx) => {
-        const c = l.split(sep).map(x => x.replace(/^"|"$/g, '').trim());
-        const dtCell = (iDt >= 0 && /\d{2}\.\d{2}\.\d{4}/.test(c.at(iDt))) ? c.at(iDt) : c.find(x => /^\d{2}\.\d{2}\.\d{4}$/.test(x));
-        if (!dtCell) return;
-        const desc = iText >= 0 ? (c.at(iText) || c.join(' ')) : c.join(' ');
-        const low = (desc + ' ' + c.join(' ')).toLowerCase();
-        if (low.includes('входящий остаток') || low.includes('исходящий остаток') || low.includes('итого по')) return;
-        if (iEndBal >= 0 && num(c.at(iEndBal))) fileEndBal = num(c.at(iEndBal));
+      for (let idx = startRow; idx < rows.length; idx++) {
+        const c = rows.at(idx);
+        const lowFull = c.join(' ').toLowerCase();
+        if (lowFull.includes('выписка по счету с')) break;
+        const rawDt = (iDt >= 0 && /^(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})$/.test(c.at(iDt))) ? c.at(iDt) : c.find(x => /^(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})$/.test(x));
+        if (!rawDt) continue;
+        const dtCell = normDt(rawDt);
+        if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого по')) continue;
+        if (iEndCol >= 0 && num(c.at(iEndCol))) fileEndBal = num(c.at(iEndCol));
 
         let amt = 0;
         if (iDc >= 0 && iSum >= 0) {
-          const v = Math.abs(num(c.at(iSum)));
-          const dc = String(c.at(iDc) || '').toUpperCase();
+          const v = Math.abs(num(c.at(iSum))), dc = String(c.at(iDc) || '').toUpperCase();
           amt = dc === 'D' ? -v : (dc === 'C' ? v : 0);
         } else if (iIn >= 0 || iOut >= 0) {
-          const vIn = iIn >= 0 ? Math.abs(num(c.at(iIn))) : 0;
-          const vOut = iOut >= 0 ? Math.abs(num(c.at(iOut))) : 0;
+          const vIn = iIn >= 0 ? Math.abs(num(c.at(iIn))) : 0, vOut = iOut >= 0 ? Math.abs(num(c.at(iOut))) : 0;
           amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0);
         } else if (iSum >= 0) {
           amt = num(c.at(iSum));
@@ -276,26 +294,27 @@
           const nums = c.slice(1).map(x => ({ v: num(x), raw: x.replace(/\s+/g, '') })).filter(x => /^[+-]?\d+([.,]\d+)?$/.test(x.raw) && x.v !== 0);
           if (nums.length) amt = nums.at(-1).v;
         }
-        if (!amt) return;
+        if (!amt) continue;
 
+        const desc = iText >= 0 ? (c.at(iText) || c.join(' ')) : c.join(' ');
         const hash = walId + '_' + dtCell + '_' + amt + '_' + desc.slice(0, 40) + '_' + idx;
-        if (db.ddsHashes[hash]) { skip++; return; }
+        if (db.ddsHashes[hash]) { skip++; continue; }
         db.ddsHashes[hash] = true;
         if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
 
         let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
-        if (low.match(/вайлдберриз|wildberries/)) cat = 'Поступление от ВБ';
-        else if (low.match(/озон|интернет решения/)) cat = 'Поступление от Озон';
-        else if (low.match(/яндекс/)) cat = 'Поступление от ЯМ';
-        else if (low.match(/1с|мойсклад|битрикс|mpstats/)) cat = 'Программное обеспечение (1С / сервисы)';
-        else if (low.match(/фтс|тамож|свх/)) cat = 'Федеральная таможенная служба';
-        else if (low.match(/уфнс|енс|енп|единый налоговый|налог|взнос/)) cat = 'ЕНП';
-        else if (low.match(/комисс|обслуживан|рко|выдачу нал/)) cat = 'Комиссия РКО';
-        else if (low.match(/перевод|снятие по карте|снятие налич/)) cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
+        if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
+        else if (lowFull.match(/озон|интернет решения/)) cat = 'Поступление от Озон';
+        else if (lowFull.match(/яндекс|спичкин/)) cat = 'Поступление от ЯМ';
+        else if (lowFull.match(/1с|мойсклад|битрикс|mpstats|лицензион|подписк/)) cat = 'Программное обеспечение (1С / сервисы)';
+        else if (lowFull.match(/фтс|тамож|свх/)) cat = 'Федеральная таможенная служба';
+        else if (lowFull.match(/уфнс|енс|енп|единый налоговый|налог|взнос/)) cat = 'ЕНП';
+        else if (lowFull.match(/комисс|обслуживан|рко|выдачу нал/)) cat = 'Комиссия РКО';
+        else if (lowFull.match(/перевод|снятие по карте|выдача налич|сбп/)) cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
 
         db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dtCell, wal: walId, cat, amt, batchId, hash });
         added++;
-      });
+      }
 
       ev.target.value = '';
       if (typeof save === 'function') save();
