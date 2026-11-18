@@ -144,16 +144,18 @@
   };
 
   window.hookSkuAndExpenseUi = function () {
-    const impBtn = Array.from(document.querySelectorAll('button, label')).find(b => /импорт.*свод.*себест/i.test(b.textContent || ''));
+        const impBtn = Array.from(document.querySelectorAll('button, label')).find(b => /импорт.*свод.*себест/i.test(b.textContent || ''));
     if (impBtn && !impBtn.dataset.skosHooked) {
       impBtn.dataset.skosHooked = '1';
-      impBtn.addEventListener('click', function (ev) {
-        ev.preventDefault(); ev.stopPropagation();
-        const inp = document.createElement('input');
-        inp.type = 'file'; inp.accept = '.csv,.txt';
-        inp.onchange = () => { if (inp.files[0]) window.parseAnyCostCsv(inp.files[0]); };
-        inp.click();
-      }, true);
+      const innerInp = impBtn.querySelector('input[type="file"]');
+      if (innerInp) {
+        innerInp.removeAttribute('onchange');
+        innerInp.onchange = function (ev) {
+          ev.stopImmediatePropagation();
+          if (this.files && this.files[0]) window.parseAnyCostCsv(this.files[0]);
+          this.value = '';
+        };
+      }
       if (!document.getElementById('skos-tpl-dl-btn')) {
         const dl = document.createElement('button');
         dl.id = 'skos-tpl-dl-btn'; dl.type = 'button'; dl.textContent = '⬇ Шаблон CSV';
