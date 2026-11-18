@@ -1,7 +1,7 @@
 /* === SKOS Finance 3.0 — patch2.js (Папки + Карандаш ✏️ + Чистый CSV + РБП) === */
 (function () {
-  if (window.__skosPatch2V4) return;
-  window.__skosPatch2V4 = true;
+  if (window.__skosPatch2V5) return;
+  window.__skosPatch2V5 = true;
 
   function ensureCollections() {
     if (!window.db) return;
@@ -20,19 +20,38 @@
     return m ? m.at(0).toUpperCase().replace('SOKS-', 'SKOS-') : '';
   }
 
-  function detectCategory(name) {
-    const n = String(name || '').toLowerCase();
+  const customCatMap = new Map();
+
+  function detectCategory(name, askUser) {
+    const raw = String(name || '').trim();
+    const n = raw.toLowerCase();
     if (/брюк|штан/.test(n)) return '👖 Брюки и штаны';
     if (/рубаш|поло/.test(n)) return '👔 Рубашки';
     if (/костюм|флис/.test(n)) return '🧥 Костюмы';
     if (/свитер|худи|футболк|топик/.test(n)) return '👕 Свитеры, худи и футболки';
     if (/шапк/.test(n)) return '🧢 Шапки и аксессуары';
+    if (customCatMap.has(n)) return customCatMap.get(n);
+    if (askUser && raw && raw !== 'Без названия') {
+      const ans = prompt(
+        `Новый товар: «${raw}»\nВ какую папку его добавить?\n1 — 👖 Брюки и штаны\n2 — 👔 Рубашки\n3 — 🧥 Костюмы\n4 — 👕 Свитеры, худи и футболки\n5 — 🧢 Шапки и аксессуары\nИли напишите название новой папки:`,
+        '📦 Прочие товары'
+      );
+      const mapNum = { '1': '👖 Брюки и штаны', '2': '👔 Рубашки', '3': '🧥 Костюмы', '4': '👕 Свитеры, худи и футболки', '5': '🧢 Шапки и аксессуары' };
+      const chosen = mapNum[String(ans || '').trim()] || String(ans || '').trim() || '📦 Прочие товары';
+      customCatMap.set(n, chosen);
+      return chosen;
+    }
     return '📦 Прочие товары';
   }
 
   window.cleanBrokenSkuImport = function () {
     ensureCollections();
-    db.sku = db.sku.filter(s => Number(s.cost || s.costUsd || 0) < 500 && s.src !== 'Импорт Свода');
+    db.sku = db.sku.filter(s => {
+      const cost = Number(s.cost || s.costUsd || 0);
+      const nm = String(s.name || '');
+      const isGarbled = /Р[‘’‚Ѓ„…†‡€‰Љ‹ЊЌЋЏ]/.test(nm) || /С[‚ƒ„…†‡€‰Љ‹ЊЌЋЏ]/.test(nm) || /\uFFFD/.test(nm);
+      return cost > 0 && cost < 500 && s.src !== 'Импорт Свода' && !isGarbled;
+    });
   };
 
   window.parseAnyCostCsv = function (file) {
@@ -84,7 +103,7 @@
         if (!cost || isNaN(cost) || cost <= 0 || cost > 500) continue;
 
         const cleanName = String(rawNm).trim() || mCode || 'Без названия';
-        const cat = detectCategory(cleanName);
+        const cat = detectCategory(cleanName, true);
         const codes = String(rawBc).split(/[,;]+/).map(normBarcode).filter(x => x.length >= 2);
 
         codes.forEach(bc => {
