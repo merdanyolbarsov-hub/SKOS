@@ -1542,4 +1542,388 @@
     }
   };
 })();
+(function () {
+  function cleanUiAndAddFolderDelete() {
+    document.querySelectorAll('.skos-undo-btn, #skos-rep-undo, #skos-sku-undo').forEach(b => b.remove());
+
+    const wrap = document.getElementById('skos-folders-wrap');
+    if (!wrap) return;
+    wrap.querySelectorAll('summary button').forEach(btn => {
+      if (!(btn.textContent || '').includes('Папка')) return;
+      const box = btn.parentElement;
+      if (!box || box.querySelector('.skos-del-folder-btn')) return;
+
+      const m = (btn.getAttribute('onclick') || '').match(/openEditFolderModal\('([^']+)'\)/);
+      if (!m || !m) return;
+      const encKey = m;
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn btn-danger skos-del-folder-btn';
+      delBtn.style.cssText = 'padding:4px 8px;font-size:11.5px;margin-left:4px';
+      delBtn.title = 'Удалить всю папку';
+      delBtn.textContent = '✕';
+      delBtn.setAttribute('onclick', `event.stopPropagation(); deleteWholeFolder('${encKey}')`);
+      box.appendChild(delBtn);
+    });
+  }
+
+  function normS(v) { return String(v || '').replace(/^[\uFEFF\u200B]+/, '').trim(); }
+  function normK(v) { return String(v || '').toLowerCase().replace(/[\s\-_]+/g, '').trim(); }
+  function pNum(v) {
+    if (typeof v === 'number') return isFinite(v) ? v : 0;
+    const n = parseFloat(String(v || '0').replace(/\u00A0/g, '').replace(/\s+/g, '').replace(',', '.'));
+    return isFinite(n) ? n : 0;
+  }
+  function pCsvLine(line, sep) {
+    const res = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (ch === sep && !inQ) {
+        res.push(cur.trim()); cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    res.push(cur.trim());
+    return res;
+  }
+
+  function findSkuSmart(bcRaw, artRaw) {
+    const bc = normS(bcRaw), art = normS(artRaw);
+    const kBc = normK(bc), kArt = normK(art);
+    if (!kBc && !kArt) return null;
+    let f = (db.skus || []).find(s => normS(s.bc) === bc && bc !== '');
+    if (f) return f;
+    if (kBc) {
+      f = (db.skus || []).find(s => normK(s.bc) === kBc);
+      if (f) return f;
+      const noOzn = kBc.replace(/^ozn/, '');
+      f = (db.skus || []).find(s => normK(s.bc).replace(/^ozn/, '') === noOzn);
+      if (f) return f;
+    }
+    if (kArt) {
+      f = (db.skus || []).find(s => normK(s.bc) === kArt || normK(s.art) === kArt);
+      if (f) return f;
+    }
+    return null;
+  }
+
+  let currentDraft = null;
+  function parseAndShowDraft(file) {
+    const r = new FileReader();
+    r.onload = function (e) {
+      try {
+        const buf = e.target.result;
+        let text = new TextDecoder('utf-8').decode(buf);
+        if (text.includes('\uFFFD')) text = new TextDecoder('windows-1251').decode(buf);
+        text = text.replace(/^\uFEFF/, '');
+
+        const rawLines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+        if (rawLines.length < 2) return alert('Файл пустой или слишком короткий.');
+
+        const headSample = rawLines.slice(0, 20).join('\n').toLowerCase();
+        let det = document.getElementById('up-mp').value;
+        let hdrIdx = 0;
+
+        if (headSample.includes('обоснование для оплаты') || headSample.includes('вайлдберриз реализовал')) {
+          det = 'WB';
+          hdrIdx = rawLines.findIndex(l => l.toLowerCase().includes('обоснование для оплаты'));
+        } else if (headSample.includes('группа услуг') && headSample.includes('тип начисления')) {
+          det = 'OZON';
+          hdrIdx = rawLines.findIndex(l => l.toLowerCase().includes('группа услуг'));
+        } else if (headSample.includes('ваш sku') && headSample.includes('доставка покупателю')) {
+          det = 'YM_ORDERS';
+          hdrIdx = rawLines.findIndex(l => l.toLowerCase().includes('ваш sku') && l.toLowerCase().includes('название товара'));
+        } else if (headSample.includes('все услуги маркета за заказы') || headSample.includes('id бизнес-аккаунта')) {
+          det = 'YM_SERVICES';
+          hdrIdx = rawLines.findIndex(l => l.toLowerCase().includes('статус заказа') && l.toLowerCase().includes('цена продажи'));
+        } else {
+          hdrIdx = rawLines.findIndex(l => l.toLowerCase().match(/баркод|штрих|sku|артикул|выручка/));
+        }
+        if (hdrIdx < 0) hdrIdx = 0;
+
+        const sep = (rawLines[hdrIdx].split(';').length >= rawLines[hdrIdx].split(',').length) ? ';' : ',';
+        const headers = pCsvLine(rawLines[hdrIdx], sep);
+        const rows = rawLines.slice(hdrIdx + 1).map(l => pCsvLine(l, sep));
+
+        const col = (rxs) => {
+          for (const rx of rxs) {
+            const i = headers.findIndex(h => rx.test(h.toLowerCase()));
+            if (i >= 0) return i;
+          }
+          return -1;
+        };
+
+        let rev = 0, ret = 0, com = 0, log = 0, ads = 0, cogs = 0, sQty = 0, rQty = 0;
+        const itemMap = {}, missMap = {};
+        const yr = document.getElementById('up-yr').value;
+        const mo = document.getElementById('up-mo').value;
+        const org = document.getElementById('up-org').value;
+        const rate = typeof getRate === 'function' ? getRate(yr + '-' + mo) : 96.5;
+
+        const addIt = (bc, name, sq, rq, rSum, fSum) => {
+          const k = bc || name || 'UNKNOWN';
+          if (!itemMap[k]) itemMap[k] = { bc: k, name: name || k, sQty: 0, rQty: 0, rev: 0, fee: 0 };
+          itemMap[k].sQty += sq; itemMap[k].rQty += rq; itemMap[k].rev += rSum; itemMap[k].fee += fSum;
+        };
+        const addCogs = (bc, art, name, q, isRet) => {
+          const sku = findSkuSmart(bc, art);
+          if (sku && sku.usd > 0) {
+            const rub = sku.usd * rate * q;
+            if (isRet) cogs -= rub; else cogs += rub;
+          } else if (bc || art) {
+            const mk = bc || art;
+            if (!missMap[mk]) missMap[mk] = { bc: mk, name: name || art || bc, qty: 0 };
+            missMap[mk].qty += q;
+          }
+        };
+
+        if (det === 'WB') {
+          const iArt = col([/^артикул поставщика$/i]), iSiz = col([/^размер$/i]), iBc = col([/^баркод$/i]);
+          const iDoc = col([/^тип документа$/i]), iOb = col([/^обоснование для оплаты$/i]), iQty = col([/^кол-во$/i]);
+          const iPr = col([/вайлдберриз реализовал товар/i]), iPay = col([/к перечислению продавцу/i]);
+          const iLog = col([/услуги по доставке товара/i]), iFine = col([/общая сумма штрафов/i]);
+          const iStor = col([/^хранение$/i]), iDed = col([/^удержания$/i]);
+
+          rows.forEach(rw => {
+            if (rw.length < 5) return;
+            const doc = iDoc >= 0 ? (rw[iDoc] || '').toLowerCase() : '';
+            const ob = iOb >= 0 ? (rw[iOb] || '').toLowerCase() : '';
+            const art = iArt >= 0 ? rw[iArt] : '', siz = iSiz >= 0 ? rw[iSiz] : '', bc = iBc >= 0 ? rw[iBc] : '';
+            const artFull = (art + (siz && siz !== '0' ? siz : '')).trim();
+            const q = iQty >= 0 ? Math.abs(pNum(rw[iQty])) : 0;
+            const vPr = iPr >= 0 ? pNum(rw[iPr]) : 0, vPay = iPay >= 0 ? pNum(rw[iPay]) : 0;
+            const vLog = iLog >= 0 ? Math.abs(pNum(rw[iLog])) : 0;
+            const vFine = iFine >= 0 ? Math.abs(pNum(rw[iFine])) : 0;
+            const vStor = iStor >= 0 ? Math.abs(pNum(rw[iStor])) : 0;
+            const vDed = iDed >= 0 ? Math.abs(pNum(rw[iDed])) : 0;
+
+            log += vLog; ads += vFine + vDed; com += vStor;
+            if (doc === 'продажа' && ob === 'продажа') {
+              const vCom = Math.max(0, vPr - vPay);
+              rev += vPr; com += vCom; sQty += (q || 1);
+              addCogs(bc, artFull, art, (q || 1), false);
+              addIt(bc || artFull, artFull, (q || 1), 0, vPr, vCom + vLog + vFine + vDed);
+            } else if (doc === 'возврат' || ob === 'возврат') {
+              const vCom = Math.max(0, vPr - vPay);
+              ret += vPr; com -= vCom; rQty += (q || 1);
+              addCogs(bc, artFull, art, (q || 1), true);
+              addIt(bc || artFull, artFull, 0, (q || 1), -vPr, vLog - vCom);
+            } else if (bc || artFull) {
+              addIt(bc || artFull, artFull, 0, 0, 0, vLog + vFine + vStor + vDed);
+            }
+          });
+        } else if (det === 'OZON') {
+          const iGrp = col([/^группа услуг$/i]), iTyp = col([/^тип начисления$/i]);
+          const iArt = col([/^артикул$/i]), iSku = col([/^sku$/i]), iName = col([/^название товара$/i]);
+          const iQty = col([/^количество$/i]), iTot = col([/^сумма итого/i]);
+
+          rows.forEach(rw => {
+            if (rw.length < 5) return;
+            const grp = iGrp >= 0 ? (rw[iGrp] || '').toLowerCase() : '';
+            const typ = iTyp >= 0 ? (rw[iTyp] || '').toLowerCase() : '';
+            const art = iArt >= 0 ? rw[iArt] : '', sku = iSku >= 0 ? rw[iSku] : '';
+            const name = iName >= 0 ? rw[iName] : art;
+            const q = iQty >= 0 ? Math.abs(pNum(rw[iQty])) : 0;
+            const tot = iTot >= 0 ? pNum(rw[iTot]) : 0;
+            const bcKey = sku ? ('OZN' + sku) : art;
+
+            if (grp === 'продажи') {
+              if (typ === 'выручка') {
+                rev += tot; sQty += (q || 1);
+                addCogs(bcKey, art, name, (q || 1), false);
+                addIt(bcKey || art, art || name, (q || 1), 0, tot, 0);
+              } else if (typ.includes('баллы') || typ.includes('программы партн')) {
+                rev += tot; addIt(bcKey || art, art || name, 0, 0, tot, 0);
+              }
+            } else if (grp === 'возвраты') {
+              if (typ === 'возврат выручки') {
+                ret += Math.abs(tot); rQty += (q || 1);
+                addCogs(bcKey, art, name, (q || 1), true);
+                addIt(bcKey || art, art || name, 0, (q || 1), -Math.abs(tot), 0);
+              } else if (typ.includes('баллы') || typ.includes('программы партн')) {
+                ret += Math.abs(tot); addIt(bcKey || art, art || name, 0, 0, -Math.abs(tot), 0);
+              } else {
+                com += (-tot);
+              }
+            } else if (grp.includes('вознаграждение')) {
+              com += (-tot); if (bcKey || art) addIt(bcKey || art, art || name, 0, 0, 0, -tot);
+            } else if (grp.includes('услуги доставки') || grp.includes('услуги агентов')) {
+              log += (-tot); if (bcKey || art) addIt(bcKey || art, art || name, 0, 0, 0, -tot);
+            } else if (grp.includes('продвижение') || grp.includes('реклам')) {
+              ads += (-tot);
+            } else {
+              com += (-tot);
+            }
+          });
+        }
+        else if (det === 'YM_ORDERS') {
+          const iSku = col([/^ваш sku$/i]), iName = col([/^название товара$/i]);
+          const iSt = col([/^статус товара$/i]), iQty = col([/^количество/i]), iPrice = col([/^цена продажи/i]);
+          const payCols = [], balCols = [];
+          headers.forEach((h, idx) => {
+            if (h.toLowerCase() === 'сумма платежа') payCols.push(idx);
+            if (h.toLowerCase() === 'сумма баллов') balCols.push(idx);
+          });
+
+          rows.forEach(rw => {
+            if (rw.length < 8) return;
+            const sku = iSku >= 0 ? rw[iSku] : '', name = iName >= 0 ? rw[iName] : sku;
+            const st = iSt >= 0 ? (rw[iSt] || '').toLowerCase() : '';
+            const q = iQty >= 0 ? Math.abs(pNum(rw[iQty])) : 1;
+            const price = iPrice >= 0 ? pNum(rw[iPrice]) : 0;
+            const payIn = payCols.length > 0 ? pNum(rw[payCols[0]]) : 0;
+            const balIn = balCols.length > 0 ? pNum(rw[balCols[0]]) : 0;
+            const payOut = payCols.length > 1 ? Math.abs(pNum(rw[payCols[1]])) : 0;
+            const balOut = balCols.length > 1 ? Math.abs(pNum(rw[balCols[1]])) : 0;
+            if (!sku && !name) return;
+
+            if (st.includes('доставлен')) {
+              const sum = (payIn + balIn) > 0 ? (payIn + balIn) : (price * q);
+              rev += sum; sQty += q;
+              addCogs(sku, sku, name, q, false);
+              addIt(sku, name, q, 0, sum, 0);
+            } else if (st.includes('возврат')) {
+              const sum = (payOut + balOut) > 0 ? (payOut + balOut) : (price * q);
+              ret += sum; rQty += q;
+              addCogs(sku, sku, name, q, true);
+              addIt(sku, name, 0, q, -sum, 0);
+            }
+          });
+        } else if (det === 'YM_SERVICES') {
+          const iSt = col([/^статус заказа$/i]), iPrice = col([/^цена продажи/i]);
+          const iAllSrv = col([/^все услуги маркета за заказы/i]), iBoost = col([/^буст продаж/i]), iLog = col([/^доставка покупателю/i]);
+
+          rows.forEach(rw => {
+            if (rw.length < 6) return;
+            const st = iSt >= 0 ? (rw[iSt] || '').toLowerCase() : '';
+            const price = iPrice >= 0 ? pNum(rw[iPrice]) : 0;
+            const srv = iAllSrv >= 0 ? Math.abs(pNum(rw[iAllSrv])) : 0;
+            const bst = iBoost >= 0 ? Math.abs(pNum(rw[iBoost])) : 0;
+            const dlv = iLog >= 0 ? Math.abs(pNum(rw[iLog])) : 0;
+            if (st === 'доставлен') { rev += price; sQty += 1; }
+            else if (st.includes('полный возврат')) { ret += price; rQty += 1; }
+            ads += bst; log += dlv; com += Math.max(0, srv - bst - dlv);
+          });
+        }
+
+        const mpCode = det.startsWith('YM') ? 'YM' : det;
+        document.getElementById('up-mp').value = mpCode;
+        const labels = {
+          WB: 'Wildberries (Детализация)',
+          OZON: 'Ozon (Начисления)',
+          YM_ORDERS: 'Яндекс Маркет (Заказы и платежи по SKU)',
+          YM_SERVICES: 'Яндекс Маркет (Услуги и маржа по заказам)'
+        };
+
+        currentDraft = {
+          fileName: file.name, org, mp: mpCode, yr, mo,
+          detectedLabel: labels[det] || det,
+          rowsCount: rows.length,
+          rev: Math.max(0, rev - ret),
+          ret, com: Math.max(0, com), log: Math.max(0, log), ads: Math.max(0, ads), cogs: Math.max(0, cogs),
+          sQty, rQty,
+          bo: (sQty + rQty) > 0 ? Math.round((sQty / (sQty + rQty)) * 100) : 89,
+          items: Object.values(itemMap),
+          missing: Object.values(missMap)
+        };
+        drawDraftCard();
+      } catch (err) {
+        alert('Ошибка разбора файла: ' + err.message);
+      }
+    };
+    r.readAsArrayBuffer(file);
+  }
+
+  function drawDraftCard() {
+    const mapBox = document.getElementById('map-box');
+    if (!mapBox) return;
+    if (!currentDraft) { mapBox.classList.add('hidden'); mapBox.innerHTML = ''; return; }
+    const d = currentDraft;
+    const orgObj = (db.orgs || []).find(o => o.id === d.org);
+    const orgName = orgObj ? (orgObj.name + ' (' + orgObj.bank + ')') : d.org;
+    const profit = d.rev - d.com - d.log - d.ads - d.cogs;
+
+    const missHtml = d.missing.length
+      ? `<details style="margin-top:8px;background:#fffbeb;border:1px solid #fcd34d;padding:8px;border-radius:8px;">
+          <summary style="cursor:pointer;font-weight:700;color:#b45309;font-size:12px">⚠️ Не найдена себестоимость для ${d.missing.length} ШК/артикулов</summary>
+          <div style="max-height:130px;overflow-y:auto;margin-top:6px;font-size:11.5px;">
+            ${d.missing.map(m => `<div>• <b>${m.bc}</b> — ${m.name} (${m.qty} шт.)</div>`).join('')}
+          </div>
+        </details>`
+      : `<div style="margin-top:8px;font-size:12px;color:#059669;font-weight:600">✅ Все товары найдены в базе себестоимости!</div>`;
+
+    mapBox.classList.remove('hidden');
+    mapBox.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <div>
+          <span class="badge badge-amber">📝 ЧЕРНОВИК ОТЧЁТА</span>
+          <strong style="margin-left:6px;font-size:13px">${d.detectedLabel}</strong>
+          <span style="font-size:11.5px;color:#64748b"> • ${d.fileName} (${d.rowsCount} строк)</span>
+        </div>
+        <div style="font-size:12px;font-weight:700;color:#1e40af">${orgName} • ${d.mo}.${d.yr}</div>
+      </div>
+      <div class="kpi-grid" style="margin-bottom:8px">
+        <div class="kpi-card" style="padding:10px"><div style="font-size:11px;color:#64748b">Чистая выручка</div><div style="font-size:16px;font-weight:800">${fmtR(d.rev)}</div><div style="font-size:10.5px;color:#64748b">Выкуп: ${d.sQty} шт. (${d.bo}%)</div></div>
+        <div class="kpi-card" style="padding:10px"><div style="font-size:11px;color:#64748b">Возвраты</div><div style="font-size:16px;font-weight:800;color:#e11d48">${fmtR(d.ret)}</div><div style="font-size:10.5px;color:#64748b">${d.rQty} шт.</div></div>
+        <div class="kpi-card" style="padding:10px"><div style="font-size:11px;color:#64748b">Комиссия и услуги</div><div style="font-size:16px;font-weight:800">${fmtR(d.com)}</div></div>
+        <div class="kpi-card" style="padding:10px"><div style="font-size:11px;color:#64748b">Логистика</div><div style="font-size:16px;font-weight:800">${fmtR(d.log)}</div></div>
+        <div class="kpi-card" style="padding:10px"><div style="font-size:11px;color:#64748b">Реклама и штрафы</div><div style="font-size:16px;font-weight:800">${fmtR(d.ads)}</div></div>
+        <div class="kpi-card" style="padding:10px"><div style="font-size:11px;color:#64748b">Себестоимость</div><div style="font-size:16px;font-weight:800">${fmtR(d.cogs)}</div></div>
+        <div class="kpi-card highlight" style="padding:10px"><div style="font-size:11px;color:#1d4ed8">Расчётная прибыль</div><div style="font-size:16px;font-weight:800;color:${profit >= 0 ? '#059669' : '#e11d48'}">${fmtR(profit)}</div></div>
+      </div>
+      ${missHtml}
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn btn-primary" id="btn-commit-draft-2">✅ Утвердить, сохранить и удалить черновик</button>
+        <button type="button" class="btn btn-danger" id="btn-drop-draft-2">🗑️ Удалить черновик</button>
+      </div>
+    `;
+
+    document.getElementById('btn-commit-draft-2').onclick = function () {
+      if (!currentDraft) return;
+      const x = currentDraft;
+      if (db.locked && db.locked[x.yr + '-' + x.mo]) return alert('Этот месяц закрыт от изменений!');
+      db.reports.unshift({
+        id: 'r_' + Date.now(), org: x.org, mp: x.mp, yr: x.yr, mo: x.mo,
+        rev: x.rev, ret: x.ret, ads: x.ads, log: x.log, com: x.com, cogs: x.cogs, bo: x.bo, note: x.detectedLabel
+      });
+      x.items.forEach(it => {
+        db.itemSales.push({ org: x.org, mp: x.mp, yr: x.yr, mo: x.mo, bc: it.bc, sQty: it.sQty, rQty: it.rQty, rev: it.rev, fee: it.fee });
+      });
+      currentDraft = null;
+      drawDraftCard();
+      if (typeof save === 'function') save();
+      if (typeof syncCloud === 'function' && db.cloud && db.cloud.url) syncCloud(false);
+      if (typeof render === 'function') render();
+      alert('Отчёт учтён! Все данные сохранены, черновик удалён.');
+    };
+
+    document.getElementById('btn-drop-draft-2').onclick = function () {
+      currentDraft = null;
+      drawDraftCard();
+    };
+  }
+
+  window.onRepFile = function (ev) {
+    const f = ev && ev.target && ev.target.files && ev.target.files[0];
+    if (!f) return;
+    parseAndShowDraft(f);
+    ev.target.value = '';
+  };
+
+  setInterval(function () {
+    cleanUiAndAddFolderDelete();
+    const inp = document.getElementById('rep-file');
+    if (inp && !inp.dataset.skosBound) {
+      inp.dataset.skosBound = '1';
+      inp.onchange = window.onRepFile;
+    }
+  }, 350);
+  setTimeout(cleanUiAndAddFolderDelete, 150);
+})();
 
