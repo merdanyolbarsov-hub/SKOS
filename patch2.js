@@ -1320,4 +1320,226 @@
   setInterval(fixSkuTopBar, 400);
   setTimeout(fixSkuTopBar, 200);
 })();
+(function () {
+  function normStr(v) {
+    return String(v || '').replace(/^[\uFEFF\u200B]+/, '').trim();
+  }
+  function toNum(v) {
+    if (typeof v === 'number') return isFinite(v) ? v : 0;
+    const n = parseFloat(String(v || '0').replace(/\u00A0/g, '').replace(/\s+/g, '').replace(',', '.'));
+    return isFinite(n) ? n : 0;
+  }
+  function splitLine(line, sep) {
+    const res = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (ch === sep && !inQ) {
+        res.push(cur.trim()); cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    res.push(cur.trim());
+    return res;
+  }
+  function readFileAuto(file, cb) {
+    const r = new FileReader();
+    r.onload = function (e) {
+      const buf = e.target.result;
+      let txt = new TextDecoder('utf-8').decode(buf);
+      if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+      cb(txt.replace(/^\uFEFF/, ''));
+    };
+    r.readAsArrayBuffer(file);
+  }
+
+  // 1. Исправляем импорт себестоимости (CSV и онлайн-шаблон)
+  window.importCostCsv = function (ev) {
+    const f = ev && ev.target && ev.target.files && ev.target.files[0];
+    if (!f) return;
+    readFileAuto(f, function (text) {
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (!lines.length) return alert('Файл пустой!');
+      const sep = (lines[0].split(';').length >= lines[0].split(',').length) ? ';' : ',';
+      const head = splitLine(lines[0], sep).map(c => c.toLowerCase());
+
+      let iArt = head.findIndex(c => c.includes('артикул'));
+      let iBc = head.findIndex(c => c === 'шк' || c.includes('штрих') || c.includes('баркод') || c.includes('sku'));
+      let iName = head.findIndex(c => c.includes('название') || c.includes('наименование'));
+      let iUsd = head.findIndex(c => c.includes('себест') || c.includes('usd') || c.includes('цена'));
+
+      let startRow = 1;
+      if (iBc < 0 && iUsd < 0) {
+        startRow = 0;
+        iArt = 0; iBc = 1; iName = 2; iUsd = 3;
+      }
+
+      const rows = [];
+      let broken = 0;
+      for (let r = startRow; r < lines.length; r++) {
+        const c = splitLine(lines[r], sep);
+        const bc = normStr(iBc >= 0 ? c[iBc] : '');
+        if (!bc) continue;
+        if (/e\+/i.test(bc)) { broken++; continue; }
+        rows.push({
+          art: normStr(iArt >= 0 ? c[iArt] : ''),
+          bc: bc,
+          name: normStr(iName >= 0 ? c[iName] : ''),
+          usd: iUsd >= 0 ? toNum(c[iUsd]) : 0
+        });
+      }
+      if (broken > 0) {
+        alert('Пропущено ' + broken + ' строк с испорченным в Excel штрихкодом (вида E+12).');
+      }
+      if (!rows.length) return alert('Не найдено ни одной строки с ШК. Проверьте столбцы файла.');
+
+      // Убираем дубли внутри самого файла
+      const uniq = new Map();
+      rows.forEach(x => uniq.set(x.bc, x));
+      const cleanList = Array.from(uniq.values());
+
+      // Собираем существующие папки
+      let fNames = {};
+      try { fNames = JSON.parse(localStorage.getItem('skos_v3_folder_names') || '{}'); } catch (e) {}
+      const existingFolders = {};
+      (db.skus || []).forEach(s => {
+        const fk = normStr(s.art) || 'Без артикула';
+        if (!existingFolders[fk]) existingFolders[fk] = fNames[fk] || s.name || fk;
+      });
+
+      const ready = [];
+      const unknownMap = {};
+      cleanList.forEach(item => {
+        const ex = (db.skus || []).find(s => normStr(s.bc) === item.bc);
+        if (ex) {
+          ready.push({ ...item, targetArt: ex.art });
+          return;
+        }
+        if (item.art && existingFolders[item.art]) {
+          ready.push({ ...item, targetArt: item.art });
+          return;
+        }
+        if (!item.art && item.name) {
+          const match = Object.keys(existingFolders).find(k => existingFolders[k].toLowerCase() === item.name.toLowerCase());
+          if (match) {
+            ready.push({ ...item, targetArt: match });
+            return;
+          }
+        }
+        const gk = (item.art || 'НОВАЯ') + '||' + (item.name || 'Без названия');
+        if (!unknownMap[gk]) unknownMap[gk] = { art: item.art, name: item.name || item.art || 'Новый товар', items: [] };
+        unknownMap[gk].items.push(item);
+      });
+
+      const groups = Object.values(unknownMap);
+
+      const finishSave = (finalList) => {
+        try {
+          sessionStorage.setItem('skos_v3_undo_snap', JSON.stringify({
+            label: 'Импорт ' + f.name,
+            time: new Date().toLocaleTimeString('ru-RU'),
+            skus: JSON.parse(JSON.stringify(db.skus || [])),
+            reports: JSON.parse(JSON.stringify(db.reports || [])),
+            itemSales: JSON.parse(JSON.stringify(db.itemSales || []))
+          }));
+        } catch (e) {}
+
+        let added = 0, updated = 0;
+        finalList.forEach(it => {
+          const idx = db.skus.findIndex(s => normStr(s.bc) === it.bc);
+          if (idx >= 0) {
+            if (it.usd > 0) db.skus[idx].usd = it.usd;
+            if (it.name) db.skus[idx].name = it.name;
+            if (it.targetArt) db.skus[idx].art = it.targetArt;
+            db.skus[idx].isNew = (db.skus[idx].usd || 0) === 0;
+            updated++;
+          } else {
+            db.skus.push({
+              id: 's_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+              name: it.name || it.targetArt || 'Товар',
+              art: it.targetArt || 'Без артикула',
+              col: '—', siz: '—', bc: it.bc, usd: it.usd || 0,
+              src: f.name, isNew: (it.usd || 0) === 0
+            });
+            added++;
+          }
+        });
+        const seen = new Set();
+        db.skus = db.skus.filter(s => { const k = normStr(s.bc); if (!k || seen.has(k)) return false; seen.add(k); return true; });
+        if (typeof save === 'function') save();
+        if (typeof syncCloud === 'function' && db.cloud && db.cloud.url) syncCloud(false);
+        if (typeof render === 'function') render();
+        alert('Импорт выполнен!\n• Добавлено новых ШК: ' + added + '\n• Обновлено: ' + updated);
+      };
+
+      if (!groups.length) {
+        finishSave(ready);
+      } else {
+        const modal = document.createElement('div');
+        modal.className = 'modal-bg';
+        const opts = Object.keys(existingFolders).sort().map(k => `<option value="${k}">📁 ${k} — ${existingFolders[k]}</option>`).join('');
+        modal.innerHTML = `
+          <div class="modal-box" style="max-width:620px">
+            <h3 style="font-size:16px;font-weight:800;margin-bottom:8px">📁 Куда добавить новые товары?</h3>
+            <p style="font-size:12px;color:#475569;margin-bottom:10px">Уже совпало с папками: <b>${ready.length} ШК</b>. Для новых укажите папку:</p>
+            <div style="max-height:55vh;overflow-y:auto">
+              ${groups.map((g, i) => `
+                <div style="border:1px solid #cbd5e1;border-radius:9px;padding:10px;margin-bottom:8px;background:#f8fafc">
+                  <div style="font-weight:700;font-size:12.5px;margin-bottom:6px">${g.art ? g.art + ' — ' : ''}${g.name} <span class="badge badge-blue">${g.items.length} ШК</span></div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <select class="select g-mode" data-i="${i}" onchange="this.closest('div').querySelector('.g-new').classList.toggle('hidden',this.value!=='NEW');this.closest('div').querySelector('.g-ex').classList.toggle('hidden',this.value==='NEW')">
+                      <option value="NEW">➕ Создать новую папку</option>
+                      ${opts ? '<option value="EXIST">📥 Добавить в существующую папку</option>' : ''}
+                    </select>
+                    <input class="input g-new" data-i="${i}" value="${g.art || g.name}" placeholder="Название/код папки">
+                    <select class="select g-ex hidden" data-i="${i}">${opts}</select>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px">
+              <button class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button>
+              <button class="btn btn-primary" id="g-save-ok">✅ Сохранить по папкам</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+        document.getElementById('g-save-ok').onclick = function () {
+          const all = [...ready];
+          groups.forEach((g, i) => {
+            const m = modal.querySelector(`.g-mode[data-i="${i}"]`).value;
+            const art = m === 'NEW'
+              ? (normStr(modal.querySelector(`.g-new[data-i="${i}"]`).value) || g.name)
+              : modal.querySelector(`.g-ex[data-i="${i}"]`).value;
+            if (m === 'NEW') {
+              fNames[art] = g.name;
+              localStorage.setItem('skos_v3_folder_names', JSON.stringify(fNames));
+            }
+            g.items.forEach(it => all.push({ ...it, targetArt: art, name: it.name || existingFolders[art] || g.name }));
+          });
+          modal.remove();
+          finishSave(all);
+        };
+      }
+      if (ev.target) ev.target.value = '';
+    });
+  };
+
+  // 2. Исправляем выбор файла на вкладке Отчёты МП (чтобы точно брался files[0])
+  const origOnRep = window.onRepFile;
+  window.onRepFile = function (ev) {
+    if (ev && ev.target && ev.target.files && ev.target.files[0]) {
+      const fileObj = ev.target.files[0];
+      const proxyEv = { target: { files: fileObj, value: '' } };
+      if (typeof origOnRep === 'function') {
+        try { origOnRep(proxyEv); } catch (e) { alert('Ошибка чтения отчёта: ' + e.message); }
+      }
+      ev.target.value = '';
+    }
+  };
+})();
 
