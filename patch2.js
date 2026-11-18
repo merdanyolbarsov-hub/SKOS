@@ -1,7 +1,7 @@
-/* === SKOS Finance 3.0 — patch2.js (Полная финальная сборка) === */
+/* === SKOS Finance 3.0 — patch2.js (Папки + Карандаш ✏️ + Чистый CSV + РБП) === */
 (function () {
-  if (window.__skosPatch2V3) return;
-  window.__skosPatch2V3 = true;
+  if (window.__skosPatch2V4) return;
+  window.__skosPatch2V4 = true;
 
   function ensureCollections() {
     if (!window.db) return;
@@ -123,6 +123,34 @@
     if (typeof render === 'function') render();
   };
 
+  window.editModelMeta = function (modelKey, curArt, curName, curCat) {
+    const newArt = prompt('Артикул модели (например, SKOS-B):', curArt || '');
+    if (newArt === null) return;
+    const newName = prompt('Название модели:', curName || '');
+    if (newName === null) return;
+    const defCat = detectCategory(newName || curName);
+    const newCat = prompt('Папка (оставьте как есть или впишите свою):', curCat || defCat);
+    if (newCat === null) return;
+
+    const cleanArt = String(newArt).trim().toUpperCase();
+    const cleanName = String(newName).trim() || curName;
+    const cleanCat = String(newCat).trim() || detectCategory(cleanName);
+
+    db.sku.forEach(s => {
+      const key = (s.art || s.name || '').trim().toUpperCase();
+      if (key === modelKey) {
+        s.art = cleanArt;
+        s.name = cleanName;
+        s.cat = cleanCat;
+      }
+    });
+    if (typeof save === 'function') save();
+    if (typeof syncCloud === 'function') syncCloud();
+    const box = document.getElementById('skos-sku-folders');
+    if (box) box.dataset.sig = '';
+    if (typeof render === 'function') render();
+  };
+
   window.exportSkuTemplateCsv = function () {
     ensureCollections();
     const rows = ['Артикул продавца;ШК;Название;Себестоимость USD'];
@@ -135,14 +163,13 @@
     a.href = URL.createObjectURL(new Blob(['\uFEFF' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' }));
     a.download = 'SKOS_shablon_sebestoimost.csv'; a.click();
   };
-
   window.renderSkuFoldersTree = function () {
     const skuTable = Array.from(document.querySelectorAll('table')).find(t => /себест\.\s*\(\$\)/i.test(t.textContent || ''));
     if (!skuTable) return;
     skuTable.style.display = 'none';
     let box = document.getElementById('skos-sku-folders');
     const rate = typeof getRate === 'function' ? getRate() : 88;
-    const sig = db.sku.length + '_' + rate;
+    const sig = db.sku.length + '_' + rate + '_' + (db.sku.at(0)?.name || '');
     if (box && box.dataset.sig === sig) return;
     if (!box) { box = document.createElement('div'); box.id = 'skos-sku-folders'; box.style.marginTop = '12px'; skuTable.parentElement.insertBefore(box, skuTable); }
     const cats = new Map();
@@ -151,7 +178,7 @@
       if (!cats.has(cat)) cats.set(cat, new Map());
       const mKey = (s.art || s.name || 'БЕЗ АРТИКУЛА').trim().toUpperCase();
       const mMap = cats.get(cat);
-      if (!mMap.has(mKey)) mMap.set(mKey, { key: mKey, art: s.art || '', name: s.name || mKey, cost: Number(s.costUsd || s.cost || 0), list: [] });
+      if (!mMap.has(mKey)) mMap.set(mKey, { key: mKey, art: s.art || '', name: s.name || mKey, cat: cat, cost: Number(s.costUsd || s.cost || 0), list: [] });
       mMap.get(mKey).list.push(s);
     });
     if (!cats.size) { box.innerHTML = '<div style="padding:14px;color:#64748b;">Справочник пуст — нажмите «📥 Импорт Свод себестоимости (CSV)».</div>'; return; }
@@ -164,13 +191,15 @@
         </summary><div style="padding:6px 12px;">`;
       mMap.forEach(m => {
         const rub = Math.round(m.cost * rate);
+        const esc = v => String(v || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
         const bcPreview = m.list.slice(0, 60).map(x => `<span style="display:inline-block;margin:2px;padding:2px 6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-family:monospace;font-size:11px;color:#334155;">${x.barcode || x.shk}</span>`).join('');
         html += `<details style="border-bottom:1px solid #f1f5f9;padding:6px 0;color:#1e293b;">
-          <summary style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;">
+          <summary style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
             <b style="min-width:95px;color:#0f172a;">${m.art || '—'}</b>
             <span style="flex:1;">${m.name}</span>
-            <span style="color:#64748b;font-size:12px;">${m.list.length} ШК</span>
-            <input type="number" step="0.01" value="${m.cost}" onclick="event.stopPropagation()" onchange="window.updateModelCostUsd('${m.key.replace(/'/g, '')}', this.value)" style="width:72px;padding:3px 6px;border:1px solid #94a3b8;border-radius:4px;text-align:right;font-weight:600;color:#0f172a;background:#fff;"> $
+            <button type="button" title="Редактировать артикул, название и папку" onclick="event.stopPropagation();window.editModelMeta('${esc(m.key)}','${esc(m.art)}','${esc(m.name)}','${esc(m.cat)}')" style="padding:2px 7px;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;cursor:pointer;font-size:12px;">✏️</button>
+            <span style="color:#64748b;font-size:12px;min-width:65px;text-align:right;">${m.list.length} ШК</span>
+            <input type="number" step="0.01" value="${m.cost}" onclick="event.stopPropagation()" onchange="window.updateModelCostUsd('${esc(m.key)}', this.value)" style="width:72px;padding:3px 6px;border:1px solid #94a3b8;border-radius:4px;text-align:right;font-weight:600;color:#0f172a;background:#fff;"> $
             <span style="min-width:75px;text-align:right;color:#0f172a;font-weight:600;">${rub} ₽</span>
           </summary><div style="padding:8px 0 4px 12px;">${bcPreview}${m.list.length > 60 ? `<span style="font-size:11px;color:#64748b;"> ...и ещё ${m.list.length - 60} ШК</span>` : ''}</div>
         </details>`;
