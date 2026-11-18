@@ -84,7 +84,7 @@
         });
       };
 
-      if (wideCostIdx >= 2) {
+        for (let c = 2; c < wideCostIdx; c++) upsert(cols[c], cols[0], cols[1] || cols[0], cost);
         for (let i = 1; i < lines.length; i++) {
           const cols = splitCsv(lines[i]);
           const cost = parseFloat(String(cols[wideCostIdx] || '').replace(/\s/g, '').replace(',', '.'));
@@ -206,7 +206,7 @@
       cleanBtn.textContent = '📥 Импорт «Свод себестоимости» (CSV)';
       cleanBtn.onclick = function () {
         const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.csv,.txt';
-        inp.onchange = function () { if (this.files && this.files) window.parseAnyCostCsv(this.files); };
+        inp.onchange = function () { if (this.files && this.files[0]) window.parseAnyCostCsv(this.files[0]); };
         inp.click();
       };
       impBtn.replaceWith(cleanBtn);
