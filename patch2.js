@@ -1,4 +1,4 @@
-/* === SKOS Finance 3.0 — patch2.js (Папки по моделям + Чистый импорт CSV + РБП) === */
+/* === SKOS Finance 3.0 — patch2.js (Полная чистая сборка) === */
 (function () {
   if (window.__skosPatch2Loaded) return;
   window.__skosPatch2Loaded = true;
@@ -20,6 +20,16 @@
     return m ? m.toUpperCase() : '';
   }
 
+  function detectCategory(name) {
+    const n = String(name || '').toLowerCase();
+    if (/брюк|штан/.test(n)) return '👖 Брюки и штаны';
+    if (/рубаш|поло/.test(n)) return '👔 Рубашки';
+    if (/костюм|флис/.test(n)) return '🧥 Костюмы';
+    if (/свитер|худи|футболк|топик/.test(n)) return '👕 Свитеры, худи и футболки';
+    if (/шапк/.test(n)) return '🧢 Шапки и аксессуары';
+    return '📦 Прочие товары';
+  }
+
   window.cleanBrokenSkuImport = function () {
     ensureCollections();
     db.sku = db.sku.filter(s => Number(s.cost || s.costUsd || 0) < 500 && s.src !== 'Импорт Свода');
@@ -37,16 +47,6 @@
     }
     return 0;
   };
-  function detectCategory(name) {
-    const n = String(name || '').toLowerCase();
-    if (/брюк|штан/.test(n)) return '👖 Брюки и штаны';
-    if (/рубаш|поло/.test(n)) return '👔 Рубашки';
-    if (/костюм|флис/.test(n)) return '🧥 Костюмы';
-    if (/свитер|худи|футболк|топик/.test(n)) return '👕 Свитеры, худи и футболки';
-    if (/шапк/.test(n)) return '🧢 Шапки и аксессуары';
-    return '📦 Прочие товары';
-  }
-
   window.parseAnyCostCsv = function (file) {
     if (!file) return;
     const reader = new FileReader();
@@ -54,14 +54,13 @@
       let text = new TextDecoder('utf-8').decode(e.target.result);
       if (text.includes('')) text = new TextDecoder('windows-1251').decode(e.target.result);
       const lines = text.split(/\r?\n/).filter(l => l.trim());
-      if (lines.length < 2) return;
-      const sep = lines[0].includes(';') && !lines[0].includes(',') ? ';' : ',';
+      if (lines.length < 2) return alert('Файл пустой');
+      const firstLine = lines.at(0);
+      const sep = firstLine.includes(';') && !firstLine.includes(',') ? ';' : ',';
       const splitCsv = l => {
         const out = []; let cur = '', q = false;
         for (let ch of l) { if (ch === '"') q = !q; else if (ch === sep && !q) { out.push(cur.trim()); cur = ''; } else cur += ch; }
-        out.push(cur.trim()); return out;
-      };
-      const head = splitCsv(lines[0]);
+      const head = splitCsv(firstLine);
       const wideCostIdx = head.findIndex(h => /итого себестоимость/i.test(h));
       ensureCollections();
       window.cleanBrokenSkuImport();
@@ -84,13 +83,13 @@
         });
       };
 
-        for (let c = 2; c < wideCostIdx; c++) upsert(cols[c], cols[0], cols[1] || cols[0], cost);
+      if (wideCostIdx >= 2) {
         for (let i = 1; i < lines.length; i++) {
-          const cols = splitCsv(lines[i]);
-          const cost = parseFloat(String(cols[wideCostIdx] || '').replace(/\s/g, '').replace(',', '.'));
-          const mCode = extractModelCode(cols[0]) || extractModelCode(cols[1]);
-          const cleanName = cols[1] || cols[0] || '';
-          for (let c = 2; c < wideCostIdx; c++) upsert(cols[c], mCode, cleanName, cost);
+          const cols = splitCsv(lines.at(i));
+          const cost = parseFloat(String(cols.at(wideCostIdx) || '').replace(/\s/g, '').replace(',', '.'));
+          const mCode = extractModelCode(cols.at(0)) || extractModelCode(cols.at(1));
+          const cleanName = cols.at(1) || cols.at(0) || '';
+          for (let c = 2; c < wideCostIdx; c++) upsert(cols.at(c), mCode, cleanName, cost);
         }
       } else {
         const iArt = head.findIndex(h => /артикул|art|модел/i.test(h));
@@ -98,15 +97,15 @@
         const iNm = head.findIndex(h => /назв|наим|товар|name/i.test(h));
         const iCost = head.findIndex(h => /себест|cost|usd|цена|\$/i.test(h));
         for (let i = 1; i < lines.length; i++) {
-          const cols = splitCsv(lines[i]);
-          const cost = iCost >= 0 ? parseFloat(String(cols[iCost] || '').replace(/\s/g, '').replace(',', '.')) : 0;
-          upsert(cols[iBc >= 0 ? iBc : 1], cols[iArt >= 0 ? iArt : 0], cols[iNm >= 0 ? iNm : 2], cost);
+          const cols = splitCsv(lines.at(i));
+          const cost = iCost >= 0 ? parseFloat(String(cols.at(iCost) || '').replace(/\s/g, '').replace(',', '.')) : 0;
+          upsert(cols.at(iBc >= 0 ? iBc : 1), cols.at(iArt >= 0 ? iArt : 0), cols.at(iNm >= 0 ? iNm : 2), cost);
         }
       }
       if (typeof save === 'function') save();
       if (typeof syncCloud === 'function') syncCloud();
       if (typeof render === 'function') render();
-      alert(`Готово! Загружено новых ШК: ${added}, обновлено: ${updated}.\nВсего уникальных ШК: ${db.sku.length}`);
+      alert(`Готово! Добавлено ШК: ${added}, обновлено: ${updated}.\nВсего уникальных ШК в базе: ${db.sku.length}`);
     };
     reader.readAsArrayBuffer(file);
   };
@@ -141,7 +140,7 @@
     skuTable.style.display = 'none';
     let box = document.getElementById('skos-sku-folders');
     if (!box) { box = document.createElement('div'); box.id = 'skos-sku-folders'; box.style.marginTop = '12px'; skuTable.parentElement.insertBefore(box, skuTable); }
-    const rate = typeof getRate === 'function' ? getRate() : 96;
+    const rate = typeof getRate === 'function' ? getRate() : 88;
     const cats = new Map();
     db.sku.forEach(s => {
       const cat = s.cat || detectCategory(s.name);
@@ -151,7 +150,7 @@
       if (!mMap.has(mKey)) mMap.set(mKey, { key: mKey, art: s.art || '', name: s.name || mKey, cost: Number(s.costUsd || s.cost || 0), list: [] });
       mMap.get(mKey).list.push(s);
     });
-    if (!cats.size) { box.innerHTML = '<div style="padding:14px;color:#64748b;">Справочник пуст — загрузите CSV себестоимости.</div>'; return; }
+    if (!cats.size) { box.innerHTML = '<div style="padding:14px;color:#64748b;">Справочник пуст — нажмите «Импорт Свод себестоимости (CSV)».</div>'; return; }
     let html = '';
     cats.forEach((mMap, catName) => {
       let totalBc = 0; mMap.forEach(m => totalBc += m.list.length);
@@ -183,7 +182,7 @@
     const total = parseFloat(String(totalAmt || '').replace(/\s/g, '').replace(',', '.'));
     if (!total || total <= 0) return false;
     const p = String(dateStr || '01.01.2026').split('.');
-    let day = parseInt(p, 10) || 1, mo = parseInt(p, 10) || 1, yr = parseInt(p, 10) || 2026;
+    let day = parseInt(p.at(0), 10) || 1, mo = parseInt(p.at(1), 10) || 1, yr = parseInt(p.at(2), 10) || 2026;
     const partAmt = Math.round((total / n) * 100) / 100, batchId = 'spr_' + Date.now();
     for (let i = 0; i < n; i++) {
       const m = ((mo - 1 + i) % 12) + 1, y = yr + Math.floor((mo - 1 + i) / 12);
@@ -206,7 +205,7 @@
       cleanBtn.textContent = '📥 Импорт «Свод себестоимости» (CSV)';
       cleanBtn.onclick = function () {
         const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.csv,.txt';
-        inp.onchange = function () { if (this.files && this.files[0]) window.parseAnyCostCsv(this.files[0]); };
+        inp.onchange = function () { const f = this.files && this.files.item(0); if (f) window.parseAnyCostCsv(f); };
         inp.click();
       };
       impBtn.replaceWith(cleanBtn);
