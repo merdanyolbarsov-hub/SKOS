@@ -144,18 +144,30 @@
   };
 
   window.hookSkuAndExpenseUi = function () {
-        const impBtn = Array.from(document.querySelectorAll('button, label')).find(b => /импорт.*свод.*себест/i.test(b.textContent || ''));
-    if (impBtn && !impBtn.dataset.skosHooked) {
-      impBtn.dataset.skosHooked = '1';
-      const innerInp = impBtn.querySelector('input[type="file"]');
-      if (innerInp) {
-        innerInp.removeAttribute('onchange');
-        innerInp.onchange = function (ev) {
-          ev.stopImmediatePropagation();
-          if (this.files && this.files[0]) window.parseAnyCostCsv(this.files[0]);
-          this.value = '';
-        };
+      const impBtn = Array.from(document.querySelectorAll('button, label')).find(b => /импорт.*свод.*себест/i.test(b.textContent || ''));
+    if (impBtn && !impBtn.dataset.skosReplaced) {
+      const cleanBtn = document.createElement('button');
+      cleanBtn.type = 'button';
+      cleanBtn.dataset.skosReplaced = '1';
+      cleanBtn.className = impBtn.className;
+      cleanBtn.style.cssText = impBtn.style.cssText + ';cursor:pointer;';
+      cleanBtn.textContent = '📥 Импорт «Свод себестоимости» (CSV)';
+      cleanBtn.onclick = function () {
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        inp.accept = '.csv,.txt';
+        inp.onchange = function () { if (this.files && this.files) window.parseAnyCostCsv(this.files); };
+        inp.click();
+      };
+      impBtn.replaceWith(cleanBtn);
+      if (!document.getElementById('skos-tpl-dl-btn')) {
+        const dl = document.createElement('button');
+        dl.id = 'skos-tpl-dl-btn'; dl.type = 'button'; dl.textContent = '⬇ Шаблон CSV';
+        dl.style.cssText = 'margin-left:6px;padding:6px 10px;background:#0f172a;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;';
+        dl.onclick = window.exportSkuTemplateCsv;
+        cleanBtn.parentElement.insertBefore(dl, cleanBtn.nextSibling);
       }
+    }
       if (!document.getElementById('skos-tpl-dl-btn')) {
         const dl = document.createElement('button');
         dl.id = 'skos-tpl-dl-btn'; dl.type = 'button'; dl.textContent = '⬇ Шаблон CSV';
