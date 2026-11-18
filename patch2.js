@@ -1926,4 +1926,125 @@
   }, 350);
   setTimeout(cleanUiAndAddFolderDelete, 150);
 })();
+(function () {
+  // 1. Скрываем через CSS любые старые кнопки «Отменить» и блок Google Таблицы мгновенно (без мелькания)
+  const st = document.createElement('style');
+  st.textContent = '.skos-undo-btn, #skos-rep-undo, #skos-sku-undo, #skos-tpl-btn { display: none !important; }';
+  document.head.appendChild(st);
+
+  // 2. Умный поиск себестоимости: 13/14-значный GTIN (с нулём спереди), Ozon ID, и авто-подхват по коду папки (SKOS-...)
+  window.findSkuSmartGlobal = function (bcRaw, artRaw, nameRaw) {
+    const clean = v => String(v || '').replace(/^[\uFEFF\u200B]+/, '').trim();
+    const key = v => clean(v).toLowerCase().replace(/[\s\-_]+/g, '');
+    const stripZeros = v => v.replace(/^0+/, '');
+
+    const bc = clean(bcRaw), art = clean(artRaw), name = clean(nameRaw);
+    const kBc = key(bc), kArt = key(art);
+    const list = window.db && Array.isArray(db.skus) ? db.skus : [];
+    if (!list.length) return null;
+
+    // Шаг 1: Точное совпадение по ШК
+    if (bc) {
+      let f = list.find(s => clean(s.bc) === bc);
+      if (f && f.usd > 0) return f;
+    }
+
+    // Шаг 2: Совпадение по GTIN без ведущих нулей (04680712809212 == 4680712809212) и OZN ID (861358069 == OZN861358069)
+    if (kBc) {
+      const bcNoZero = stripZeros(kBc.replace(/^ozn/, ''));
+      let f = list.find(s => {
+        const sBc = stripZeros(key(s.bc).replace(/^ozn/, ''));
+        return sBc && sBc === bcNoZero && s.usd > 0;
+      });
+      if (f) return f;
+    }
+
+    // Шаг 3: Совпадение по артикулу
+    if (kArt) {
+      let f = list.find(s => (key(s.bc) === kArt || key(s.art) === kArt) && s.usd > 0);
+      if (f) return f;
+    }
+
+    // Шаг 4: Вытаскиваем код модели SKOS-... из артикула или названия (например "skos-kcyk черный" -> "SKOS-KCYK")
+    const combo = (art + ' ' + name + ' ' + bc).toUpperCase();
+    const modelMatch = combo.match(/\b(SKOS-[A-ZА-Я0-9]+)\b/);
+    if (modelMatch) {
+      const modelCode = modelMatch;
+      let f = list.find(s => clean(s.art).toUpperCase() === modelCode && s.usd > 0);
+      if (f) return f;
+    }
+
+    return null;
+  };
+
+  // Переопределяем разбор отчёта так, чтобы он использовал findSkuSmartGlobal (GTIN + Ozon ID + код папки SKOS-...)
+  const origOnRep = window.onRepFile;
+  window.onRepFile = function (ev) {
+    const f = ev && ev.target && ev.target.files && ev.target.files;
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = function (e) {
+      const buf = e.target.result;
+      let text = new TextDecoder('utf-8').decode(buf);
+      if (text.includes('\uFFFD')) text = new TextDecoder('windows-1251').decode(buf);
+      text = text.replace(/^\uFEFF/, '');
+
+      // Вызываем стандартный разбор через оригинальный обработчик, а затем пересчитываем себестоимость по умному поиску
+      if (typeof origOnRep === 'function') {
+        origOnRep({ target: { files: [f], value: '' } });
+      }
+      setTimeout(function () {
+        const box = document.getElementById('map-box');
+        if (!box || box.classList.contains('hidden')) return;
+        // Дополнительно проверяем список ненайденных — если findSkuSmartGlobal их находит, пересчитываем!
+        const yr = document.getElementById('up-yr').value;
+        const mo = document.getElementById('up-mo').value;
+        const rate = typeof getRate === 'function' ? getRate(yr + '-' + mo) : 96.5;
+
+        const missDivs = box.querySelectorAll('details div div');
+        if (!missDivs.length) return;
+
+        let recoveredRub = 0;
+        let stillMissing = [];
+        missDivs.forEach(div => {
+          const txt = div.textContent || '';
+          const m = txt.match(/•\s*([^\s—]+)\s*—\s*(.+?)\s*\((\d+)\s*шт\.\)/);
+          if (!m) return;
+          const bc = m, name = m, qty = parseInt(m, 10) || 1;
+          const found = window.findSkuSmartGlobal(bc, name, name);
+          if (found && found.usd > 0) {
+            recoveredRub += found.usd * rate * qty;
+          } else {
+            stillMissing.push(div.outerHTML);
+          }
+        });
+
+        if (recoveredRub > 0) {
+          // Обновляем отображаемую себестоимость и прибыль в черновике
+          const cards = box.querySelectorAll('.kpi-card');
+          if (cards.length >= 7) {
+            const curCogs = parseFloat((cards.children.textContent || '0').replace(/[^\d.-]/g, '')) || 0;
+            const curProf = parseFloat((cards.children.textContent || '0').replace(/[^\d.-]/g, '')) || 0;
+            const newCogs = Math.round(curCogs + recoveredRub);
+            const newProf = Math.round(curProf - recoveredRub);
+            cards.children.textContent = fmtR(newCogs);
+            cards.children.textContent = fmtR(newProf);
+            cards.children.style.color = newProf >= 0 ? '#059669' : '#e11d48';
+          }
+          const detEl = box.querySelector('details');
+          if (detEl) {
+            if (!stillMissing.length) {
+              detEl.outerHTML = '<div style="margin-top:8px;font-size:12px;color:#059669;font-weight:600">✅ Все товары автоматически распознаны по GTIN / ID / коду модели!</div>';
+            } else {
+              detEl.querySelector('summary').textContent = '⚠️ Не найдена себестоимость для ' + stillMissing.length + ' ШК/артикулов';
+              detEl.querySelector('div').innerHTML = stillMissing.join('');
+            }
+          }
+        }
+      }, 120);
+    };
+    r.readAsArrayBuffer(f);
+    ev.target.value = '';
+  };
+})();
 
