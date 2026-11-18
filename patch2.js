@@ -1178,4 +1178,146 @@
     if (window.db && db.tab === 'sku') renderSkuFolders();
   }, 150);
 })();
+(function () {
+  function fixSkuTopBar() {
+    const skuCard = document.querySelector('#tab-sku .card');
+    if (!skuCard) return;
+
+    // 1. Убираем старую кнопку Шаблон из левого заголовка и убираем строку Google Таблицы
+    const oldTpl = document.getElementById('skos-tpl-btn');
+    if (oldTpl) oldTpl.remove();
+
+    const gsInp = document.getElementById('skos-gsheet-url');
+    if (gsInp && gsInp.parentElement) gsInp.parentElement.remove();
+
+    // 2. Ставим кнопку «📄 Шаблон» строго МЕЖДУ «Импорт» и «Убрать дубли»
+    const header = skuCard.querySelector('.card-header');
+    if (!header) return;
+    const rightBar = header.children[1];
+    if (!rightBar || document.getElementById('skos-tpl-mid-btn')) return;
+
+    const dedupBtn = Array.from(rightBar.children).find(el => (el.textContent || '').includes('Убрать дубли'));
+
+    const tplBtn = document.createElement('button');
+    tplBtn.id = 'skos-tpl-mid-btn';
+    tplBtn.type = 'button';
+    tplBtn.className = 'btn btn-primary';
+    tplBtn.textContent = '📄 Шаблон';
+    tplBtn.title = 'Открыть онлайн-таблицу для быстрого добавления новых ШК или скачать CSV-шаблон';
+    tplBtn.onclick = window.openOnlineSkuTemplate;
+
+    if (dedupBtn) {
+      rightBar.insertBefore(tplBtn, dedupBtn);
+    } else {
+      rightBar.appendChild(tplBtn);
+    }
+  }
+
+  // 3. Онлайн-редактор шаблона (можно заполнить прямо здесь или скачать CSV)
+  window.openOnlineSkuTemplate = function () {
+    let modal = document.getElementById('skos-online-tpl-modal');
+    if (modal) modal.remove();
+
+    const fKeys = [...new Set((db.skus || []).map(x => String(x.art || '').trim()).filter(Boolean))].sort();
+    const dlHtml = `<datalist id="skos-tpl-arts">${fKeys.map(k => `<option value="${k}">`).join('')}</datalist>`;
+
+    const makeRow = (art = '', bc = '', name = '', usd = '') => `
+      <tr>
+        <td><input type="text" class="input tpl-art" list="skos-tpl-arts" value="${art}" placeholder="Например: SKOS-B"></td>
+        <td><input type="text" class="input tpl-bc" value="${bc}" placeholder="ШК / Баркод / SKU" style="font-family:monospace"></td>
+        <td><input type="text" class="input tpl-name" value="${name}" placeholder="Название (необяз.)"></td>
+        <td><input type="number" step="0.01" class="input tpl-usd" value="${usd}" placeholder="6.60" style="text-align:right"></td>
+        <td style="text-align:center"><button type="button" class="btn btn-danger" onclick="this.closest('tr').remove()">✕</button></td>
+      </tr>
+    `;
+
+    modal = document.createElement('div');
+    modal.id = 'skos-online-tpl-modal';
+    modal.className = 'modal-bg';
+    modal.innerHTML = `
+      ${dlHtml}
+      <div class="modal-box" style="max-width:780px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="font-size:16px;font-weight:800">📄 Шаблон добавления новых товаров и себестоимости</h3>
+          <button type="button" class="btn" onclick="document.getElementById('skos-online-tpl-modal').remove()">✕</button>
+        </div>
+        <p style="font-size:12px;color:#475569;margin-bottom:10px">
+          Заполните строки прямо здесь (можно вставлять скопированные столбцы из Excel/таблицы) и нажмите <b>«Сохранить в базу»</b> — программа сама разложит по папкам и проверит дубли.
+        </p>
+        <div style="max-height:52vh;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:22%">Артикул (Папка)</th>
+                <th style="width:28%">ШК / Баркод *</th>
+                <th style="width:30%">Название товара</th>
+                <th style="width:14%" class="num">Себест. $</th>
+                <th style="width:6%"></th>
+              </tr>
+            </thead>
+            <tbody id="skos-tpl-tbody">
+              ${makeRow()}${makeRow()}${makeRow()}${makeRow()}${makeRow()}
+            </tbody>
+          </table>
+        </div>
+        <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button type="button" class="btn" id="skos-tpl-add-row">+ Добавить строку</button>
+            <button type="button" class="btn" onclick="downloadSkuTemplateCsv()">⬇️ Скачать файл шаблона (CSV)</button>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button type="button" class="btn" onclick="document.getElementById('skos-online-tpl-modal').remove()">Отмена</button>
+            <button type="button" class="btn btn-primary" id="skos-tpl-save-btn">✅ Сохранить в базу (по папкам)</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    const tbody = document.getElementById('skos-tpl-tbody');
+
+    // Поддержка вставки (Ctrl+V) сразу нескольких строк из Excel/Google Таблицы
+    tbody.addEventListener('paste', function (e) {
+      const text = (e.clipboardData || window.clipboardData).getData('text');
+      if (!text || (!text.includes('\t') && !text.includes('\n'))) return;
+      e.preventDefault();
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      lines.forEach((line, idx) => {
+        const cols = line.split('\t').map(c => c.trim());
+        const tr = document.createElement('tr');
+        tr.innerHTML = makeRow(cols[0] || '', cols[1] || '', cols[2] || '', (cols[3] || '').replace(',', '.')).replace(/^<tr>|<\/tr>$/g, '');
+        if (idx === 0 && e.target && e.target.closest('tr')) {
+          e.target.closest('tr').replaceWith(tr);
+        } else {
+          tbody.appendChild(tr);
+        }
+      });
+    });
+
+    document.getElementById('skos-tpl-add-row').onclick = function () {
+      const tr = document.createElement('tr');
+      tr.innerHTML = makeRow().replace(/^<tr>|<\/tr>$/g, '');
+      tbody.appendChild(tr);
+    };
+
+    document.getElementById('skos-tpl-save-btn').onclick = function () {
+      const lines = ['Артикул продавца;ШК;Название;Себестоимость USD'];
+      tbody.querySelectorAll('tr').forEach(tr => {
+        const art = tr.querySelector('.tpl-art').value.trim();
+        const bc = tr.querySelector('.tpl-bc').value.trim();
+        const name = tr.querySelector('.tpl-name').value.trim();
+        const usd = tr.querySelector('.tpl-usd').value.trim();
+        if (bc) lines.push(`${art};${bc};${name};${usd}`);
+      });
+      if (lines.length <= 1) return alert('Заполните хотя бы один ШК!');
+      modal.remove();
+      // Передаём собранные строки в наш стандартный импортёр с проверкой дублей и выбором папки
+      const fakeFile = new File([lines.join('\r\n')], 'Онлайн-шаблон.csv', { type: 'text/csv' });
+      window.importCostCsv({ target: { files: [fakeFile], value: '' } });
+    };
+  };
+
+  setInterval(fixSkuTopBar, 400);
+  setTimeout(fixSkuTopBar, 200);
+})();
 
