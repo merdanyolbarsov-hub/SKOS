@@ -1,7 +1,7 @@
-/* === SKOS Finance 3.0 — patch2.js (Финальная версия 2.0) === */
+/* === SKOS Finance 3.0 — patch2.js (Полная финальная сборка) === */
 (function () {
-  if (window.__skosPatch2V2) return;
-  window.__skosPatch2V2 = true;
+  if (window.__skosPatch2V3) return;
+  window.__skosPatch2V3 = true;
 
   function ensureCollections() {
     if (!window.db) return;
@@ -85,7 +85,7 @@
 
         const cleanName = String(rawNm).trim() || mCode || 'Без названия';
         const cat = detectCategory(cleanName);
-        const codes = String(rawBc).split(/[,;\s]+/).map(normBarcode).filter(x => x.length >= 2);
+        const codes = String(rawBc).split(/[,;]+/).map(normBarcode).filter(x => x.length >= 2);
 
         codes.forEach(bc => {
           const ex = map.get(bc);
@@ -102,12 +102,14 @@
 
       if (typeof save === 'function') save();
       if (typeof syncCloud === 'function') syncCloud();
+      const box = document.getElementById('skos-sku-folders');
+      if (box) box.dataset.sig = '';
       if (typeof render === 'function') render();
       alert(`Успешно загружено!\nНовых ШК: ${added}, обновлено: ${updated}.\nВсего уникальных ШК в базе: ${db.sku.length}`);
     };
     reader.readAsArrayBuffer(file);
   };
-window.updateModelCostUsd = function (modelKey, newVal) {
+  window.updateModelCostUsd = function (modelKey, newVal) {
     const val = parseFloat(String(newVal || '').replace(',', '.'));
     if (isNaN(val) || val < 0) return;
     db.sku.forEach(s => {
@@ -116,6 +118,8 @@ window.updateModelCostUsd = function (modelKey, newVal) {
     });
     if (typeof save === 'function') save();
     if (typeof syncCloud === 'function') syncCloud();
+    const box = document.getElementById('skos-sku-folders');
+    if (box) box.dataset.sig = '';
     if (typeof render === 'function') render();
   };
 
@@ -125,7 +129,7 @@ window.updateModelCostUsd = function (modelKey, newVal) {
     if (db.sku.length) {
       db.sku.forEach(s => rows.push(`${s.art || ''};${s.barcode || s.shk || ''};${String(s.name || '').replace(/;/g, ' ')};${String(s.costUsd || s.cost || 0).replace('.', ',')}`));
     } else {
-      rows.push('SKOS-B;2043192743629, OZN861358069;Брюки мужские зауженные;6,60');
+      rows.push('SKOS-B;2043192743629, OZN861358069, SKOS-B серый33;Брюки мужские зауженные;6,60');
     }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['\uFEFF' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' }));
@@ -133,12 +137,14 @@ window.updateModelCostUsd = function (modelKey, newVal) {
   };
 
   window.renderSkuFoldersTree = function () {
-    const skuTable = document.querySelector('#tb-sku, #sku-table, [data-tab="sku"] table');
+    const skuTable = Array.from(document.querySelectorAll('table')).find(t => /себест\.\s*\(\$\)/i.test(t.textContent || ''));
     if (!skuTable) return;
     skuTable.style.display = 'none';
     let box = document.getElementById('skos-sku-folders');
-    if (!box) { box = document.createElement('div'); box.id = 'skos-sku-folders'; box.style.marginTop = '12px'; skuTable.parentElement.insertBefore(box, skuTable); }
     const rate = typeof getRate === 'function' ? getRate() : 88;
+    const sig = db.sku.length + '_' + rate;
+    if (box && box.dataset.sig === sig) return;
+    if (!box) { box = document.createElement('div'); box.id = 'skos-sku-folders'; box.style.marginTop = '12px'; skuTable.parentElement.insertBefore(box, skuTable); }
     const cats = new Map();
     db.sku.forEach(s => {
       const cat = s.cat || detectCategory(s.name);
@@ -153,24 +159,25 @@ window.updateModelCostUsd = function (modelKey, newVal) {
     cats.forEach((mMap, catName) => {
       let totalBc = 0; mMap.forEach(m => totalBc += m.list.length);
       html += `<details open style="margin-bottom:10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;overflow:hidden;">
-        <summary style="padding:10px 14px;background:#f1f5f9;font-weight:700;cursor:pointer;display:flex;justify-content:space-between;">
+        <summary style="padding:10px 14px;background:#f1f5f9;font-weight:700;cursor:pointer;display:flex;justify-content:space-between;color:#0f172a;">
           <span>${catName} (${mMap.size} мод.)</span><span style="color:#475569;font-weight:500;">${totalBc} ШК</span>
         </summary><div style="padding:6px 12px;">`;
       mMap.forEach(m => {
         const rub = Math.round(m.cost * rate);
-        const bcPreview = m.list.slice(0, 60).map(x => `<span style="display:inline-block;margin:2px;padding:2px 6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-family:monospace;font-size:11px;">${x.barcode || x.shk}</span>`).join('');
-        html += `<details style="border-bottom:1px solid #f1f5f9;padding:6px 0;">
+        const bcPreview = m.list.slice(0, 60).map(x => `<span style="display:inline-block;margin:2px;padding:2px 6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-family:monospace;font-size:11px;color:#334155;">${x.barcode || x.shk}</span>`).join('');
+        html += `<details style="border-bottom:1px solid #f1f5f9;padding:6px 0;color:#1e293b;">
           <summary style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;">
-            <b style="min-width:95px;color:#1e293b;">${m.art || '—'}</b>
+            <b style="min-width:95px;color:#0f172a;">${m.art || '—'}</b>
             <span style="flex:1;">${m.name}</span>
             <span style="color:#64748b;font-size:12px;">${m.list.length} ШК</span>
-            <input type="number" step="0.01" value="${m.cost}" onclick="event.stopPropagation()" onchange="window.updateModelCostUsd('${m.key.replace(/'/g, '')}', this.value)" style="width:72px;padding:3px 6px;border:1px solid #94a3b8;border-radius:4px;text-align:right;font-weight:600;"> $
+            <input type="number" step="0.01" value="${m.cost}" onclick="event.stopPropagation()" onchange="window.updateModelCostUsd('${m.key.replace(/'/g, '')}', this.value)" style="width:72px;padding:3px 6px;border:1px solid #94a3b8;border-radius:4px;text-align:right;font-weight:600;color:#0f172a;background:#fff;"> $
             <span style="min-width:75px;text-align:right;color:#0f172a;font-weight:600;">${rub} ₽</span>
           </summary><div style="padding:8px 0 4px 12px;">${bcPreview}${m.list.length > 60 ? `<span style="font-size:11px;color:#64748b;"> ...и ещё ${m.list.length - 60} ШК</span>` : ''}</div>
         </details>`;
       });
       html += '</div></details>';
     });
+    box.dataset.sig = sig;
     box.innerHTML = html;
   };
 
@@ -217,14 +224,14 @@ window.updateModelCostUsd = function (modelKey, newVal) {
     if (catEl && !document.getElementById('skos-spread-exp-panel')) {
       const formRow = catEl.closest('div[style*="grid"], div[style*="flex"], .grid, .row') || catEl.parentElement.parentElement;
       const box = document.createElement('div'); box.id = 'skos-spread-exp-panel';
-      box.style.cssText = 'width:100%;margin:0 0 12px 0;padding:10px 14px;border:1px solid #fde047;border-radius:8px;background:#fefce8;display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:13px;box-sizing:border-box;';
+      box.style.cssText = 'width:100%;margin:0 0 12px 0;padding:10px 14px;border:1px solid #fde047;border-radius:8px;background:#fefce8;display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:13px;box-sizing:border-box;color:#1e293b;';
       const orgOpts = (db.orgs || []).filter(o => !o.archived).map(o => `<option value="${o.id}">${o.name}</option>`).join('');
       box.innerHTML = `<span style="font-weight:600;color:#854d0e;">📅 Разбить годовой расход (1С / сервисы) на N мес.:</span>
-        <input type="text" id="spr-dt" value="01.01.2026" style="width:95px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;">
-        <select id="spr-org" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;">${orgOpts}</select>
-        <input type="number" id="spr-amt" placeholder="Сумма ₽" style="width:105px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;">
-        <input type="number" id="spr-mo" value="12" min="2" max="36" style="width:60px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;">
-        <input type="text" id="spr-note" placeholder="Комментарий (напр. 1С за год)" style="flex:1;min-width:150px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;">
+        <input type="text" id="spr-dt" value="01.01.2026" style="width:95px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;">
+        <select id="spr-org" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;">${orgOpts}</select>
+        <input type="number" id="spr-amt" placeholder="Сумма ₽" style="width:105px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;">
+        <input type="number" id="spr-mo" value="12" min="2" max="36" style="width:60px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;">
+        <input type="text" id="spr-note" placeholder="Комментарий (напр. 1С за год)" style="flex:1;min-width:150px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;">
         <button type="button" onclick="if(window.addSpreadExpense(document.getElementById('spr-dt').value, document.getElementById('spr-org').value, document.getElementById('ex-cat').value, document.getElementById('spr-amt').value, document.getElementById('spr-mo').value, document.getElementById('spr-note').value)) alert('Расход разбит!')" style="padding:6px 14px;background:#ca8a04;color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer;">Разбить</button>`;
       formRow.parentElement.insertBefore(box, formRow);
     }
