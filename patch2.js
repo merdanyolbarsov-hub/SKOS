@@ -35,18 +35,6 @@
     db.sku = db.sku.filter(s => Number(s.cost || s.costUsd || 0) < 500 && s.src !== 'Импорт Свода');
   };
 
-  window.findSkuCost = function (barcode, artOrName) {
-    ensureCollections();
-    const bc = normBarcode(barcode);
-    let hit = bc ? db.sku.find(s => normBarcode(s.barcode || s.shk || s.id) === bc) : null;
-    if (hit && Number(hit.costUsd || hit.cost) > 0) return Number(hit.costUsd || hit.cost);
-    const code = extractModelCode(artOrName) || String(artOrName || '').trim().toUpperCase();
-    if (code) {
-      hit = db.sku.find(s => (extractModelCode(s.art || s.name) === code || String(s.art || '').trim().toUpperCase() === code) && Number(s.costUsd || s.cost) > 0);
-      if (hit) return Number(hit.costUsd || hit.cost);
-    }
-    return 0;
-  };
   window.parseAnyCostCsv = function (file) {
     if (!file) return;
     const reader = new FileReader();
@@ -59,7 +47,13 @@
       const sep = firstLine.includes(';') && !firstLine.includes(',') ? ';' : ',';
       const splitCsv = l => {
         const out = []; let cur = '', q = false;
-        for (let ch of l) { if (ch === '"') q = !q; else if (ch === sep && !q) { out.push(cur.trim()); cur = ''; } else cur += ch; }
+        for (let ch of l) {
+          if (ch === '"') q = !q;
+          else if (ch === sep && !q) { out.push(cur.trim()); cur = ''; }
+          else cur += ch;
+        }
+        out.push(cur.trim()); return out;
+      };
       const head = splitCsv(firstLine);
       const wideCostIdx = head.findIndex(h => /итого себестоимость/i.test(h));
       ensureCollections();
