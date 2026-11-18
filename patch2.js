@@ -40,7 +40,7 @@
     const reader = new FileReader();
     reader.onload = function (e) {
       let text = new TextDecoder('utf-8').decode(e.target.result);
-      if (text.includes('')) text = new TextDecoder('windows-1251').decode(e.target.result);
+      if (text.includes('\uFFFD')) text = new TextDecoder('windows-1251').decode(e.target.result);
       const lines = text.split(/\r?\n/).filter(l => l.trim());
       if (lines.length < 2) return alert('Файл пустой или в нём меньше 2 строк');
 
