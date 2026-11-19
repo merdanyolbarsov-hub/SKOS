@@ -1583,56 +1583,7 @@
     `;
   };
 
-    function syncAllPatch4Views() {
-    if (!window.db) return;
-
-    // 1. Вкладка «Запасы, Брак и Фурнитура» (находим активную секцию по заголовку или id)
-    const invSec = document.getElementById('tab-inv') || document.getElementById('tab-stock') ||
-      Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
-        el.offsetParent !== null && (el.textContent || '').includes('Конструктор аксессуаров и фурнитуры')
-      );
-    if (invSec && !invSec.querySelector('#skos-erp-inv-ready')) {
-      invSec.id = 'tab-inv';
-      renderErpInventoryTab();
-      if (invSec.firstElementChild) invSec.firstElementChild.id = 'skos-erp-inv-ready';
-    }
-
-    // 2. Вкладка «Расходы и Налоги (КВ/3)» (находим активную секцию по заголовку или id)
-    const finSec = document.getElementById('tab-fin') || document.getElementById('tab-exp') ||
-      Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
-        el.offsetParent !== null && (el.textContent || '').includes('Налоги от бухгалтера')
-      );
-    if (finSec && finSec.offsetParent !== null) {
-      finSec.id = 'tab-fin';
-      enhanceFinanceTab();
-    }
-
-    // 3. Вкладка «Поставщики и ОС»
-    const supSec = document.getElementById('tab-sup');
-    if (supSec && supSec.offsetParent !== null && !supSec.querySelector('#skos-erp-sup-ready')) {
-      renderSuppliersAndAssetsTab();
-      if (supSec.firstElementChild) supSec.firstElementChild.id = 'skos-erp-sup-ready';
-    }
-
-    // 4. Обновление карточки «Заморожено в запасах» на Сводке
-    const dashSec = document.getElementById('tab-dash');
-    if (dashSec && dashSec.offsetParent !== null) {
-      const y = document.getElementById('f-yr')?.value || '2026';
-      const m = document.getElementById('f-mo')?.value || '11';
-      const invMoney = calcTotalInventoryMoney(y, m);
-      const dashFrozen = dashSec.querySelector('.kpi-grid > div:last-child .kpi-val, .kpi-grid > div:last-child div[style*="font-size:22px"]');
-      if (dashFrozen && invMoney.totalRub > 0) dashFrozen.textContent = fmtR(invMoney.totalRub);
-    }
-  }
-
-  document.addEventListener('click', function () {
-    setTimeout(syncAllPatch4Views, 60);
-  });
-  setInterval(syncAllPatch4Views, 800);
-  setTimeout(syncAllPatch4Views, 200);
-})();
-(function () {
-  window.pullTaxesFromDds = function () {
+    window.pullTaxesFromDds = function () {
     if (!window.db || !Array.isArray(db.dds)) {
       alert('В разделе ДДС пока нет операций.');
       return;
@@ -1676,7 +1627,6 @@
         String((q - 1) * 3 + 3).padStart(2, '0')
       ];
 
-      // Определяем юрлицо по кошельку ДДС
       const acc = String(d.acc || '');
       const orgMatch = (db.orgs || []).find(o => acc.includes(o.name.replace('ИП ', '').split(' ').at(0)));
       const orgName = orgMatch ? orgMatch.name : 'ALL';
@@ -1696,24 +1646,64 @@
 
     if (typeof save === 'function') save();
     if (typeof render === 'function') render();
-    alert(added > 0 ? `Успешно подтянуто новых налогов из ДДС: ${added} шт.` : 'Все налоги из ДДС уже были загружены ранее (дублей нет).');
+    alert(added > 0 ? `Успешно подтянуто новых налогов из ДДС: ${added} шт.` : 'Все налоги из ДДС уже загружены ранее.');
   };
 
-  function injectPullTaxBtn() {
-    const finSec = document.getElementById('tab-fin') || document.getElementById('tab-exp');
-    if (!finSec || finSec.offsetParent === null) return;
-    const hdr = finSec.querySelector('.card:first-child .card-header');
-    if (!hdr || document.getElementById('skos-pull-tax-dds')) return;
+  function syncAllPatch4Views() {
+    if (!window.db) return;
 
-    const btn = document.createElement('button');
-    btn.id = 'skos-pull-tax-dds';
-    btn.type = 'button';
-    btn.className = 'btn';
-    btn.textContent = '🔄 Подтянуть налоги из ДДС';
-    btn.onclick = window.pullTaxesFromDds;
-    hdr.appendChild(btn);
+    // 1. Вкладка «Запасы, Брак и Фурнитура»
+    const invSec = document.getElementById('tab-inv') || document.getElementById('tab-stock') ||
+      Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
+        el.offsetParent !== null && (el.textContent || '').includes('Конструктор аксессуаров и фурнитуры')
+      );
+    if (invSec && invSec.offsetParent !== null && !invSec.querySelector('#skos-erp-inv-ready')) {
+      invSec.id = 'tab-inv';
+      renderErpInventoryTab();
+      if (invSec.firstElementChild) invSec.firstElementChild.id = 'skos-erp-inv-ready';
+    }
+
+    // 2. Вкладка «Расходы и Налоги (КВ/3)»
+    const finSec = Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
+      el.id !== 'tab-inv' && el.offsetParent !== null && (el.textContent || '').includes('Налоги от бухгалтера')
+    );
+    if (finSec) {
+      finSec.id = 'tab-fin';
+      enhanceFinanceTab();
+      const hdr = finSec.querySelector('.card:first-child .card-header');
+      if (hdr && !document.getElementById('skos-pull-tax-dds')) {
+        const btn = document.createElement('button');
+        btn.id = 'skos-pull-tax-dds';
+        btn.type = 'button';
+        btn.className = 'btn';
+        btn.textContent = '🔄 Подтянуть налоги из ДДС';
+        btn.onclick = window.pullTaxesFromDds;
+        hdr.appendChild(btn);
+      }
+    }
+
+    // 3. Вкладка «Поставщики и ОС»
+    const supSec = document.getElementById('tab-sup');
+    if (supSec && supSec.offsetParent !== null && !supSec.querySelector('#skos-erp-sup-ready')) {
+      renderSuppliersAndAssetsTab();
+      if (supSec.firstElementChild) supSec.firstElementChild.id = 'skos-erp-sup-ready';
+    }
+
+    // 4. Обновление карточки «Заморожено в запасах» на Сводке
+    const dashSec = document.getElementById('tab-dash');
+    if (dashSec && dashSec.offsetParent !== null) {
+      const y = document.getElementById('f-yr')?.value || '2026';
+      const m = document.getElementById('f-mo')?.value || '11';
+      const invMoney = calcTotalInventoryMoney(y, m);
+      const dashFrozen = dashSec.querySelector('.kpi-grid > div:last-child .kpi-val, .kpi-grid > div:last-child div[style*="font-size:22px"]');
+      if (dashFrozen && invMoney.totalRub > 0) dashFrozen.textContent = fmtR(invMoney.totalRub);
+    }
   }
 
-  setInterval(injectPullTaxBtn, 1000);
-  setTimeout(injectPullTaxBtn, 300);
+  document.querySelectorAll('.nav-item, [onclick*="tab("]').forEach(btn => {
+    btn.addEventListener('click', function () {
+      setTimeout(syncAllPatch4Views, 80);
+    });
+  });
+  setTimeout(syncAllPatch4Views, 300);
 })();
