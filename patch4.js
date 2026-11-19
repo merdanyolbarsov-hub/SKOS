@@ -1513,3 +1513,38 @@
     }
   }, 300);
 })();
+(function () {
+  // Умный архив организаций: скрывает закрытые ИП из новых форм, но сохраняет их в Сводке за периоды, где были обороты
+  function applySmartOrgArchive() {
+    if (!window.db || !Array.isArray(db.orgs)) return;
+
+    const curYr = document.getElementById('f-yr')?.value || '2026';
+    const curMo = document.getElementById('f-mo')?.value || '11';
+
+    // 1. В Сводке (таблица по ИП и ООО) скрываем архивные ИП ТОЛЬКО если за выбранный период у них 0 выручки и 0 расходов
+    const dashRows = document.querySelectorAll('#tab-dash table tbody tr');
+    dashRows.forEach(tr => {
+      const firstCell = tr.firstElementChild;
+      if (!firstCell) return;
+      const orgName = firstCell.textContent.trim();
+      const orgObj = db.orgs.find(o => o.name === orgName && o.archived);
+      if (!orgObj) return;
+
+      const hasRev = (db.reports || []).some(r => r.org === orgName && String(r.yr) === String(curYr) && (curMo === 'ALL' || String(r.mo) === String(curMo)) && Number(r.rev) > 0);
+      const hasExp = (db.expenses || []).some(e => e.org === orgName && String(e.yr) === String(curYr) && (curMo === 'ALL' || String(e.mo) === String(curMo)) && Number(e.amt) > 0);
+
+      tr.style.display = (hasRev || hasExp) ? '' : 'none';
+    });
+
+    // 2. В выпадающих списках (Отчёты, Налоги, Расходы) прячем архивные организации
+    document.querySelectorAll('#up-org, #tab-fin select:first-of-type').forEach(sel => {
+      Array.from(sel.options).forEach(opt => {
+        const isArch = db.orgs.some(o => o.name === opt.value && o.archived);
+        if (isArch) opt.style.display = 'none';
+      });
+    });
+  }
+
+  setInterval(applySmartOrgArchive, 1500);
+  setTimeout(applySmartOrgArchive, 400);
+})();
