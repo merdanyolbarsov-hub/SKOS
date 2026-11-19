@@ -330,7 +330,7 @@
       <div><button type="submit" class="btn btn-primary" style="width:100%">Провести</button></div>
     </form>
   </div></div>
-    <script>
+      <script>
     (function () {
       const origSetInt = window.setInterval;
       window.setInterval = function (fn, ms) {
@@ -368,23 +368,21 @@
           display: flex !important;
           justify-content: space-between !important;
           align-items: center !important;
-          position: static !important;
-          padding-right: 12px !important;
+          font-size: 13px !important;
+          color: #0f172a !important;
         }
         #skos-folders-wrap details > summary > div:first-child {
           display: flex !important;
           align-items: center !important;
           gap: 8px !important;
-          position: static !important;
+          font-size: 13px !important;
+          color: #0f172a !important;
+          min-width: 200px !important;
+        }
+        #skos-folders-wrap details > summary > div:first-child * {
+          font-size: 13px !important;
           visibility: visible !important;
           opacity: 1 !important;
-        }
-        #skos-folders-wrap details > summary > div:last-child {
-          position: static !important;
-          transform: none !important;
-          display: flex !important;
-          align-items: center !important;
-          gap: 8px !important;
         }
       `;
       document.head.appendChild(fixCss);
