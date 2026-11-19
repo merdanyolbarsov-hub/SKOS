@@ -2047,4 +2047,461 @@
     ev.target.value = '';
   };
 })();
+(function () {
+  // 1. Блокируем 5-секундное появление Google Таблицы на вкладке товаров
+  const hideGoogleOnce = setInterval(function () {
+    const inp = document.getElementById('skos-gsheet-url');
+    if (inp && inp.parentElement) {
+      inp.parentElement.remove();
+      clearInterval(hideGoogleOnce);
+    }
+  }, 30);
+  setTimeout(function () { clearInterval(hideGoogleOnce); }, 6000);
+
+  // 2. Усиленная пакетная загрузка отчётов WB / Ozon / ЯМ с накоплением в черновике и автоочисткой
+  let multiBatch = null;
+
+  function normClean(v) { return String(v || '').replace(/^[\uFEFF\u200B]+/, '').trim(); }
+  function toNumber(v) {
+    if (typeof v === 'number') return isFinite(v) ? v : 0;
+    const n = parseFloat(String(v || '0').replace(/\u00A0/g, '').replace(/\s+/g, '').replace(',', '.'));
+    return isFinite(n) ? n : 0;
+  }
+  function parseLineCsv(line, sep) {
+    const out = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line.charAt(i);
+      if (ch === '"') {
+        if (inQ && line.charAt(i + 1) === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (ch === sep && !inQ) {
+        out.push(cur.trim()); cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur.trim());
+    return out;
+  }
+
+  function matchProductCost(bcRaw, artRaw, nameRaw) {
+    const clean = v => normClean(v).toLowerCase().replace(/[\s\-_]+/g, '');
+    const noZero = v => v.replace(/^0+/, '').replace(/^ozn/, '');
+    const kBc = noZero(clean(bcRaw));
+    const kArt = clean(artRaw);
+    const list = (window.db && Array.isArray(db.skus)) ? db.skus : [];
+
+    if (kBc) {
+      const f = list.find(s => s.usd > 0 && noZero(clean(s.bc)) === kBc);
+      if (f) return f;
+    }
+    if (kArt) {
+      const f = list.find(s => s.usd > 0 && (clean(s.art) === kArt || clean(s.bc) === kArt));
+      if (f) return f;
+    }
+    const combo = (String(artRaw || '') + ' ' + String(nameRaw || '')).toUpperCase();
+    const m = combo.match(/\b(SKOS-[A-ZА-Я0-9]+)\b/);
+    if (m) {
+      const code = m.at(1);
+      const f = list.find(s => s.usd > 0 && normClean(s.art).toUpperCase() === code);
+      if (f) return f;
+    }
+    return null;
+  }
+  function readSingleMpFile(file, rate) {
+    return new Promise(resolve => {
+      const r = new FileReader();
+      r.onload = function (e) {
+        try {
+          const buf = e.target.result;
+          let text = new TextDecoder('utf-8').decode(buf);
+          if (text.includes('\uFFFD')) text = new TextDecoder('windows-1251').decode(buf);
+          text = text.replace(/^\uFEFF/, '');
+
+          const rawLines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+          if (rawLines.length < 2) return resolve(null);
+
+          const sample = rawLines.slice(0, 20).join('\n').toLowerCase();
+          let det = document.getElementById('up-mp').value;
+          let hdrIdx = 0;
+
+          if (sample.includes('обоснование для оплаты') || sample.includes('вайлдберриз реализовал')) {
+            det = 'WB';
+            hdrIdx = rawLines.findIndex(l => l.toLowerCase().includes('обоснование для оплаты'));
+          } else if (sample.includes('группа услуг') && sample.includes('тип начисления')) {
+            det = 'OZON';
+            hdrIdx = rawLines.findIndex(l => l.toLowerCase().includes('группа услуг'));
+          } else if (sample.includes('ваш sku') && sample.includes('доставка покупателю')) {
+            det = 'YM_ORDERS';
+            hdrIdx = rawLines.findIndex(l => l.toLowerCase().includes('ваш sku') && l.toLowerCase().includes('название товара'));
+          } else if (sample.includes('все услуги маркета за заказы') || sample.includes('id бизнес-аккаунта')) {
+            det = 'YM_SERVICES';
+            hdrIdx = rawLines.findIndex(l => l.toLowerCase().includes('статус заказа') && l.toLowerCase().includes('цена продажи'));
+          } else {
+            hdrIdx = rawLines.findIndex(l => l.toLowerCase().match(/баркод|штрих|sku|артикул|выручка/));
+          }
+          if (hdrIdx < 0) hdrIdx = 0;
+
+          const hdrLine = rawLines.at(hdrIdx);
+          const sep = (hdrLine.split(';').length >= hdrLine.split(',').length) ? ';' : ',';
+          const headers = parseLineCsv(hdrLine, sep);
+          const rows = rawLines.slice(hdrIdx + 1).map(l => parseLineCsv(l, sep));
+
+          const col = (rxs) => {
+            for (const rx of rxs) {
+              const i = headers.findIndex(h => rx.test(h.toLowerCase()));
+              if (i >= 0) return i;
+            }
+            return -1;
+          };
+
+          let grossRev = 0, ret = 0, com = 0, log = 0, ads = 0, cogs = 0, sQty = 0, rQty = 0;
+          const items = [], missing = [];
+
+          const addCogs = (bc, art, name, q, isRet) => {
+            const sku = matchProductCost(bc, art, name);
+            if (sku && sku.usd > 0) {
+              const rub = sku.usd * rate * q;
+              if (isRet) cogs -= rub; else cogs += rub;
+            } else if (bc || art) {
+              missing.push({ bc: bc || art, name: name || art || bc, qty: q });
+            }
+          };
+
+          if (det === 'WB') {
+            const iArt = col([/^артикул поставщика$/i]), iSiz = col([/^размер$/i]), iBc = col([/^баркод$/i]);
+            const iDoc = col([/^тип документа$/i]), iOb = col([/^обоснование для оплаты$/i]), iQty = col([/^кол-во$/i]);
+            const iPr = col([/вайлдберриз реализовал товар/i]), iPay = col([/к перечислению продавцу/i]);
+            const iLog = col([/услуги по доставке товара/i]), iFine = col([/общая сумма штрафов/i]);
+            const iStor = col([/^хранение$/i]), iDed = col([/^удержания$/i]);
+
+            rows.forEach(rw => {
+              if (rw.length < 5) return;
+              const doc = iDoc >= 0 ? (rw.at(iDoc) || '').toLowerCase() : '';
+              const ob = iOb >= 0 ? (rw.at(iOb) || '').toLowerCase() : '';
+              const art = iArt >= 0 ? (rw.at(iArt) || '') : '';
+              const siz = iSiz >= 0 ? (rw.at(iSiz) || '') : '';
+              const bc = iBc >= 0 ? (rw.at(iBc) || '') : '';
+              const artFull = (art + (siz && siz !== '0' ? siz : '')).trim();
+              const q = iQty >= 0 ? Math.abs(toNumber(rw.at(iQty))) : 0;
+              const vPr = iPr >= 0 ? toNumber(rw.at(iPr)) : 0;
+              const vPay = iPay >= 0 ? toNumber(rw.at(iPay)) : 0;
+              const vLog = iLog >= 0 ? Math.abs(toNumber(rw.at(iLog))) : 0;
+              const vFine = iFine >= 0 ? Math.abs(toNumber(rw.at(iFine))) : 0;
+              const vStor = iStor >= 0 ? Math.abs(toNumber(rw.at(iStor))) : 0;
+              const vDed = iDed >= 0 ? Math.abs(toNumber(rw.at(iDed))) : 0;
+
+              log += vLog; ads += vFine + vDed; com += vStor;
+              if (doc === 'продажа' && ob === 'продажа') {
+                const vCom = Math.max(0, vPr - vPay);
+                grossRev += vPr; com += vCom; sQty += (q || 1);
+                addCogs(bc, artFull, art, (q || 1), false);
+                items.push({ bc: bc || artFull, sQty: (q || 1), rQty: 0, rev: vPr, fee: vCom + vLog + vFine + vDed });
+              } else if (doc === 'возврат' || ob === 'возврат') {
+                const vCom = Math.max(0, vPr - vPay);
+                ret += vPr; com -= vCom; rQty += (q || 1);
+                addCogs(bc, artFull, art, (q || 1), true);
+                items.push({ bc: bc || artFull, sQty: 0, rQty: (q || 1), rev: -vPr, fee: vLog - vCom });
+              } else if (bc || artFull) {
+                items.push({ bc: bc || artFull, sQty: 0, rQty: 0, rev: 0, fee: vLog + vFine + vStor + vDed });
+              }
+            });
+          } else if (det === 'OZON') {
+            const iGrp = col([/^группа услуг$/i]), iTyp = col([/^тип начисления$/i]);
+            const iArt = col([/^артикул$/i]), iSku = col([/^sku$/i]), iName = col([/^название товара$/i]);
+            const iQty = col([/^количество$/i]), iTot = col([/^сумма итого/i]);
+
+            rows.forEach(rw => {
+              if (rw.length < 5) return;
+              const grp = iGrp >= 0 ? (rw.at(iGrp) || '').toLowerCase() : '';
+              const typ = iTyp >= 0 ? (rw.at(iTyp) || '').toLowerCase() : '';
+              const art = iArt >= 0 ? (rw.at(iArt) || '') : '';
+              const sku = iSku >= 0 ? (rw.at(iSku) || '') : '';
+              const name = iName >= 0 ? (rw.at(iName) || '') : art;
+              const q = iQty >= 0 ? Math.abs(toNumber(rw.at(iQty))) : 0;
+              const tot = iTot >= 0 ? toNumber(rw.at(iTot)) : 0;
+              const bcKey = sku ? ('OZN' + sku) : art;
+
+              if (grp === 'продажи') {
+                if (typ === 'выручка') {
+                  grossRev += tot; sQty += (q || 1);
+                  addCogs(bcKey, art, name, (q || 1), false);
+                  items.push({ bc: bcKey || art, sQty: (q || 1), rQty: 0, rev: tot, fee: 0 });
+                } else if (typ.includes('баллы') || typ.includes('программы партн')) {
+                  grossRev += tot;
+                  items.push({ bc: bcKey || art, sQty: 0, rQty: 0, rev: tot, fee: 0 });
+                }
+              } else if (grp === 'возвраты') {
+                if (typ === 'возврат выручки') {
+                  ret += Math.abs(tot); rQty += (q || 1);
+                  addCogs(bcKey, art, name, (q || 1), true);
+                  items.push({ bc: bcKey || art, sQty: 0, rQty: (q || 1), rev: -Math.abs(tot), fee: 0 });
+                } else if (typ.includes('баллы') || typ.includes('программы партн')) {
+                  ret += Math.abs(tot);
+                  items.push({ bc: bcKey || art, sQty: 0, rQty: 0, rev: -Math.abs(tot), fee: 0 });
+                } else {
+                  com += (-tot);
+                }
+              } else if (grp.includes('вознаграждение')) {
+                com += (-tot); if (bcKey || art) items.push({ bc: bcKey || art, sQty: 0, rQty: 0, rev: 0, fee: -tot });
+              } else if (grp.includes('услуги доставки') || grp.includes('услуги агентов')) {
+                log += (-tot); if (bcKey || art) items.push({ bc: bcKey || art, sQty: 0, rQty: 0, rev: 0, fee: -tot });
+              } else if (grp.includes('продвижение') || grp.includes('реклам')) {
+                ads += (-tot);
+              } else {
+                com += (-tot);
+              }
+            });
+          }
+          else if (det === 'YM_ORDERS') {
+            const iSku = col([/^ваш sku$/i]), iName = col([/^название товара$/i]);
+            const iSt = col([/^статус товара$/i]), iQty = col([/^количество/i]), iPrice = col([/^цена продажи/i]);
+            const payCols = [], balCols = [];
+            headers.forEach((h, idx) => {
+              if (h.toLowerCase() === 'сумма платежа') payCols.push(idx);
+              if (h.toLowerCase() === 'сумма баллов') balCols.push(idx);
+            });
+
+            rows.forEach(rw => {
+              if (rw.length < 8) return;
+              const sku = iSku >= 0 ? (rw.at(iSku) || '') : '';
+              const name = iName >= 0 ? (rw.at(iName) || '') : sku;
+              const st = iSt >= 0 ? (rw.at(iSt) || '').toLowerCase() : '';
+              const q = iQty >= 0 ? Math.abs(toNumber(rw.at(iQty))) : 1;
+              const price = iPrice >= 0 ? toNumber(rw.at(iPrice)) : 0;
+              const payIn = payCols.length > 0 ? toNumber(rw.at(payCols.at(0))) : 0;
+              const balIn = balCols.length > 0 ? toNumber(rw.at(balCols.at(0))) : 0;
+              const payOut = payCols.length > 1 ? Math.abs(toNumber(rw.at(payCols.at(1)))) : 0;
+              const balOut = balCols.length > 1 ? Math.abs(toNumber(rw.at(balCols.at(1)))) : 0;
+              if (!sku && !name) return;
+
+              if (st.includes('доставлен')) {
+                const sum = (payIn + balIn) > 0 ? (payIn + balIn) : (price * q);
+                grossRev += sum; sQty += q;
+                addCogs(sku, sku, name, q, false);
+                items.push({ bc: sku, sQty: q, rQty: 0, rev: sum, fee: 0 });
+              } else if (st.includes('возврат')) {
+                const sum = (payOut + balOut) > 0 ? (payOut + balOut) : (price * q);
+                ret += sum; rQty += q;
+                addCogs(sku, sku, name, q, true);
+                items.push({ bc: sku, sQty: 0, rQty: q, rev: -sum, fee: 0 });
+              }
+            });
+          } else if (det === 'YM_SERVICES') {
+            const iSt = col([/^статус заказа$/i]), iPrice = col([/^цена продажи/i]);
+            const iAllSrv = col([/^все услуги маркета за заказы/i]), iBoost = col([/^буст продаж/i]), iLog = col([/^доставка покупателю/i]);
+
+            rows.forEach(rw => {
+              if (rw.length < 6) return;
+              const st = iSt >= 0 ? (rw.at(iSt) || '').toLowerCase() : '';
+              const price = iPrice >= 0 ? toNumber(rw.at(iPrice)) : 0;
+              const srv = iAllSrv >= 0 ? Math.abs(toNumber(rw.at(iAllSrv))) : 0;
+              const bst = iBoost >= 0 ? Math.abs(toNumber(rw.at(iBoost))) : 0;
+              const dlv = iLog >= 0 ? Math.abs(toNumber(rw.at(iLog))) : 0;
+              if (st === 'доставлен') { grossRev += price; sQty += 1; }
+              else if (st.includes('полный возврат')) { ret += price; rQty += 1; }
+              ads += bst; log += dlv; com += Math.max(0, srv - bst - dlv);
+            });
+          }
+
+          const mpCode = det.startsWith('YM') ? 'YM' : det;
+          const labels = {
+            WB: 'WB Детализация',
+            OZON: 'Ozon Начисления',
+            YM_ORDERS: 'ЯМ Заказы по SKU',
+            YM_SERVICES: 'ЯМ Услуги и маржа'
+          };
+
+          resolve({
+            fileName: file.name,
+            mp: mpCode,
+            detType: det,
+            label: labels[det] || det,
+            rev: Math.max(0, grossRev - ret),
+            ret,
+            com: Math.max(0, com),
+            log: Math.max(0, log),
+            ads: Math.max(0, ads),
+            cogs: Math.max(0, cogs),
+            sQty,
+            rQty,
+            items,
+            missing
+          });
+        } catch (err) {
+          resolve(null);
+        }
+      };
+      r.readAsArrayBuffer(file);
+    });
+  }
+  function showMultiBatchDraft() {
+    const mapBox = document.getElementById('map-box');
+    if (!mapBox) return;
+    if (!multiBatch || !multiBatch.files.length) {
+      mapBox.classList.add('hidden');
+      mapBox.innerHTML = '';
+      return;
+    }
+
+    const orgObj = (db.orgs || []).find(o => o.id === multiBatch.org);
+    const orgName = orgObj ? (orgObj.name + ' (' + orgObj.bank + ')') : multiBatch.org;
+
+    const grouped = {};
+    multiBatch.files.forEach(f => {
+      if (!grouped[f.mp]) {
+        grouped[f.mp] = {
+          mp: f.mp, names: [], hasYmOrders: false, hasYmServices: false,
+          rev: 0, ret: 0, com: 0, log: 0, ads: 0, cogs: 0, sQty: 0, rQty: 0,
+          items: [], missingMap: new Map()
+        };
+      }
+      const g = grouped[f.mp];
+      g.names.push(f.fileName);
+      if (f.detType === 'YM_ORDERS') g.hasYmOrders = true;
+      if (f.detType === 'YM_SERVICES') g.hasYmServices = true;
+      g.rev += f.rev; g.ret += f.ret; g.com += f.com; g.log += f.log; g.ads += f.ads; g.cogs += f.cogs;
+      g.sQty += f.sQty; g.rQty += f.rQty;
+      f.items.forEach(it => g.items.push(it));
+      f.missing.forEach(m => {
+        const prev = g.missingMap.get(m.bc);
+        if (prev) prev.qty += m.qty;
+        else g.missingMap.set(m.bc, { ...m });
+      });
+    });
+
+    if (grouped.YM && grouped.YM.hasYmOrders && grouped.YM.hasYmServices) {
+      grouped.YM.rev = Math.round(grouped.YM.rev / 2);
+      grouped.YM.ret = Math.round(grouped.YM.ret / 2);
+      grouped.YM.sQty = Math.round(grouped.YM.sQty / 2);
+      grouped.YM.rQty = Math.round(grouped.YM.rQty / 2);
+    }
+
+    const cardsHtml = Object.values(grouped).map(g => {
+      g.bo = (g.sQty + g.rQty) > 0 ? Math.round((g.sQty / (g.sQty + g.rQty)) * 100) : 89;
+      const prof = g.rev - g.com - g.log - g.ads - g.cogs;
+      const missArr = Array.from(g.missingMap.values());
+      const missBlock = missArr.length
+        ? `<details style="margin-top:6px;background:#fffbeb;border:1px solid #fcd34d;padding:6px 8px;border-radius:7px">
+            <summary style="cursor:pointer;font-weight:700;color:#b45309;font-size:11.5px">⚠️ Без себестоимости: ${missArr.length} поз.</summary>
+            <div style="max-height:110px;overflow-y:auto;margin-top:4px;font-size:11px">${missArr.map(m => `<div>• <b>${m.bc}</b> — ${m.name} (${m.qty} шт.)</div>`).join('')}</div>
+          </details>`
+        : `<div style="margin-top:5px;font-size:11.5px;color:#059669;font-weight:600">✅ Все товары найдены в базе себестоимости</div>`;
+
+      return `
+        <div style="border:1px solid #cbd5e1;border-radius:10px;padding:10px;margin-bottom:10px;background:#fff">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+            <div><span class="badge badge-blue">${g.mp}</span> <span style="font-size:11.5px;color:#475569">Файлы (${g.names.length}): ${g.names.join(', ')}</span></div>
+            <div style="font-weight:800;font-size:13px;color:${prof >= 0 ? '#059669' : '#e11d48'}">Прибыль: ${fmtR(prof)}</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:6px;font-size:12px">
+            <div style="background:#f8fafc;padding:6px;border-radius:6px">Выручка: <b>${fmtR(g.rev)}</b> (${g.sQty} шт.)</div>
+            <div style="background:#f8fafc;padding:6px;border-radius:6px">Возвраты: <b style="color:#e11d48">${fmtR(g.ret)}</b> (${g.rQty} шт.)</div>
+            <div style="background:#f8fafc;padding:6px;border-radius:6px">Комиссия/Усл.: <b>${fmtR(g.com)}</b></div>
+            <div style="background:#f8fafc;padding:6px;border-radius:6px">Логистика: <b>${fmtR(g.log)}</b></div>
+            <div style="background:#f8fafc;padding:6px;border-radius:6px">Реклама/Штрафы: <b>${fmtR(g.ads)}</b></div>
+            <div style="background:#f8fafc;padding:6px;border-radius:6px">Себестоимость: <b>${fmtR(g.cogs)}</b></div>
+          </div>
+          ${missBlock}
+        </div>
+      `;
+    }).join('');
+
+    mapBox.classList.remove('hidden');
+    mapBox.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        <div>
+          <span class="badge badge-amber">📝 ЧЕРНОВИК ПАКЕТА (${multiBatch.files.length} файлов)</span>
+          <strong style="margin-left:6px;font-size:13px">${orgName} • ${multiBatch.mo}.${multiBatch.yr}</strong>
+          <div style="font-size:11px;color:#64748b;margin-top:2px">Можете докинуть ещё файлы в этот же пакет или нажать «Сохранить» — после сохранения черновик удалится.</div>
+        </div>
+      </div>
+      ${cardsHtml}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button type="button" class="btn btn-primary" id="btn-commit-batch">✅ Сохранить в учёт и удалить черновик</button>
+        <button type="button" class="btn btn-danger" id="btn-clear-batch">🗑️ Удалить черновик</button>
+      </div>
+    `;
+
+    document.getElementById('btn-commit-batch').onclick = function () {
+      if (!multiBatch) return;
+      if (db.locked && db.locked[multiBatch.yr + '-' + multiBatch.mo]) return alert('Этот месяц закрыт от изменений!');
+
+      Object.values(grouped).forEach(g => {
+        db.reports.unshift({
+          id: 'r_' + Date.now() + '_' + g.mp,
+          org: multiBatch.org,
+          mp: g.mp,
+          yr: multiBatch.yr,
+          mo: multiBatch.mo,
+          rev: g.rev,
+          ret: g.ret,
+          ads: g.ads,
+          log: g.log,
+          com: g.com,
+          cogs: g.cogs,
+          bo: g.bo || 89,
+          note: 'Пакет (' + g.names.length + ' ф.)'
+        });
+        g.items.forEach(it => {
+          db.itemSales.push({
+            org: multiBatch.org, mp: g.mp, yr: multiBatch.yr, mo: multiBatch.mo,
+            bc: it.bc, sQty: it.sQty, rQty: it.rQty, rev: it.rev, fee: it.fee
+          });
+        });
+      });
+
+      const savedCount = multiBatch.files.length;
+      multiBatch = null;
+      if (typeof csvRows !== 'undefined') csvRows = [];
+      if (typeof csvHdr !== 'undefined') csvHdr = [];
+      mapBox.classList.add('hidden');
+      mapBox.innerHTML = '';
+
+      if (typeof save === 'function') save();
+      if (typeof syncCloud === 'function' && db.cloud && db.cloud.url) syncCloud(false);
+      if (typeof render === 'function') render();
+      alert('Сохранено навсегда (' + savedCount + ' файлов)! Черновик полностью удалён.');
+    };
+
+    document.getElementById('btn-clear-batch').onclick = function () {
+      multiBatch = null;
+      if (typeof csvRows !== 'undefined') csvRows = [];
+      if (typeof csvHdr !== 'undefined') csvHdr = [];
+      mapBox.classList.add('hidden');
+      mapBox.innerHTML = '';
+    };
+  }
+
+  document.addEventListener('change', async function (ev) {
+    if (!ev.target || ev.target.id !== 'rep-file') return;
+    ev.stopImmediatePropagation();
+
+    const fileList = ev.target.files;
+    if (!fileList || !fileList.length) return;
+    const files = Array.from(fileList);
+    ev.target.value = '';
+
+    const org = document.getElementById('up-org').value;
+    const yr = document.getElementById('up-yr').value;
+    const mo = document.getElementById('up-mo').value;
+    const rate = typeof getRate === 'function' ? getRate(yr + '-' + mo) : 96.5;
+
+    if (!multiBatch || multiBatch.org !== org || multiBatch.yr !== yr || multiBatch.mo !== mo) {
+      multiBatch = { org, yr, mo, files: [] };
+    }
+
+    for (const f of files) {
+      const parsed = await readSingleMpFile(f, rate);
+      if (parsed) multiBatch.files.push(parsed);
+    }
+
+    if (!multiBatch.files.length) {
+      multiBatch = null;
+      return alert('Не удалось распознать выбранные CSV-файлы.');
+    }
+    showMultiBatchDraft();
+  }, true);
+})();
 
