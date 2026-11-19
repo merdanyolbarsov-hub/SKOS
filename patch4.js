@@ -1,10 +1,117 @@
 (function () {
-  function fmtUsd(v) { /* форматирование USD */ }
-  function fmtN(v) { /* форматирование чисел */ }
-  function saveErp() { /* сохранение данных ERP */ }
-  function ensureErpStore() { /* инициализация хранилища и списков материалов/BOM */ }
-  function calcMaterialsBalances() { /* расчет балансов материалов */ }
-  // Полный код этой инициализирующей обертки вы можете найти в исходных материалах скрипта.
+  function fmtUsd(v) {
+    const n = Number(v) || 0;
+    return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' $';
+  }
+  function fmtN(v) {
+    const n = Number(v) || 0;
+    return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+  }
+  function saveErp() {
+    if (typeof save === 'function') save();
+  }
+  function ensureErpStore() {
+    if (!window.db) window.db = {};
+    if (!db.erp) {
+      db.erp = {
+        materials: [
+          { id: 'm1', name: 'Ткань лён', type: 'Материал', unit: 'м2', startQty: 0, startUsd: 0 },
+          { id: 'm2', name: 'Ткань флис', type: 'Материал', unit: 'кг', startQty: 0, startUsd: 0 },
+          { id: 'm3', name: 'Ткань жаты', type: 'Материал', unit: 'м2', startQty: 0, startUsd: 0 },
+          { id: 'm4', name: 'Ткань муслин', type: 'Материал', unit: 'м2', startQty: 0, startUsd: 0 },
+          { id: 'm5', name: 'Ткань брюк', type: 'Материал', unit: 'м2', startQty: 0, startUsd: 0 },
+          { id: 'm6', name: 'Пуговицы', type: 'Аксессуары', unit: 'шт', startQty: 0, startUsd: 0 },
+          { id: 'm7', name: 'Замки', type: 'Аксессуары', unit: 'шт', startQty: 0, startUsd: 0 },
+          { id: 'm8', name: 'Крючки', type: 'Аксессуары', unit: 'шт', startQty: 0, startUsd: 0 },
+          { id: 'm9', name: 'Карсаж', type: 'Аксессуары', unit: 'м2', startQty: 0, startUsd: 0 },
+          { id: 'm10', name: 'Ичлик', type: 'Аксессуары', unit: 'м2', startQty: 0, startUsd: 0 },
+          { id: 'm11', name: 'Клейвой', type: 'Аксессуары', unit: 'м2', startQty: 0, startUsd: 0 },
+          { id: 'm12', name: 'Этикетки', type: 'Аксессуары', unit: 'шт', startQty: 0, startUsd: 0 },
+          { id: 'm13', name: 'Резинки', type: 'Аксессуары', unit: 'м2', startQty: 0, startUsd: 0 },
+          { id: 'm14', name: 'Шнурок', type: 'Аксессуары', unit: 'шт', startQty: 0, startUsd: 0 },
+          { id: 'm15', name: 'Пакет 5', type: 'Аксессуары', unit: 'шт', startQty: 0, startUsd: 0 },
+          { id: 'm16', name: 'Пакет 10', type: 'Аксессуары', unit: 'шт', startQty: 0, startUsd: 0 }
+        ],
+        incoming: [],
+        bom: [
+          {
+            product: 'Брюки мужские зауженные',
+            items: [
+              { matName: 'Пошив одежды', norm: 1, priceUsd: 2.00 },
+              { matName: 'Ткань брюк', norm: 1.25, priceUsd: 2.65 },
+              { matName: 'Карсаж', norm: 1.1, priceUsd: 0.15 },
+              { matName: 'Ичлик', norm: 0.35, priceUsd: 0.25 },
+              { matName: 'Пуговицы', norm: 2, priceUsd: 0.03 },
+              { matName: 'Замки', norm: 1, priceUsd: 0.12 },
+              { matName: 'Крючки', norm: 1, priceUsd: 0.04 },
+              { matName: 'Этикетки', norm: 2, priceUsd: 0.02 },
+              { matName: 'Пакет 10', norm: 1, priceUsd: 0.05 }
+            ]
+          }
+        ],
+        orders: [],
+        fgStocks: [],
+        defects: [],
+        supOps: []
+      };
+    }
+    ['materials', 'incoming', 'bom', 'orders', 'fgStocks', 'defects', 'supOps'].forEach(k => {
+      if (!Array.isArray(db.erp[k])) db.erp[k] = [];
+    });
+    return db.erp;
+  }
+
+  function calcMaterialsBalances() {
+    const erp = ensureErpStore();
+    const map = {};
+    erp.materials.forEach(m => {
+      const sQty = Number(m.startQty) || 0;
+      const sUsd = Number(m.startUsd) || 0;
+      map[m.name] = {
+        ...m,
+        startQty: sQty,
+        startUsd: sUsd,
+        inQty: 0,
+        inUsd: 0,
+        outQty: 0,
+        outUsd: 0,
+        curQty: sQty,
+        curUsd: sUsd,
+        avgPrice: sQty > 0 ? sUsd / sQty : 0
+      };
+    });
+
+    erp.incoming.forEach(inc => {
+      const m = map[inc.matName];
+      if (!m) return;
+      m.inQty += Number(inc.qty) || 0;
+      m.inUsd += Number(inc.usd) || 0;
+    });
+
+    Object.values(map).forEach(m => {
+      const totQty = m.startQty + m.inQty;
+      const totUsd = m.startUsd + m.inUsd;
+      if (totQty > 0) m.avgPrice = totUsd / totQty;
+    });
+
+    erp.orders.forEach(ord => {
+      (ord.lines || []).forEach(ln => {
+        const m = map[ln.matName];
+        if (!m) return;
+        const q = Number(ln.qty) || 0;
+        m.outQty += q;
+        m.outUsd += q * m.avgPrice;
+      });
+    });
+
+    Object.values(map).forEach(m => {
+      m.curQty = m.startQty + m.inQty - m.outQty;
+      m.curUsd = Math.max(0, m.curQty * m.avgPrice);
+    });
+
+    return { map, list: Object.values(map) };
+  }
+
   // Поиск цены за 1 единицу модели ($) из каталога 32 папок или техкарты
   function getModelUnitUsd(modelName) {
     const clean = String(modelName || '').trim().toLowerCase();
