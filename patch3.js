@@ -748,15 +748,8 @@
       // Временно подменяем db.tab на 'fast', если открыта не вкладка товаров, чтобы patch2 не строил 11 000 строк впустую
       if (curTab !== 'sku' && window.db) {
         const realTab = db.tab;
-        db.tab = 'fast_skip';
-        try { origRender.apply(this, arguments); } finally { db.tab = realTab; }
-      } else {
-        origRender.apply(this, arguments);
-      }
-    };
-  }
-
-  // 3. Плавный поиск без подвисаний при наборе текста в каталоге на 11 000+ ШК
+        (function () {
+  // Плавный поиск без подвисаний при наборе текста в каталоге на 11 000+ ШК
   let searchTimer = null;
   const origSearch = window.searchSku;
   if (typeof origSearch === 'function') {
