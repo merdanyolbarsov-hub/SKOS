@@ -717,14 +717,62 @@
   }, 200);
 })();
 (function () {
-  // Защищаем браузер от отрисовки 11 248 невидимых строк в фоне при переключении вкладок
-  const origGetById = document.getElementById.bind(document);
-  const dummyEl = document.createElement('tbody');
+  // 1. Делаем папки на вкладке товаров сверхлёгкими: строки ШК рисуются ТОЛЬКО при клике на папку!
+  function optimizeFoldersLazy() {
+    const wrap = document.getElementById('skos-folders-wrap');
+    if (!wrap) return;
 
-  document.getElementById = function (id) {
-    if (id === 'tb-skus' && window.db && db.tab !== 'sku') {
-      return dummyEl;
-    }
-    return origGetById(id);
-  };
+    wrap.querySelectorAll('details').forEach(det => {
+      if (det.dataset.lazyReady === '1') return;
+      det.dataset.lazyReady = '1';
+
+      const bodyDiv = det.querySelector('div');
+      if (!bodyDiv) return;
+
+      // Если папка закрыта — выгружаем тяжёлую таблицу из DOM в память до момента клика
+      if (!det.open) {
+        det._cachedHtml = bodyDiv.innerHTML;
+        bodyDiv.innerHTML = '';
+      }
+
+      det.addEventListener('toggle', function () {
+        if (det.open && det._cachedHtml) {
+          bodyDiv.innerHTML = det._cachedHtml;
+          det._cachedHtml = null;
+        }
+      });
+    });
+  }
+
+  // 2. Запрещаем перестройку каталога на 11 248 ШК, когда пользователь находится на других вкладках
+  const prevRender = window.render;
+  if (typeof prevRender === 'function') {
+    window.render = function () {
+      const wrap = document.getElementById('skos-folders-wrap');
+      if (wrap && window.db && db.tab !== 'sku') {
+        wrap.innerHTML = ''; // Очищаем тяжёлый DOM каталога при уходе со вкладки товаров
+      }
+      prevRender.apply(this, arguments);
+      if (window.db && db.tab === 'sku') {
+        setTimeout(optimizeFoldersLazy, 50);
+      }
+    };
+  }
+
+  const prevTab = window.tab;
+  if (typeof prevTab === 'function') {
+    window.tab = function (id) {
+      const wrap = document.getElementById('skos-folders-wrap');
+      if (wrap && id !== 'sku') {
+        wrap.innerHTML = '';
+      }
+      prevTab.apply(this, arguments);
+      if (id === 'sku') {
+        setTimeout(optimizeFoldersLazy, 50);
+      }
+    };
+  }
+
+  setTimeout(optimizeFoldersLazy, 300);
 })();
+
