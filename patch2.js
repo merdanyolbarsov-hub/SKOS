@@ -1141,17 +1141,6 @@
         btnBar.appendChild(undoBtn);
       }
 
-      const gsBar = document.createElement('div');
-      gsBar.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;padding-top:10px;border-top:1px dashed #e2e8f0';
-      const savedUrl = localStorage.getItem(GSHEET_KEY) || '';
-      gsBar.innerHTML = `
-        <span style="font-size:12px;font-weight:700;color:#334155">Google Таблица:</span>
-        <input type="text" id="skos-gsheet-url" class="input" style="max-width:420px" value="${savedUrl}" placeholder="Вставьте ссылку на Google Таблицу (доступ по ссылке)...">
-        <button type="button" id="skos-gsheet-btn" class="btn btn-primary" onclick="importFromGoogleSheet()">☁️ Из Google Таблицы</button>
-      `;
-      skuCard.appendChild(gsBar);
-    }
-
     updateUndoButtons();
   }
 
