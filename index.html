@@ -330,7 +330,8 @@
       <div><button type="submit" class="btn btn-primary" style="width:100%">Провести</button></div>
     </form>
   </div></div>
-      <script>
+  
+    <script>
     (function () {
       const origSetInt = window.setInterval;
       window.setInterval = function (fn, ms) {
@@ -364,26 +365,6 @@
       fixCss.textContent = `
         #skos-gsheet-url, #skos-gsheet-btn { display: none !important; }
         #tab-sku > .card:first-child > div:nth-child(3) { display: none !important; }
-        #skos-folders-wrap details > summary {
-          display: flex !important;
-          justify-content: space-between !important;
-          align-items: center !important;
-          font-size: 13px !important;
-          color: #0f172a !important;
-        }
-        #skos-folders-wrap details > summary > div:first-child {
-          display: flex !important;
-          align-items: center !important;
-          gap: 8px !important;
-          font-size: 13px !important;
-          color: #0f172a !important;
-          min-width: 200px !important;
-        }
-        #skos-folders-wrap details > summary > div:first-child * {
-          font-size: 13px !important;
-          visibility: visible !important;
-          opacity: 1 !important;
-        }
       `;
       document.head.appendChild(fixCss);
 
@@ -391,18 +372,49 @@
         const gs = document.getElementById('skos-gsheet-url');
         if (gs && gs.parentElement) gs.parentElement.style.display = 'none';
 
-        document.querySelectorAll('#skos-folders-wrap summary .badge-green').forEach(b => {
-          const txt = b.textContent || '';
-          if (txt.includes('–') || txt.includes('-')) {
-            const parts = txt.split(/[–-]/);
-            const mainPrice = parts[parts.length - 1].trim();
-            if (mainPrice) b.textContent = mainPrice;
+        const wrap = document.getElementById('skos-folders-wrap');
+        if (!wrap || !window.db || !Array.isArray(db.skus)) return;
+
+        let fNames = {};
+        try { fNames = JSON.parse(localStorage.getItem('skos_v3_folder_names') || '{}'); } catch (e) {}
+
+        wrap.querySelectorAll('details > summary').forEach(sum => {
+          // 1. Убираем двойную цену
+          const greenBadge = sum.querySelector('.badge-green');
+          if (greenBadge) {
+            const txt = greenBadge.textContent || '';
+            if (txt.includes('–') || txt.includes('-')) {
+              const parts = txt.split(/[–-]/);
+              const singlePrice = parts[parts.length - 1].trim();
+              if (singlePrice) greenBadge.textContent = singlePrice;
+            }
           }
+
+          // 2. Берём точный код папки из кнопки «✏️ Папка» справа и гарантированно пишем название слева
+          const editBtn = sum.querySelector('button[onclick*="openEditFolderModal"]');
+          if (!editBtn) return;
+          const m = (editBtn.getAttribute('onclick') || '').match(/openEditFolderModal\('([^']+)'\)/);
+          if (!m || !m[1]) return;
+
+          const folderCode = decodeURIComponent(m[1]);
+          const leftBox = sum.firstElementChild;
+          if (!leftBox || leftBox.dataset.titled === folderCode) return;
+
+          const items = db.skus.filter(s => (String(s.art || '').trim() || 'Без артикула') === folderCode);
+          const title = fNames[folderCode] || (items[0] && items[0].name) || folderCode;
+
+          leftBox.dataset.titled = folderCode;
+          leftBox.style.cssText = 'display:flex;align-items:center;gap:8px;color:#0f172a;font-size:13px';
+          leftBox.innerHTML =
+            '<span style="font-size:15px">📁</span>' +
+            '<strong style="font-weight:800;color:#0f172a">' + folderCode + '</strong>' +
+            '<span style="color:#475569">— ' + title + '</span>' +
+            '<span class="badge badge-blue">' + items.length + ' ШК</span>';
         });
-      }, 1000);
+      }, 600);
     })();
   </script>
-  
+
   <script src="app.js"></script>
   <script src="patch.js"></script>
   <script src="patch2.js"></script>
