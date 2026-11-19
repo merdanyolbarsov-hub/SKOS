@@ -1631,3 +1631,89 @@
   setInterval(syncAllPatch4Views, 800);
   setTimeout(syncAllPatch4Views, 200);
 })();
+(function () {
+  window.pullTaxesFromDds = function () {
+    if (!window.db || !Array.isArray(db.dds)) {
+      alert('В разделе ДДС пока нет операций.');
+      return;
+    }
+
+    const taxRows = db.dds.filter(d => {
+      const amt = Number(d.amt) || 0;
+      if (amt >= 0) return false;
+      const cat = String(d.cat || '').toLowerCase();
+      const desc = String(d.desc || d.comment || '').toLowerCase();
+      return cat.includes('налог') || cat.includes('взнос') || desc.includes('аусн') || desc.includes('усн') || desc.includes('фнс');
+    });
+
+    if (!taxRows.length) {
+      alert('В ДДС не найдено платежей по статьям налогов и взносов.');
+      return;
+    }
+
+    const asWhole = confirm(
+      `Найдено налоговых платежей в ДДС: ${taxRows.length} шт.\n\n` +
+      `Нажмите «ОК», чтобы записать их ЦЕЛИКОМ (100% в месяц оплаты, как АУСН).\n` +
+      `Нажмите «Отмена», чтобы разделить каждый платёж на 3 месяца квартала (1/3).`
+    );
+
+    if (!Array.isArray(db.taxes)) db.taxes = [];
+    let added = 0;
+
+    taxRows.forEach((d, idx) => {
+      const ddsKey = 'dds_tax_' + (d.id || (d.date + '_' + Math.abs(Number(d.amt))));
+      if (db.taxes.some(t => t.ddsRef === ddsKey)) return;
+
+      const dt = String(d.date || '2026-11-01');
+      const parts = dt.includes('-') ? dt.split('-') : dt.split('.').reverse();
+      const yr = parts.at(0) || '2026';
+      const mo = String(parts.at(1) || '11').padStart(2, '0');
+      const mNum = parseInt(mo, 10) || 11;
+      const q = Math.ceil(mNum / 3);
+      const qMonths = [
+        String((q - 1) * 3 + 1).padStart(2, '0'),
+        String((q - 1) * 3 + 2).padStart(2, '0'),
+        String((q - 1) * 3 + 3).padStart(2, '0')
+      ];
+
+      // Определяем юрлицо по кошельку ДДС
+      const acc = String(d.acc || '');
+      const orgMatch = (db.orgs || []).find(o => acc.includes(o.name.replace('ИП ', '').split(' ').at(0)));
+      const orgName = orgMatch ? orgMatch.name : 'ALL';
+
+      db.taxes.unshift({
+        id: 'tax_' + Date.now() + '_' + idx,
+        ddsRef: ddsKey,
+        org: orgName,
+        kind: (d.cat || 'Налог из ДДС') + (asWhole ? ' (100% за мес.)' : ' (1/3 кв.)'),
+        yr,
+        q: asWhole ? '100%' : String(q),
+        months: asWhole ? [mo] : qMonths,
+        amt: Math.abs(Number(d.amt) || 0)
+      });
+      added++;
+    });
+
+    if (typeof save === 'function') save();
+    if (typeof render === 'function') render();
+    alert(added > 0 ? `Успешно подтянуто новых налогов из ДДС: ${added} шт.` : 'Все налоги из ДДС уже были загружены ранее (дублей нет).');
+  };
+
+  function injectPullTaxBtn() {
+    const finSec = document.getElementById('tab-fin') || document.getElementById('tab-exp');
+    if (!finSec || finSec.offsetParent === null) return;
+    const hdr = finSec.querySelector('.card:first-child .card-header');
+    if (!hdr || document.getElementById('skos-pull-tax-dds')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'skos-pull-tax-dds';
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = '🔄 Подтянуть налоги из ДДС';
+    btn.onclick = window.pullTaxesFromDds;
+    hdr.appendChild(btn);
+  }
+
+  setInterval(injectPullTaxBtn, 1000);
+  setTimeout(injectPullTaxBtn, 300);
+})();
