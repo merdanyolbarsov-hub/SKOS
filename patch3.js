@@ -716,3 +716,15 @@
     if (window.db && db.tab === 'abc') renderEnhancedAbc();
   }, 200);
 })();
+(function () {
+  // Защищаем браузер от отрисовки 11 248 невидимых строк в фоне при переключении вкладок
+  const origGetById = document.getElementById.bind(document);
+  const dummyEl = document.createElement('tbody');
+
+  document.getElementById = function (id) {
+    if (id === 'tb-skus' && window.db && db.tab !== 'sku') {
+      return dummyEl;
+    }
+    return origGetById(id);
+  };
+})();
