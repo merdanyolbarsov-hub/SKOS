@@ -717,4 +717,26 @@
   }, 200);
 })();
 (function () {
+  function expandAllYearSelects() {
+    const selects = document.querySelectorAll('#f-yr, #abc-f-yr, #up-yr');
+
+    selects.forEach(sel => {
+      if (!sel || sel.dataset.years2050 === '1') return;
+      const curVal = sel.value || '2026';
+      const hasAllOption = Array.from(sel.options).some(o => o.value === 'ALL');
+
+      let html = hasAllOption ? '<option value="ALL">Все годы</option>' : '';
+      for (let y = 2020; y <= 2050; y++) {
+        html += `<option value="${y}">${y}</option>`;
+      }
+      sel.innerHTML = html;
+      sel.value = curVal;
+      sel.dataset.years2050 = '1';
+    });
+  }
+
+  expandAllYearSelects();
+  setInterval(expandAllYearSelects, 2000);
+})();
+
   
