@@ -332,13 +332,13 @@
   </div></div>
   <script>
     (function () {
-      // 1. Защита от частых фоновых таймеров (не чаще 1 раза в 3 секунды)
+      <script>
+    (function () {
       const origSetInt = window.setInterval;
       window.setInterval = function (fn, ms) {
         return origSetInt.call(window, fn, Math.max(ms || 0, 3000));
       };
 
-      // 2. Блокируем старую тормозящую таблицу tb-skus из app.js (у нас теперь 32 папки)
       const origGetId = document.getElementById.bind(document);
       const fakeTbody = document.createElement('tbody');
       document.getElementById = function (id) {
@@ -346,7 +346,6 @@
         return origGetId(id);
       };
 
-      // 3. Защита от зацикливания render()
       let isRendering = false;
       let renderDesc = null;
       Object.defineProperty(window, 'render', {
@@ -363,17 +362,16 @@
         }
       });
 
-      // 4. Мгновенно скрываем строку Google Таблицы и возвращаем названия всех 32 папок
       const fixCss = document.createElement('style');
       fixCss.textContent = `
         #skos-gsheet-url, #skos-gsheet-btn { display: none !important; }
         #tab-sku .card > div:last-child:has(#skos-gsheet-url) { display: none !important; }
-        #skos-folders-wrap summary > div:first-child { display: flex !important; visibility: visible !important; opacity: 1 !important; }
+        #skos-folders-wrap details:not([open]) summary > div:first-child,
+        #skos-folders-wrap details summary > div { display: flex !important; visibility: visible !important; opacity: 1 !important; }
       `;
       document.head.appendChild(fixCss);
     })();
   </script>
-
   <script src="app.js"></script>
   <script src="patch.js"></script>
   <script src="patch2.js"></script>
