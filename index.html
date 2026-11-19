@@ -330,13 +330,11 @@
       <div><button type="submit" class="btn btn-primary" style="width:100%">Провести</button></div>
     </form>
   </div></div>
-  <script>
-    (function () {
-      <script>
+    <script>
     (function () {
       const origSetInt = window.setInterval;
       window.setInterval = function (fn, ms) {
-        return origSetInt.call(window, fn, Math.max(ms || 0, 3000));
+        return origSetInt.call(window, fn, Math.max(ms || 0, 2000));
       };
 
       const origGetId = document.getElementById.bind(document);
@@ -365,11 +363,45 @@
       const fixCss = document.createElement('style');
       fixCss.textContent = `
         #skos-gsheet-url, #skos-gsheet-btn { display: none !important; }
-        #tab-sku .card > div:last-child:has(#skos-gsheet-url) { display: none !important; }
-        #skos-folders-wrap details:not([open]) summary > div:first-child,
-        #skos-folders-wrap details summary > div { display: flex !important; visibility: visible !important; opacity: 1 !important; }
+        #tab-sku > .card:first-child > div:nth-child(3) { display: none !important; }
+        #skos-folders-wrap details > summary {
+          display: flex !important;
+          justify-content: space-between !important;
+          align-items: center !important;
+          position: static !important;
+          padding-right: 12px !important;
+        }
+        #skos-folders-wrap details > summary > div:first-child {
+          display: flex !important;
+          align-items: center !important;
+          gap: 8px !important;
+          position: static !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+        }
+        #skos-folders-wrap details > summary > div:last-child {
+          position: static !important;
+          transform: none !important;
+          display: flex !important;
+          align-items: center !important;
+          gap: 8px !important;
+        }
       `;
       document.head.appendChild(fixCss);
+
+      setInterval(function () {
+        const gs = document.getElementById('skos-gsheet-url');
+        if (gs && gs.parentElement) gs.parentElement.style.display = 'none';
+
+        document.querySelectorAll('#skos-folders-wrap summary .badge-green').forEach(b => {
+          const txt = b.textContent || '';
+          if (txt.includes('–') || txt.includes('-')) {
+            const parts = txt.split(/[–-]/);
+            const mainPrice = parts[parts.length - 1].trim();
+            if (mainPrice) b.textContent = mainPrice;
+          }
+        });
+      }, 1000);
     })();
   </script>
   
