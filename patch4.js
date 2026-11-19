@@ -1585,24 +1585,42 @@
 
     function syncAllPatch4Views() {
     if (!window.db) return;
-    if (db.tab === 'inv' && !document.getElementById('skos-erp-inv-ready')) {
+
+    // 1. Вкладка «Запасы, Брак и Фурнитура» (находим активную секцию по заголовку или id)
+    const invSec = document.getElementById('tab-inv') || document.getElementById('tab-stock') ||
+      Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
+        el.offsetParent !== null && (el.textContent || '').includes('Конструктор аксессуаров и фурнитуры')
+      );
+    if (invSec && !invSec.querySelector('#skos-erp-inv-ready')) {
+      invSec.id = 'tab-inv';
       renderErpInventoryTab();
-      const t = document.getElementById('tab-inv');
-      if (t && t.firstElementChild) t.firstElementChild.id = 'skos-erp-inv-ready';
+      if (invSec.firstElementChild) invSec.firstElementChild.id = 'skos-erp-inv-ready';
     }
-    if (db.tab === 'fin') {
+
+    // 2. Вкладка «Расходы и Налоги (КВ/3)» (находим активную секцию по заголовку или id)
+    const finSec = document.getElementById('tab-fin') || document.getElementById('tab-exp') ||
+      Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
+        el.offsetParent !== null && (el.textContent || '').includes('Налоги от бухгалтера')
+      );
+    if (finSec && finSec.offsetParent !== null) {
+      finSec.id = 'tab-fin';
       enhanceFinanceTab();
     }
-    if (db.tab === 'sup' && !document.getElementById('skos-erp-sup-ready')) {
+
+    // 3. Вкладка «Поставщики и ОС»
+    const supSec = document.getElementById('tab-sup');
+    if (supSec && supSec.offsetParent !== null && !supSec.querySelector('#skos-erp-sup-ready')) {
       renderSuppliersAndAssetsTab();
-      const t = document.getElementById('tab-sup');
-      if (t && t.firstElementChild) t.firstElementChild.id = 'skos-erp-sup-ready';
+      if (supSec.firstElementChild) supSec.firstElementChild.id = 'skos-erp-sup-ready';
     }
-    if (db.tab === 'dash') {
+
+    // 4. Обновление карточки «Заморожено в запасах» на Сводке
+    const dashSec = document.getElementById('tab-dash');
+    if (dashSec && dashSec.offsetParent !== null) {
       const y = document.getElementById('f-yr')?.value || '2026';
       const m = document.getElementById('f-mo')?.value || '11';
       const invMoney = calcTotalInventoryMoney(y, m);
-      const dashFrozen = document.querySelector('#tab-dash .kpi-grid > div:last-child .kpi-val, #tab-dash .kpi-grid > div:last-child div[style*="font-size:22px"]');
+      const dashFrozen = dashSec.querySelector('.kpi-grid > div:last-child .kpi-val, .kpi-grid > div:last-child div[style*="font-size:22px"]');
       if (dashFrozen && invMoney.totalRub > 0) dashFrozen.textContent = fmtR(invMoney.totalRub);
     }
   }
@@ -1610,6 +1628,6 @@
   document.addEventListener('click', function () {
     setTimeout(syncAllPatch4Views, 60);
   });
-  setInterval(syncAllPatch4Views, 1000);
+  setInterval(syncAllPatch4Views, 800);
   setTimeout(syncAllPatch4Views, 200);
 })();
