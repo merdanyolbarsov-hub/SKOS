@@ -1583,75 +1583,33 @@
     `;
   };
 
-  const prevRender4 = window.render;
-  if (typeof prevRender4 === 'function') {
-    window.render = function () {
-      prevRender4.apply(this, arguments);
-      if (window.db) {
-        if (db.tab === 'inv') renderErpInventoryTab();
-        if (db.tab === 'fin') enhanceFinanceTab();
-        if (db.tab === 'sup') renderSuppliersAndAssetsTab();
-        if (db.tab === 'dash') {
-          const y = document.getElementById('f-yr')?.value || '2026';
-          const m = document.getElementById('f-mo')?.value || '11';
-          const invMoney = calcTotalInventoryMoney(y, m);
-          const dashFrozen = document.querySelector('#tab-dash .kpi-grid > div:last-child .kpi-val, #tab-dash .kpi-grid > div:last-child div[style*="font-size:22px"]');
-          if (dashFrozen && invMoney.totalRub > 0) dashFrozen.textContent = fmtR(invMoney.totalRub);
-        }
-      }
-    };
-  }
-
-  const prevTab4 = window.tab;
-  if (typeof prevTab4 === 'function') {
-    window.tab = function (id) {
-      prevTab4.apply(this, arguments);
-      if (id === 'inv') renderErpInventoryTab();
-      if (id === 'fin') enhanceFinanceTab();
-      if (id === 'sup') renderSuppliersAndAssetsTab();
-    };
-  }
-
-  setTimeout(function () {
-    if (window.db) {
-      if (db.tab === 'inv') renderErpInventoryTab();
-      if (db.tab === 'fin') enhanceFinanceTab();
-      if (db.tab === 'sup') renderSuppliersAndAssetsTab();
+    function syncAllPatch4Views() {
+    if (!window.db) return;
+    if (db.tab === 'inv' && !document.getElementById('skos-erp-inv-ready')) {
+      renderErpInventoryTab();
+      const t = document.getElementById('tab-inv');
+      if (t && t.firstElementChild) t.firstElementChild.id = 'skos-erp-inv-ready';
     }
-  }, 300);
-})();
-(function () {
-  // Умный архив организаций: скрывает закрытые ИП из новых форм, но сохраняет их в Сводке за периоды, где были обороты
-  function applySmartOrgArchive() {
-    if (!window.db || !Array.isArray(db.orgs)) return;
-
-    const curYr = document.getElementById('f-yr')?.value || '2026';
-    const curMo = document.getElementById('f-mo')?.value || '11';
-
-    // 1. В Сводке (таблица по ИП и ООО) скрываем архивные ИП ТОЛЬКО если за выбранный период у них 0 выручки и 0 расходов
-    const dashRows = document.querySelectorAll('#tab-dash table tbody tr');
-    dashRows.forEach(tr => {
-      const firstCell = tr.firstElementChild;
-      if (!firstCell) return;
-      const orgName = firstCell.textContent.trim();
-      const orgObj = db.orgs.find(o => o.name === orgName && o.archived);
-      if (!orgObj) return;
-
-      const hasRev = (db.reports || []).some(r => r.org === orgName && String(r.yr) === String(curYr) && (curMo === 'ALL' || String(r.mo) === String(curMo)) && Number(r.rev) > 0);
-      const hasExp = (db.expenses || []).some(e => e.org === orgName && String(e.yr) === String(curYr) && (curMo === 'ALL' || String(e.mo) === String(curMo)) && Number(e.amt) > 0);
-
-      tr.style.display = (hasRev || hasExp) ? '' : 'none';
-    });
-
-    // 2. В выпадающих списках (Отчёты, Налоги, Расходы) прячем архивные организации
-    document.querySelectorAll('#up-org, #tab-fin select:first-of-type').forEach(sel => {
-      Array.from(sel.options).forEach(opt => {
-        const isArch = db.orgs.some(o => o.name === opt.value && o.archived);
-        if (isArch) opt.style.display = 'none';
-      });
-    });
+    if (db.tab === 'fin') {
+      enhanceFinanceTab();
+    }
+    if (db.tab === 'sup' && !document.getElementById('skos-erp-sup-ready')) {
+      renderSuppliersAndAssetsTab();
+      const t = document.getElementById('tab-sup');
+      if (t && t.firstElementChild) t.firstElementChild.id = 'skos-erp-sup-ready';
+    }
+    if (db.tab === 'dash') {
+      const y = document.getElementById('f-yr')?.value || '2026';
+      const m = document.getElementById('f-mo')?.value || '11';
+      const invMoney = calcTotalInventoryMoney(y, m);
+      const dashFrozen = document.querySelector('#tab-dash .kpi-grid > div:last-child .kpi-val, #tab-dash .kpi-grid > div:last-child div[style*="font-size:22px"]');
+      if (dashFrozen && invMoney.totalRub > 0) dashFrozen.textContent = fmtR(invMoney.totalRub);
+    }
   }
 
-  setInterval(applySmartOrgArchive, 1500);
-  setTimeout(applySmartOrgArchive, 400);
+  document.addEventListener('click', function () {
+    setTimeout(syncAllPatch4Views, 60);
+  });
+  setInterval(syncAllPatch4Views, 1000);
+  setTimeout(syncAllPatch4Views, 200);
 })();
