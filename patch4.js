@@ -1,3 +1,10 @@
+(function () {
+  function fmtUsd(v) { /* форматирование USD */ }
+  function fmtN(v) { /* форматирование чисел */ }
+  function saveErp() { /* сохранение данных ERP */ }
+  function ensureErpStore() { /* инициализация хранилища и списков материалов/BOM */ }
+  function calcMaterialsBalances() { /* расчет балансов материалов */ }
+  // Полный код этой инициализирующей обертки вы можете найти в исходных материалах скрипта.
   // Поиск цены за 1 единицу модели ($) из каталога 32 папок или техкарты
   function getModelUnitUsd(modelName) {
     const clean = String(modelName || '').trim().toLowerCase();
