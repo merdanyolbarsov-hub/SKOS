@@ -733,3 +733,38 @@
     if (window.db && db.tab === 'abc') renderEnhancedAbc();
   }, 200);
 })();
+(function () {
+  // 1. Останавливаем лишние фоновые таймеры setInterval, грузящие процессор
+  for (let i = 1; i < 500; i++) {
+    try { clearInterval(i); } catch (e) {}
+  }
+
+  // 2. Ускоряем переключение вкладок: не перерисовываем 11 248 ШК в фоне, когда открыты другие вкладки
+  let lastSkuHash = '';
+  const origRender = window.render;
+  if (typeof origRender === 'function') {
+    window.render = function () {
+      const curTab = window.db ? db.tab : 'dash';
+      // Временно подменяем db.tab на 'fast', если открыта не вкладка товаров, чтобы patch2 не строил 11 000 строк впустую
+      if (curTab !== 'sku' && window.db) {
+        const realTab = db.tab;
+        db.tab = 'fast_skip';
+        try { origRender.apply(this, arguments); } finally { db.tab = realTab; }
+      } else {
+        origRender.apply(this, arguments);
+      }
+    };
+  }
+
+  // 3. Плавный поиск без подвисаний при наборе текста в каталоге на 11 000+ ШК
+  let searchTimer = null;
+  const origSearch = window.searchSku;
+  if (typeof origSearch === 'function') {
+    window.searchSku = function (q) {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () {
+        origSearch(q);
+      }, 250);
+    };
+  }
+})();
