@@ -2,11 +2,29 @@
   if (window.__skosPatch3Loaded) return;
   window.__skosPatch3Loaded = true;
 
+  // --- УСКОРЕНИЕ РАБОТЫ САЙТА (останавливаем лишние фоновые циклы без поломки вкладок) ---
+  setTimeout(function () {
+    for (let i = 1; i < 400; i++) {
+      try { clearInterval(i); } catch (e) {}
+    }
+  }, 800);
+
+  let searchDebounce = null;
+  const origSearchSku = window.searchSku;
+  if (typeof origSearchSku === 'function') {
+    window.searchSku = function (q) {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(function () {
+        origSearchSku(q);
+      }, 250);
+    };
+  }
+
   function normClean(v) { return String(v || '').replace(/^[\uFEFF\u200B]+/, '').trim(); }
   function normKey(v) { return normClean(v).toLowerCase().replace(/[\s\-_]+/g, ''); }
   function stripZero(v) { return v.replace(/^0+/, '').replace(/^ozn/, ''); }
 
-  // Поиск карточки товара в 32 папках (с учётом GTIN с нулём спереди, OZN и кода папки SKOS-...)
+  // Умный поиск модели, цвета, размера и себестоимости из 32 папок
   function resolveProductMeta(bcRaw, artRaw, nameRaw) {
     const bc = normClean(bcRaw);
     const art = normClean(artRaw);
@@ -33,7 +51,6 @@
       }
     }
 
-    // Извлекаем цвет и размер из строки (например "SKOS-B черный32" или "skos-fkzk серо-молочный XL")
     const srcText = (name + ' ' + art + ' ' + bc).trim();
     let parsedCol = '—';
     let parsedSiz = '—';
@@ -204,7 +221,6 @@
 
     const rawSales = Array.isArray(db.itemSales) ? db.itemSales : [];
     const groups = {};
-
     let totSold = 0, totRet = 0, totRev = 0, totCogs = 0, totFee = 0, totProf = 0;
 
     rawSales.forEach(it => {
@@ -227,12 +243,7 @@
       const cogs = Math.max(0, meta.usd * rate * netQty);
       const prof = rev - fee - cogs;
 
-      totSold += sq;
-      totRet += rq;
-      totRev += rev;
-      totCogs += cogs;
-      totFee += fee;
-      totProf += prof;
+      totSold += sq; totRet += rq; totRev += rev; totCogs += cogs; totFee += fee; totProf += prof;
 
       let gKey = meta.art;
       let gTitle = `${meta.art} — ${meta.modelTitle}`;
@@ -253,27 +264,10 @@
       }
 
       if (!groups[gKey]) {
-        groups[gKey] = {
-          key: gKey,
-          title: gTitle,
-          sub: gSub,
-          sQty: 0,
-          rQty: 0,
-          rev: 0,
-          cogs: 0,
-          fee: 0,
-          prof: 0,
-          mps: new Set(),
-          orgs: new Set()
-        };
+        groups[gKey] = { key: gKey, title: gTitle, sub: gSub, sQty: 0, rQty: 0, rev: 0, cogs: 0, fee: 0, prof: 0, mps: new Set(), orgs: new Set() };
       }
       const g = groups[gKey];
-      g.sQty += sq;
-      g.rQty += rq;
-      g.rev += rev;
-      g.cogs += cogs;
-      g.fee += fee;
-      g.prof += prof;
+      g.sQty += sq; g.rQty += rq; g.rev += rev; g.cogs += cogs; g.fee += fee; g.prof += prof;
       if (it.mp) g.mps.add(it.mp);
       if (it.org) {
         const oObj = (db.orgs || []).find(o => o.id === it.org);
@@ -282,13 +276,11 @@
     });
 
     const list = Object.values(groups).sort((a, b) => b.prof - a.prof);
-
     const posProfTotal = list.reduce((acc, x) => acc + Math.max(0, x.prof), 0);
     let cumProf = 0;
     list.forEach(x => {
-      if (x.prof <= 0 || posProfTotal <= 0) {
-        x.abcProf = 'C';
-      } else {
+      if (x.prof <= 0 || posProfTotal <= 0) { x.abcProf = 'C'; }
+      else {
         cumProf += x.prof;
         const share = (cumProf / posProfTotal) * 100;
         x.abcProf = share <= 80 ? 'A' : (share <= 95 ? 'B' : 'C');
@@ -299,9 +291,8 @@
     const posRevTotal = byRev.reduce((acc, x) => acc + Math.max(0, x.rev), 0);
     let cumRev = 0;
     byRev.forEach(x => {
-      if (x.rev <= 0 || posRevTotal <= 0) {
-        x.abcRev = 'C';
-      } else {
+      if (x.rev <= 0 || posRevTotal <= 0) { x.abcRev = 'C'; }
+      else {
         cumRev += x.rev;
         const share = (cumRev / posRevTotal) * 100;
         x.abcRev = share <= 80 ? 'A' : (share <= 95 ? 'B' : 'C');
@@ -325,14 +316,12 @@
 
     const tbody = sec.querySelector('tbody');
     if (!tbody) return;
-
     if (!list.length) {
       tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:18px;color:#64748b">Нет данных продаж за выбранный фильтр. Загрузите отчёты МП или сбросьте фильтры.</td></tr>';
       return;
     }
 
     const badgeCls = c => c === 'A' ? 'badge-green' : (c === 'B' ? 'badge-amber' : 'badge-red');
-
     tbody.innerHTML = list.map(x => {
       const shareProf = posProfTotal > 0 ? ((Math.max(0, x.prof) / posProfTotal) * 100).toFixed(1) : '0.0';
       const bo = (x.sQty + x.rQty) > 0 ? Math.round((x.sQty / (x.sQty + x.rQty)) * 100) : 100;
@@ -393,7 +382,6 @@
     const afterMp = rev - mpFeeTotal; // Ступень 1: Без учёта себестоимости (нагрузка МП)
     const grossProfit = afterMp - cogs; // Ступень 2: С себестоимостью, но ДО налогов, ЗП и офиса
 
-    // Налоги (1/3 квартала) и операционные расходы компании (если режим FULL)
     let taxSum = 0, opexSum = 0;
     const mode = db.mode || 'FULL';
     if (mode === 'FULL') {
@@ -457,7 +445,6 @@
       else dash.appendChild(box);
     }
 
-    // Расчёт долей для цветной полосы «Куда ушёл каждый рубль (100%)»
     const safeRev = Math.max(1, m.rev);
     const wMp = m.rev > 0 ? Math.min(100, Math.max(0, (m.mpFeeTotal / safeRev) * 100)) : 0;
     const wCogs = m.rev > 0 ? Math.min(100 - wMp, Math.max(0, (m.cogs / safeRev) * 100)) : 0;
@@ -553,10 +540,9 @@
         if (String(r.yr) !== String(targetYr) || String(r.mo) !== String(targetMo)) return false;
         if (fOrg && fOrg !== 'ALL' && r.org !== fOrg) return false;
         return true;
-      }).slice().reverse(); // от ранних к поздним
+      }).slice().reverse();
 
       if (reps.length > 0) {
-        // Группируем отчёты по неделям (1-я, 2-я, 3-я, 4-я, 5-я)
         const weeks = [
           { label: '1-я неделя (1–7 число)', rev: 0, mpFee: 0, cogs: 0, prof: 0, cnt: 0 },
           { label: '2-я неделя (8–14 число)', rev: 0, mpFee: 0, cogs: 0, prof: 0, cnt: 0 },
@@ -566,7 +552,6 @@
         ];
 
         reps.forEach((r, idx) => {
-          // Если в ID есть метка времени — берём день месяца, иначе распределяем последовательно по неделям
           let wIdx = idx % 4;
           const tsMatch = String(r.id || '').match(/r_(\d{13})/);
           if (tsMatch) {
@@ -682,7 +667,6 @@
     `;
   }
 
-  // Выгрузка сводного отчёта для руководителя в CSV (открывается в Excel)
   window.exportBossSummaryCsv = function () {
     const fYr = document.getElementById('f-yr')?.value || '2026';
     const fMo = document.getElementById('f-mo')?.value || '11';
@@ -709,7 +693,6 @@
     a.click();
   };
 
-  // --- ХУКИ ПЕРЕРИСОВКИ ---
   const origRender = window.render;
   if (typeof origRender === 'function') {
     window.render = function () {
@@ -732,32 +715,4 @@
     renderBossAnalyticsBlock();
     if (window.db && db.tab === 'abc') renderEnhancedAbc();
   }, 200);
-})();
-(function () {
-  // 1. Останавливаем лишние фоновые таймеры setInterval, грузящие процессор
-  for (let i = 1; i < 500; i++) {
-    try { clearInterval(i); } catch (e) {}
-  }
-
-  // 2. Ускоряем переключение вкладок: не перерисовываем 11 248 ШК в фоне, когда открыты другие вкладки
-  let lastSkuHash = '';
-  const origRender = window.render;
-  if (typeof origRender === 'function') {
-    window.render = function () {
-      const curTab = window.db ? db.tab : 'dash';
-      // Временно подменяем db.tab на 'fast', если открыта не вкладка товаров, чтобы patch2 не строил 11 000 строк впустую
-      if (curTab !== 'sku' && window.db) {
-        const realTab = db.tab;
-        (function () {
-  // Плавный поиск без подвисаний при наборе текста в каталоге на 11 000+ ШК
-  let searchTimer = null;
-  const origSearch = window.searchSku;
-  if (typeof origSearch === 'function') {
-    window.searchSku = function (q) {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(function () {
-        origSearch(q);
-      }, 250);
-    };
-  }
 })();
