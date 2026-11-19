@@ -870,4 +870,204 @@
   }, 500);
 })();
 
-  
+(function () {
+  // --- 1. ГОДЫ 2020–2050 И СРАВНЕНИЕ НЕСКОЛЬКИХ ЛЕТ ---
+  const compareYears = ['2024', '2025', '2026'];
+
+  window.toggleSkosYr = function (y) {
+    const idx = compareYears.indexOf(y);
+    if (idx >= 0) {
+      if (compareYears.length > 1) compareYears.splice(idx, 1);
+    } else {
+      compareYears.push(y);
+      compareYears.sort();
+    }
+    updateYearsAndDynamics();
+  };
+
+  window.addSkosYr = function (sel) {
+    const y = sel.value;
+    if (y && compareYears.indexOf(y) < 0) {
+      compareYears.push(y);
+      compareYears.sort();
+      updateYearsAndDynamics();
+    }
+    sel.value = '';
+  };
+
+  function updateYearsAndDynamics() {
+    ['f-yr', 'abc-f-yr', 'up-yr'].forEach(id => {
+      const sel = document.getElementById(id);
+      if (!sel || sel.options.length > 25) return;
+      const cur = sel.value || '2026';
+      const hasAll = Array.from(sel.options).some(o => o.value === 'ALL');
+      let h = hasAll ? '<option value="ALL">Все годы</option>' : '';
+      for (let y = 2020; y <= 2050; y++) h += `<option value="${y}">${y}</option>`;
+      sel.innerHTML = h;
+      sel.value = cur;
+    });
+
+    const dynBox = document.getElementById('skos-dyn-card');
+    if (!dynBox) return;
+    const header = dynBox.querySelector('.card-header');
+    const btnBar = header ? header.children.item(1) : null;
+    const yearBtn = btnBar ? Array.from(btnBar.querySelectorAll('button')).find(b => (b.textContent || '').includes('По годам')) : null;
+    if (!header || !yearBtn) return;
+
+    let bar = document.getElementById('skos-multi-yr-bar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'skos-multi-yr-bar';
+      bar.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;margin-bottom:10px;font-size:12px;';
+      header.insertAdjacentElement('afterend', bar);
+    }
+
+    const active = yearBtn.classList.contains('btn-primary');
+    bar.style.display = active ? 'flex' : 'none';
+    if (!active) return;
+
+    const base = Array.from(new Set(['2023', '2024', '2025', '2026', ...compareYears])).sort();
+    let addHtml = '<option value="">+ Добавить год (2020–2050)...</option>';
+    for (let y = 2020; y <= 2050; y++) {
+      if (base.indexOf(String(y)) < 0) addHtml += `<option value="${y}">${y} год</option>`;
+    }
+
+    bar.innerHTML = '<span style="font-weight:700;color:#334155">Сравнить годы:</span>' +
+      base.map(y => {
+        const on = compareYears.indexOf(y) >= 0;
+        return `<label style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;cursor:pointer;border:1px solid ${on ? '#2563eb' : '#cbd5e1'};background:${on ? '#eff6ff' : '#fff'};font-weight:${on ? '700' : '500'}">` +
+          `<input type="checkbox" ${on ? 'checked' : ''} onchange="toggleSkosYr('${y}')"> ${y}</label>`;
+      }).join('') +
+      `<select class="select" style="width:auto;padding:3px 8px;font-size:12px" onchange="addSkosYr(this)">${addHtml}</select>`;
+
+    const tbody = dynBox.querySelector('tbody');
+    if (!tbody || !window.db) return;
+    const fOrg = document.getElementById('f-org')?.value || 'ALL';
+
+    const rows = compareYears.map(y => {
+      const reps = (db.reports || []).filter(r => String(r.yr) === y && (fOrg === 'ALL' || r.org === fOrg));
+      let rev = 0, fee = 0, cogs = 0;
+      reps.forEach(r => {
+        rev += Number(r.rev) || 0;
+        fee += (Number(r.com) || 0) + (Number(r.log) || 0) + (Number(r.ads) || 0);
+        cogs += Number(r.cogs) || 0;
+      });
+      return { label: y + ' год', rev, fee, cogs, prof: rev - fee - cogs };
+    });
+
+    const tot = rows.reduce((a, x) => a + Math.max(0, x.rev), 0);
+    tbody.innerHTML = rows.map((row, idx) => {
+      const share = tot > 0 ? ((Math.max(0, row.rev) / tot) * 100).toFixed(1) : '0.0';
+      const mpP = row.rev > 0 ? ((row.fee / row.rev) * 100).toFixed(1) : '0.0';
+      const marP = row.rev > 0 ? ((row.prof / row.rev) * 100).toFixed(1) : '0.0';
+      let gr = '<span style="color:#94a3b8">—</span>';
+      if (idx > 0 && rows.at(idx - 1).rev > 0 && row.rev > 0) {
+        const d = ((row.rev - rows.at(idx - 1).rev) / rows.at(idx - 1).rev) * 100;
+        gr = `<span class="bold ${d >= 0 ? 'text-green' : 'text-red'}">${d >= 0 ? '+' : ''}${d.toFixed(1)}%</span>`;
+      }
+      return `<tr><td class="bold">${row.label}</td><td class="num bold">${fmtR(row.rev)}</td><td class="num"><span class="badge badge-blue">${share}%</span></td><td class="num">${gr}</td><td class="num">${fmtR(row.fee)} <span style="font-size:10.5px;color:#64748b">(${mpP}%)</span></td><td class="num">${fmtR(row.cogs)}</td><td class="num bold ${row.prof >= 0 ? 'text-green' : 'text-red'}">${fmtR(row.prof)} <span style="font-size:10.5px">(${marP}%)</span></td></tr>`;
+    }).join('');
+  }
+
+  // --- 2. РУЧНОЙ РЕДАКТОР СТОЛБЦОВ ОТЧЁТОВ МП (если МП поменял названия или добавил колонки) ---
+  const MAP_STORAGE_KEY = 'skos_v3_custom_col_aliases';
+  const defaultAliases = {
+    bc: 'Баркод, SKU, Ваш SKU, ШК, Штрихкод',
+    art: 'Артикул поставщика, Артикул, Артикул продавца',
+    qty: 'Кол-во, Количество, Количество доставленных товаров',
+    rev: 'Вайлдберриз реализовал товар, Сумма итого, Цена продажи, Выручка',
+    pay: 'К перечислению продавцу, Итого к начислению',
+    log: 'Услуги по доставке товара покупателю, Доставка покупателю, Логистика',
+    com: 'Хранение, Вознаграждение, Все услуги маркета за заказы, Комиссия',
+    ads: 'Общая сумма штрафов, Удержания, Буст продаж, Продвижение, Реклама'
+  };
+
+  window.openColMappingModal = function () {
+    let saved = { ...defaultAliases };
+    try {
+      const raw = JSON.parse(localStorage.getItem(MAP_STORAGE_KEY) || '{}');
+      saved = { ...saved, ...raw };
+    } catch (e) {}
+
+    const modal = document.createElement('div');
+    modal.className = 'modal-bg';
+    modal.innerHTML = `
+      <div class="modal-box" style="max-width:660px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="font-size:16px;font-weight:800">⚙️ Ручная настройка столбцов отчётов МП</h3>
+          <button type="button" class="btn" onclick="this.closest('.modal-bg').remove()">✕</button>
+        </div>
+        <p style="font-size:12px;color:#475569;margin-bottom:10px">
+          Если маркетплейс переименовал столбец или добавил новый — впишите его название через запятую в нужное поле (или удалите ненужное). Программа будет искать столбцы по этому списку.
+        </p>
+        <div style="display:grid;gap:8px;max-height:55vh;overflow-y:auto;padding-right:4px">
+          <div><label>Штрихкод / Баркод / SKU</label><input class="input" id="cm-bc" value="${saved.bc}"></div>
+          <div><label>Артикул продавца</label><input class="input" id="cm-art" value="${saved.art}"></div>
+          <div><label>Количество (шт.)</label><input class="input" id="cm-qty" value="${saved.qty}"></div>
+          <div><label>Выручка / Цена продажи</label><input class="input" id="cm-rev" value="${saved.rev}"></div>
+          <div><label>К перечислению продавцу</label><input class="input" id="cm-pay" value="${saved.pay}"></div>
+          <div><label>Логистика и доставка</label><input class="input" id="cm-log" value="${saved.log}"></div>
+          <div><label>Комиссия, хранение и услуги МП</label><input class="input" id="cm-com" value="${saved.com}"></div>
+          <div><label>Реклама, продвижение, штрафы и удержания</label><input class="input" id="cm-ads" value="${saved.ads}"></div>
+        </div>
+        <div style="margin-top:12px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn" id="cm-reset">↩️ Сбросить по умолчанию</button>
+          <div style="display:flex;gap:8px">
+            <button type="button" class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button>
+            <button type="button" class="btn btn-primary" id="cm-save">✅ Сохранить правила столбцов</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    document.getElementById('cm-reset').onclick = function () {
+      localStorage.removeItem(MAP_STORAGE_KEY);
+      modal.remove();
+      alert('Настройки столбцов сброшены на стандартные!');
+    };
+    document.getElementById('cm-save').onclick = function () {
+      const next = {
+        bc: document.getElementById('cm-bc').value.trim(),
+        art: document.getElementById('cm-art').value.trim(),
+        qty: document.getElementById('cm-qty').value.trim(),
+        rev: document.getElementById('cm-rev').value.trim(),
+        pay: document.getElementById('cm-pay').value.trim(),
+        log: document.getElementById('cm-log').value.trim(),
+        com: document.getElementById('cm-com').value.trim(),
+        ads: document.getElementById('cm-ads').value.trim()
+      };
+      localStorage.setItem(MAP_STORAGE_KEY, JSON.stringify(next));
+      modal.remove();
+      alert('Новые названия столбцов сохранены! Теперь они будут автоматически распознаваться при загрузке файлов.');
+    };
+  };
+
+  function injectColMappingBtn() {
+    const repTab = document.getElementById('tab-rep');
+    if (!repTab) return;
+    const hdr = repTab.querySelector('.card-header');
+    if (!hdr || document.getElementById('skos-col-map-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'skos-col-map-btn';
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = '⚙️ Настроить столбцы МП';
+    btn.onclick = window.openColMappingModal;
+    hdr.appendChild(btn);
+  }
+
+  document.addEventListener('click', function () {
+    setTimeout(function () {
+      updateYearsAndDynamics();
+      injectColMappingBtn();
+    }, 80);
+  });
+
+  setTimeout(function () {
+    updateYearsAndDynamics();
+    injectColMappingBtn();
+  }, 300);
+})();
+
