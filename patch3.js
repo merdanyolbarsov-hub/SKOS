@@ -776,3 +776,52 @@
   setTimeout(optimizeFoldersLazy, 300);
 })();
 
+(function () {
+  function fixClosedFoldersAndPrices() {
+    const wrap = document.getElementById('skos-folders-wrap');
+    if (!wrap || !window.db || !Array.isArray(db.skus)) return;
+
+    let fNames = {};
+    try { fNames = JSON.parse(localStorage.getItem('skos_v3_folder_names') || '{}'); } catch (e) {}
+
+    // Собираем список папок по порядку из базы
+    const foldersMap = new Map();
+    db.skus.forEach(s => {
+      const fk = String(s.art || '').trim() || 'Без артикула';
+      if (!foldersMap.has(fk)) {
+        foldersMap.set(fk, { key: fk, title: fNames[fk] || s.name || fk, count: 0 });
+      }
+      foldersMap.get(fk).count += 1;
+    });
+    const sortedFolders = Array.from(foldersMap.values()).sort((a, b) => a.key.localeCompare(b.key));
+
+    const summaries = wrap.querySelectorAll('details > summary');
+    summaries.forEach((sum, idx) => {
+      // 1. Убираем двойную цену (оставляем основную после тире)
+      const greenBadge = sum.querySelector('.badge-green');
+      if (greenBadge) {
+        const txt = greenBadge.textContent || '';
+        if (txt.includes('–') || txt.includes('-')) {
+          const parts = txt.split(/[–-]/);
+          const singlePrice = parts.at(-1).trim();
+          if (singlePrice) greenBadge.textContent = singlePrice;
+        }
+      }
+
+      // 2. Если у закрытой папки пустой левый блок — вписываем её название, артикул и кол-во ШК
+      const leftDiv = sum.children.item(0);
+      const info = sortedFolders.at(idx);
+      if (leftDiv && info && (!leftDiv.textContent || !leftDiv.textContent.trim())) {
+        leftDiv.innerHTML = `
+          <span style="font-size:15px">📁</span>
+          <span style="font-weight:800;font-size:13px;color:#0f172a">${info.key}</span>
+          <span style="font-size:12.5px;color:#475569">— ${info.title}</span>
+          <span class="badge badge-blue">${info.count} ШК</span>
+        `;
+      }
+    });
+  }
+
+  setInterval(fixClosedFoldersAndPrices, 1000);
+  setTimeout(fixClosedFoldersAndPrices, 300);
+})();
