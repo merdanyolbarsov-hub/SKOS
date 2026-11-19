@@ -738,5 +738,136 @@
   expandAllYearSelects();
   setInterval(expandAllYearSelects, 2000);
 })();
+(function () {
+  // 1. Заполняем годы 2020–2050 в Сводке (#f-yr), ABC (#abc-f-yr) и Отчётах (#up-yr), не трогая ДДС
+  function fillYears2020to2050() {
+    ['f-yr', 'abc-f-yr', 'up-yr'].forEach(id => {
+      const sel = document.getElementById(id);
+      if (!sel || sel.options.length > 25) return;
+
+      const curVal = sel.value || '2026';
+      const hasAll = Array.from(sel.options).some(o => o.value === 'ALL');
+      let html = hasAll ? '<option value="ALL">Все годы</option>' : '';
+      for (let y = 2020; y <= 2050; y++) {
+        html += '<option value="' + y + '">' + y + '</option>';
+      }
+      sel.innerHTML = html;
+      sel.value = curVal;
+    });
+  }
+
+  // Храним выбранные для сравнения годы (по умолчанию 2024, 2025, 2026)
+  let comparedYears = ['2024', '2025', '2026'];
+
+  window.toggleCompareYear = function (yr) {
+    const idx = comparedYears.indexOf(yr);
+    if (idx >= 0) {
+      if (comparedYears.length > 1) comparedYears.splice(idx, 1);
+    } else {
+      comparedYears.push(yr);
+      comparedYears.sort();
+    }
+    enhanceDynamicsMultiYear();
+  };
+
+  window.addCompareYearFromSelect = function (sel) {
+    const y = sel.value;
+    if (y && !comparedYears.includes(y)) {
+      comparedYears.push(y);
+      comparedYears.sort();
+      enhanceDynamicsMultiYear();
+    }
+    sel.value = '';
+  };
+
+  // 2. Панель выбора нескольких годов (например, 3 года для сравнения) при нажатии «📊 По годам»
+  function enhanceDynamicsMultiYear() {
+    const dynBox = document.getElementById('skos-dyn-card');
+    if (!dynBox) return;
+
+    const header = dynBox.querySelector('.card-header');
+    const btnBar = header ? header.children.item(1) : null;
+    const yearBtn = btnBar ? Array.from(btnBar.querySelectorAll('button')).find(b => (b.textContent || '').includes('По годам')) : null;
+    if (!header || !yearBtn) return;
+
+    const oldPick = document.getElementById('skos-dyn-yr-pick');
+    if (oldPick) oldPick.remove();
+
+    let multiBar = document.getElementById('skos-multi-yr-bar');
+    if (!multiBar) {
+      multiBar = document.createElement('div');
+      multiBar.id = 'skos-multi-yr-bar';
+      multiBar.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;margin-bottom:10px;font-size:12px;';
+      header.insertAdjacentElement('afterend', multiBar);
+    }
+
+    const isYearMode = yearBtn.classList.contains('btn-primary');
+    multiBar.style.display = isYearMode ? 'flex' : 'none';
+    if (!isYearMode) return;
+
+    // Отрисовываем чипсы с галочками для выбранных годов + выбор любого года 2020–2050
+    const quickList = Array.from(new Set(['2023', '2024', '2025', '2026', ...comparedYears])).sort();
+    let addOpts = '<option value="">+ Добавить год...</option>';
+    for (let y = 2020; y <= 2050; y++) {
+      if (!quickList.includes(String(y))) {
+        addOpts += '<option value="' + y + '">' + y + ' год</option>';
+      }
+    }
+
+    multiBar.innerHTML =
+      '<span style="font-weight:700;color:#334155">Сравнить годы:</span>' +
+      quickList.map(y => {
+        const checked = comparedYears.includes(y);
+        return '<label style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;cursor:pointer;border:1px solid ' + (checked ? '#2563eb' : '#cbd5e1') + ';background:' + (checked ? '#eff6ff' : '#fff') + ';font-weight:' + (checked ? '700' : '500') + '">' +
+          '<input type="checkbox" ' + (checked ? 'checked' : '') + ' onchange="toggleCompareYear(\'' + y + '\')"> ' + y +
+        '</label>';
+      }).join('') +
+      '<select class="select" style="width:auto;padding:3px 8px;font-size:12px" onchange="addCompareYearFromSelect(this)">' + addOpts + '</select>';
+
+    // Пересчитываем таблицу строго по отмеченным годам
+    const tbody = dynBox.querySelector('tbody');
+    if (!tbody || !window.db) return;
+    const fOrg = document.getElementById('f-org')?.value || 'ALL';
+
+    const rows = comparedYears.map(y => {
+      const reps = (db.reports || []).filter(r => String(r.yr) === y && (fOrg === 'ALL' || r.org === fOrg));
+      let rev = 0, mpFee = 0, cogs = 0;
+      reps.forEach(r => {
+        rev += Number(r.rev) || 0;
+        mpFee += (Number(r.com) || 0) + (Number(r.log) || 0) + (Number(r.ads) || 0);
+        cogs += Number(r.cogs) || 0;
+      });
+      return { label: y + ' год', rev, mpFee, cogs, prof: rev - mpFee - cogs };
+    });
+
+    const totRev = rows.reduce((a, x) => a + Math.max(0, x.rev), 0);
+    tbody.innerHTML = rows.map((row, idx) => {
+      const share = totRev > 0 ? ((Math.max(0, row.rev) / totRev) * 100).toFixed(1) : '0.0';
+      const mpPct = row.rev > 0 ? ((row.mpFee / row.rev) * 100).toFixed(1) : '0.0';
+      const marPct = row.rev > 0 ? ((row.prof / row.rev) * 100).toFixed(1) : '0.0';
+      let gr = '<span style="color:#94a3b8">—</span>';
+      if (idx > 0 && rows[idx - 1].rev > 0 && row.rev > 0) {
+        const d = ((row.rev - rows[idx - 1].rev) / rows[idx - 1].rev) * 100;
+        gr = '<span class="bold ' + (d >= 0 ? 'text-green' : 'text-red') + '">' + (d >= 0 ? '+' : '') + d.toFixed(1) + '%</span>';
+      }
+      return '<tr>' +
+        '<td class="bold">' + row.label + '</td>' +
+        '<td class="num bold">' + fmtR(row.rev) + '</td>' +
+        '<td class="num"><span class="badge badge-blue">' + share + '%</span></td>' +
+        '<td class="num">' + gr + '</td>' +
+        '<td class="num">' + fmtR(row.mpFee) + ' <span style="font-size:10.5px;color:#64748b">(' + mpPct + '%)</span></td>' +
+        '<td class="num">' + fmtR(row.cogs) + '</td>' +
+        '<td class="num bold ' + (row.prof >= 0 ? 'text-green' : 'text-red') + '">' + fmtR(row.prof) + ' <span style="font-size:10.5px">(' + marPct + '%)</span></td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  fillYears2020to2050();
+  enhanceDynamicsMultiYear();
+  setInterval(function () {
+    fillYears2020to2050();
+    enhanceDynamicsMultiYear();
+  }, 500);
+})();
 
   
