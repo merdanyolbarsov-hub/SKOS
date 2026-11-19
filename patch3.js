@@ -1058,7 +1058,8 @@
     hdr.appendChild(btn);
   }
 
-  document.addEventListener('click', function () {
+    document.addEventListener('click', function (ev) {
+    if (ev.target && ev.target.closest('#skos-multi-yr-bar')) return;
     setTimeout(function () {
       updateYearsAndDynamics();
       injectColMappingBtn();
