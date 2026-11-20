@@ -799,4 +799,18 @@
     injectUeButton();
     if (window.db?.tab) window.tab(window.db.tab);
   }, 200);
+    // --- ЗАЩИТА ОТ СКРЫТИЯ ВКЛАДОК СТАРЫМИ ПАТЧАМИ (УБИРАЕТ БЕЛЫЙ ЭКРАН) ---
+  setInterval(function () {
+    const cur = window.db?.tab || 'dash';
+    const sec = document.getElementById('tab-' + cur);
+    if (sec && sec.classList.contains('hidden')) {
+      document.querySelectorAll('main.content > section').forEach(s => s.classList.toggle('hidden', s.id !== 'tab-' + cur));
+    }
+    if (cur === 'ue' && sec && !sec.innerHTML.trim()) renderUeSection();
+    if (cur === 'stk' && sec && !sec.querySelector('.card-header')) renderStkSection();
+    if (cur === 'dds' && !document.getElementById('p4-dds-box')) enhanceDdsSection();
+    if (cur === 'exp' && !document.getElementById('p4-exp-extra')) enhanceExpSection();
+    if (cur === 'sup' && !document.getElementById('p4-sup-os-box')) enhanceSupSection();
+    if (cur === 'dash' && !document.getElementById('p4-dash-bal')) enhanceDashBalance();
+  }, 300);
 })();
