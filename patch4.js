@@ -1648,21 +1648,32 @@
     if (typeof render === 'function') render();
     alert(added > 0 ? `Успешно подтянуто новых налогов из ДДС: ${added} шт.` : 'Все налоги из ДДС уже загружены ранее.');
   };
-
+  
   function syncAllPatch4Views() {
     if (!window.db) return;
 
-        // 1. Вкладка «Запасы, Брак и Фурнитура»
-    const invSec = document.getElementById('tab-inv') || document.getElementById('tab-stock');
-    if (invSec && invSec.offsetParent !== null && !invSec.querySelector('#skos-erp-inv-ready')) {
+    // 1. Вкладка «Запасы, Брак и Фурнитура» (ищем видимую секцию по заголовку, НЕ меняя её id!)
+    const invSec = Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
+      el.offsetParent !== null && (el.textContent || '').includes('Конструктор аксессуаров и фурнитуры')
+    );
+    if (invSec && !invSec.querySelector('#skos-erp-inv-ready')) {
+      const origId = invSec.id;
+      invSec.id = 'tab-inv';
       renderErpInventoryTab();
+      invSec.id = origId || 'tab-inv';
       if (invSec.firstElementChild) invSec.firstElementChild.id = 'skos-erp-inv-ready';
     }
 
-    // 2. Вкладка «Расходы и Налоги (КВ/3)» (строго отдельная секция, не пересекается с Запасами)
-    const finSec = document.getElementById('tab-fin') || document.getElementById('tab-exp');
-    if (finSec && finSec.offsetParent !== null && finSec !== invSec) {
+    // 2. Вкладка «Расходы и Налоги (КВ/3)» (ищем видимую секцию по заголовку, НЕ меняя её id!)
+    const finSec = Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
+      el.offsetParent !== null && (el.textContent || '').includes('Налоги от бухгалтера')
+    );
+    if (finSec) {
+      const origFinId = finSec.id;
+      finSec.id = 'tab-fin';
       enhanceFinanceTab();
+      finSec.id = origFinId || 'tab-fin';
+
       const hdr = finSec.querySelector('.card:first-child .card-header');
       if (hdr && !document.getElementById('skos-pull-tax-dds')) {
         const btn = document.createElement('button');
