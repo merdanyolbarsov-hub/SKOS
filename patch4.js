@@ -1652,23 +1652,16 @@
   function syncAllPatch4Views() {
     if (!window.db) return;
 
-    // 1. Вкладка «Запасы, Брак и Фурнитура»
-    const invSec = document.getElementById('tab-inv') || document.getElementById('tab-stock') ||
-      Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
-        el.offsetParent !== null && (el.textContent || '').includes('Конструктор аксессуаров и фурнитуры')
-      );
+        // 1. Вкладка «Запасы, Брак и Фурнитура»
+    const invSec = document.getElementById('tab-inv') || document.getElementById('tab-stock');
     if (invSec && invSec.offsetParent !== null && !invSec.querySelector('#skos-erp-inv-ready')) {
-      invSec.id = 'tab-inv';
       renderErpInventoryTab();
       if (invSec.firstElementChild) invSec.firstElementChild.id = 'skos-erp-inv-ready';
     }
 
-    // 2. Вкладка «Расходы и Налоги (КВ/3)»
-    const finSec = Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
-      el.id !== 'tab-inv' && el.offsetParent !== null && (el.textContent || '').includes('Налоги от бухгалтера')
-    );
-    if (finSec) {
-      finSec.id = 'tab-fin';
+    // 2. Вкладка «Расходы и Налоги (КВ/3)» (строго отдельная секция, не пересекается с Запасами)
+    const finSec = document.getElementById('tab-fin') || document.getElementById('tab-exp');
+    if (finSec && finSec.offsetParent !== null && finSec !== invSec) {
       enhanceFinanceTab();
       const hdr = finSec.querySelector('.card:first-child .card-header');
       if (hdr && !document.getElementById('skos-pull-tax-dds')) {
