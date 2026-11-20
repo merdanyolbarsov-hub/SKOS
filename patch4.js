@@ -613,8 +613,9 @@
     enhanceDdsSection();
   };
 
-  window.importDdsCsvP4 = function (ev) {
-    const f = ev.target.files?.; if (!f) return;
+   window.importDdsCsvP4 = function (ev) {
+    const f = ev.target.files && ev.target.files.item(0);
+    if (!f) return;
     const sec = document.getElementById('tab-dds');
     const wSel = sec ? sec.querySelector('select') : null;
     const wallet = wSel ? wSel.value : 'Банк / Касса';
@@ -622,8 +623,9 @@
     reader.onload = function (e) {
       const lines = e.target.result.split(/\r?\n/).filter(l => l.trim());
       if (lines.length < 2) return alert('Файл пустой.');
-      const sep = lines.includes(';') ? ';' : ',';
-      const hdr = lines.split(sep).map(h => h.replace(/^"|"$/g, '').trim().toLowerCase());
+      const firstLine = lines.at(0) || '';
+      const sep = firstLine.includes(';') ? ';' : ',';
+      const hdr = firstLine.split(sep).map(h => h.replace(/^"|"$/g, '').trim().toLowerCase());
       const iD = hdr.findIndex(h => /дата|date/.test(h)), iIn = hdr.findIndex(h => /приход|поступ|кредит/.test(h));
       const iOut = hdr.findIndex(h => /расход|списан|дебет/.test(h)), iS = hdr.findIndex(h => /сумма|amount/.test(h));
       const iDesc = hdr.findIndex(h => /назначен|коммент|описан|контрагент/.test(h)), iDoc = hdr.findIndex(h => /номер|док/.test(h));
@@ -632,22 +634,27 @@
       let add = 0, skp = 0;
       lines.slice(1).forEach(line => {
         const c = line.split(sep).map(x => x.replace(/^"|"$/g, '').trim());
-        const dt = iD >= 0 ? c[iD] : ''; if (!dt) return;
+        const dt = iD >= 0 ? (c.at(iD) || '') : '';
+        if (!dt) return;
         const num = v => parseFloat(String(v || '0').replace(/\s+/g, '').replace(',', '.')) || 0;
         let amt = 0, dir = 'out';
-        if (iIn >= 0 && num(c[iIn]) > 0) { amt = num(c[iIn]); dir = 'in'; }
-        else if (iOut >= 0 && num(c[iOut]) > 0) { amt = num(c[iOut]); dir = 'out'; }
-        else if (iS >= 0 && num(c[iS]) !== 0) { const r = num(c[iS]); dir = r > 0 ? 'in' : 'out'; amt = Math.abs(r); }
+        if (iIn >= 0 && num(c.at(iIn)) > 0) { amt = num(c.at(iIn)); dir = 'in'; }
+        else if (iOut >= 0 && num(c.at(iOut)) > 0) { amt = num(c.at(iOut)); dir = 'out'; }
+        else if (iS >= 0 && num(c.at(iS)) !== 0) { const r = num(c.at(iS)); dir = r > 0 ? 'in' : 'out'; amt = Math.abs(r); }
         if (!amt) return;
-        const desc = iDesc >= 0 ? c[iDesc] : '', docNum = iDoc >= 0 ? c[iDoc] : '';
+        const desc = iDesc >= 0 ? (c.at(iDesc) || '') : '';
+        const docNum = iDoc >= 0 ? (c.at(iDoc) || '') : '';
         const key = `${dt}|${wallet}|${amt}|${desc}|${docNum}`;
         if (seen.has(key)) { skp++; return; }
         seen.add(key);
-        let iso = dt; const m = dt.match(/^(\d{2})\.(\d{2})\.(\d{4})$/); if (m) iso = `${m}-${m}-${m}`;
+        let iso = dt;
+        const m = dt.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+        if (m) iso = `${m.at(3)}-${m.at(2)}-${m.at(1)}`;
         window.db.dds.unshift({ id: 'dds_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5), date: iso, wallet, acc: wallet, type: dir, dir, cat: dir === 'in' ? 'Поступление' : 'Расход', amount: amt, sum: amt, desc, comment: desc, docNum });
         add++;
       });
-      pSave(); if (typeof render === 'function') render();
+      pSave();
+      if (typeof render === 'function') render();
       alert(`✅ Импорт ДДС: добавлено ${add} операций (включая разные суммы/назначения в 1 день), пропущено дублей: ${skp}.`);
     };
     reader.readAsText(f, 'UTF-8');
@@ -681,7 +688,7 @@
   window.addTaxWholeP4 = function () {
     const sec = document.getElementById('tab-exp'); if (!sec) return;
     const sels = sec.querySelectorAll('select');
-    const org = sels?.value || 'ИП Каримов Артем', type = sels?.value || 'АУСН', yr = sels?.value || '2026';
+    const org = sels.item(0)?.value || 'ИП Каримов Артем', type = sels.item(1)?.value || 'АУСН', yr = sels.item(2)?.value || '2026';
     const inp = sec.querySelector('input[type="number"]');
     const amt = Number(inp?.value || 0);
     if (amt <= 0) return alert('Введите сумму налога.');
