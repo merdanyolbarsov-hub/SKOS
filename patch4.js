@@ -422,7 +422,6 @@
           </tbody>
         </table>
       `;
-    }
     } else if (st === 'sew') {
       const bomListHtml = (e.bom || []).map((b, bIdx) => {
         const uCost = (b.items || []).reduce((s, it) => s + (Number(it.norm) || 0) * (Number(it.priceUsd) || 0), 0);
