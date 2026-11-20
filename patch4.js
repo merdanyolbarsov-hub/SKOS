@@ -1652,16 +1652,16 @@
   function syncAllPatch4Views() {
     if (!window.db) return;
 
-    // 1. Вкладка «Запасы, Брак и Фурнитура» (ищем видимую секцию по заголовку, НЕ меняя её id!)
-    const invSec = Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
+       // 1. Вкладка «Запасы, Брак и Фурнитура»
+    const invSec = document.getElementById('tab-inv') || Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
       el.offsetParent !== null && (el.textContent || '').includes('Конструктор аксессуаров и фурнитуры')
     );
-    if (invSec && !invSec.querySelector('#skos-erp-inv-ready')) {
-      const origId = invSec.id;
+    if (invSec && invSec.offsetParent !== null) {
       invSec.id = 'tab-inv';
-      renderErpInventoryTab();
-      invSec.id = origId || 'tab-inv';
-      if (invSec.firstElementChild) invSec.firstElementChild.id = 'skos-erp-inv-ready';
+      if (!invSec.querySelector('#skos-erp-inv-ready')) {
+        renderErpInventoryTab();
+        if (invSec.firstElementChild) invSec.firstElementChild.id = 'skos-erp-inv-ready';
+      }
     }
 
     // 2. Вкладка «Расходы и Налоги (КВ/3)» (ищем видимую секцию по заголовку, НЕ меняя её id!)
