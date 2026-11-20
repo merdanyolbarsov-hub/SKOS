@@ -540,7 +540,24 @@
       </table>
     `;
   }
-  // --- ВКЛАДКА «ПОШИВ / ЗАКАЗЫ В РАБОТУ (НЗП) И ТЕХКАРТЫ» ---
+  // --- ЕДИНЫЙ СПРАВОЧНИК ВСЕХ МОДЕЛЕЙ (ТЕХКАРТЫ + ТОВАРЫ) ---
+  function getAllCatalogModels() {
+    const erp = ensureErpStore();
+    const set = new Set();
+    (erp.bom || []).forEach(b => { if (b && b.product) set.add(String(b.product).trim()); });
+    if (window.db) {
+      ['products', 'items', 'catalog', 'sku', 'goods'].forEach(k => {
+        if (Array.isArray(window.db[k])) {
+          window.db[k].forEach(it => {
+            const name = typeof it === 'string' ? it : (it.name || it.title || it.product || it.model);
+            if (name) set.add(String(name).trim());
+          });
+        }
+      });
+    }
+    return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b, 'ru'));
+  }
+
   window.createProductionOrder = function (e) {
     e.preventDefault();
     const erp = ensureErpStore();
@@ -552,7 +569,9 @@
 
     const bom = (erp.bom || []).find(b => b.product.toLowerCase() === product.toLowerCase());
     if (!bom || !Array.isArray(bom.items) || !bom.items.length) {
-      alert('Для модели «' + product + '» не найдена техкарта (нормы расхода). Сначала создайте её ниже в конструкторе норм.');
+      alert('Для модели «' + product + '» пока не заполнена техкарта. Выберите её в конструкторе ниже и добавьте материалы.');
+      const inp = document.getElementById('bom-prod-name');
+      if (inp) { inp.value = product; inp.focus(); }
       return;
     }
 
@@ -568,17 +587,9 @@
     });
 
     erp.orders.unshift({
-      id: 'ord_' + Date.now(),
-      date,
-      doneDate: '',
-      status: 'WIP',
-      product,
-      qty,
-      totalUsd,
-      comment: comment || `Заказ товара "${product}" в объеме "${qty}"`,
-      lines
+      id: 'ord_' + Date.now(), date, doneDate: '', status: 'WIP', product, qty, totalUsd,
+      comment: comment || `Заказ товара "${product}" в объеме "${qty}"`, lines
     });
-
     saveErp();
     renderErpInventoryTab();
   };
@@ -587,9 +598,8 @@
     const erp = ensureErpStore();
     const ord = erp.orders.at(idx);
     if (!ord) return;
-    const doneDate = prompt('Введите дату выполнения заказа (ДД.ММ.ГГГГ или ГГГГ-ММ-ДД):', new Date().toISOString().slice(0, 10));
+    const doneDate = prompt('Введите дату выполнения заказа (ГГГГ-ММ-ДД):', new Date().toISOString().slice(0, 10));
     if (!doneDate) return;
-
     ord.status = 'DONE';
     ord.doneDate = doneDate;
 
@@ -631,19 +641,25 @@
     if (!prod || !matName || norm <= 0) return;
 
     let bom = erp.bom.find(b => b.product.toLowerCase() === prod.toLowerCase());
-    if (!bom) {
-      bom = { product: prod, items: [] };
-      erp.bom.push(bom);
-    }
+    if (!bom) { bom = { product: prod, items: [] }; erp.bom.push(bom); }
     const ex = bom.items.find(x => x.matName === matName);
     if (ex) { ex.norm = norm; ex.priceUsd = priceUsd; }
     else bom.items.push({ matName, norm, priceUsd });
+    saveErp();
+    renderErpInventoryTab();
+  };
 
+  window.updateBomItemField = function (bIdx, iIdx, field, val) {
+    const item = ensureErpStore().bom?.[bIdx]?.items?.[iIdx];
+    const num = Number(val);
+    if (!item || isNaN(num) || num < 0) return;
+    item[field] = num;
     saveErp();
     renderErpInventoryTab();
   };
 
   window.delBomItemRow = function (bIdx, iIdx) {
+    if (!confirm('Удалить эту позицию из техкарты?')) return;
     const erp = ensureErpStore();
     const bom = erp.bom.at(bIdx);
     if (!bom) return;
@@ -652,6 +668,124 @@
     saveErp();
     renderErpInventoryTab();
   };
+
+  window.deleteWholeBom = function (bIdx) {
+    const erp = ensureErpStore();
+    const bom = erp.bom.at(bIdx);
+    if (!bom || !confirm(`Удалить всю техкарту для модели «${bom.product}»?`)) return;
+    erp.bom.splice(bIdx, 1);
+    saveErp();
+    renderErpInventoryTab();
+  };
+
+  window.selectModelForBom = function (prodName) {
+    const inp = document.getElementById('bom-prod-name');
+    if (inp) { inp.value = prodName; inp.focus(); inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  };
+  function buildOrdersAndBomHtml() {
+    const erp = ensureErpStore();
+    const allModels = getAllCatalogModels();
+    const bomNames = new Set((erp.bom || []).map(b => b.product.toLowerCase()));
+
+    const prodOpts = allModels.map(m => {
+      const hasBom = bomNames.has(m.toLowerCase());
+      return `<option value="${m}">${m}${hasBom ? ' ✅' : ' (нет техкарты)'}</option>`;
+    }).join('');
+
+    const matOpts = ['Пошив одежды'].concat((erp.materials || []).map(m => m.name))
+      .map(n => `<option value="${n}">${n}</option>`).join('');
+
+    const datalistOpts = allModels.map(m => `<option value="${m}">`).join('');
+
+    const bomCardsHtml = (erp.bom || []).map((b, bIdx) => {
+      const unitCost = (b.items || []).reduce((s, it) => s + (Number(it.norm) || 0) * (Number(it.priceUsd) || 0), 0);
+      return `
+        <details open style="border:1px solid #cbd5e1;border-radius:8px;background:#fff;margin-bottom:8px;padding:8px 10px">
+          <summary style="cursor:pointer;font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center">
+            <span>▶ ${b.product} — <span style="color:#0369a1">Себест.: ${fmtUsd(unitCost)}</span> (${(b.items || []).length} поз.)</span>
+            <span style="display:flex;gap:6px">
+              <button type="button" class="btn" style="padding:2px 8px;font-size:11.5px" onclick="event.preventDefault();selectModelForBom('${b.product.replace(/'/g, "\\'")}')">➕ Добавить позицию</button>
+              <button type="button" class="btn btn-danger" style="padding:2px 8px;font-size:11.5px" onclick="event.preventDefault();deleteWholeBom(${bIdx})">🗑️ Удалить техкарту</button>
+            </span>
+          </summary>
+          <table style="margin-top:8px;font-size:12px">
+            <thead><tr><th>Материал / Работа</th><th class="num">Норма на 1 шт.</th><th class="num">Цена ед. ($)</th><th class="num">Итого на 1 шт. ($)</th><th>Удалить</th></tr></thead>
+            <tbody>
+              ${(b.items || []).map((it, iIdx) => {
+                const rowUsd = (Number(it.norm) || 0) * (Number(it.priceUsd) || 0);
+                return `
+                  <tr>
+                    <td class="bold">${it.matName}</td>
+                    <td class="num"><input type="number" step="0.0001" class="input" style="width:95px;text-align:right;padding:3px 6px" value="${it.norm}" onchange="updateBomItemField(${bIdx},${iIdx},'norm',this.value)"></td>
+                    <td class="num"><input type="number" step="0.0001" class="input" style="width:95px;text-align:right;padding:3px 6px" value="${it.priceUsd}" onchange="updateBomItemField(${bIdx},${iIdx},'priceUsd',this.value)"></td>
+                    <td class="num bold">${fmtUsd(rowUsd)}</td>
+                    <td style="text-align:center"><button type="button" class="btn btn-danger" style="padding:2px 7px" onclick="delBomItemRow(${bIdx},${iIdx})">✕</button></td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </details>
+      `;
+    }).join('') || '<div style="color:#64748b;font-size:12.5px">Техкарт пока нет. Выберите модель выше и добавьте первую позицию.</div>';
+
+    return `
+      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px;margin-bottom:14px">
+        <div style="font-weight:800;font-size:13px;color:#92400e;margin-bottom:8px">✂️ Запустить новый заказ в пошив (Калькулятор авто-списания по техкарте)</div>
+        <form onsubmit="createProductionOrder(event)" class="form-grid" style="grid-template-columns:1fr 2fr 1fr 2fr auto;gap:8px">
+          <div><label>Дата запуска</label><input id="erp-ord-date" type="date" class="input" required value="${new Date().toISOString().slice(0, 10)}"></div>
+          <div><label>Модель товара (все модели и техкарты)</label><select id="erp-ord-prod" class="select" required>${prodOpts}</select></div>
+          <div><label>Объём (шт.)</label><input id="erp-ord-qty" type="number" class="input" required placeholder="5550"></div>
+          <div><label>Комментарий / № заказа</label><input id="erp-ord-com" class="input" placeholder="Заказ на фабрику ТМ"></div>
+          <div><button type="submit" class="btn btn-primary">⚙️ Списать сырьё и запустить</button></div>
+        </form>
+      </div>
+
+      <div style="font-weight:800;font-size:13.5px;margin-bottom:8px">📋 Журнал заказов в работе (НЗП) и выполненных партий</div>
+      <table style="margin-bottom:18px">
+        <thead><tr><th>Дата запуска</th><th>Статус / Дата готовн.</th><th>Модель</th><th class="num">Кол-во шт.</th><th class="num">Цена 1 шт. ($)</th><th class="num">Итого USD</th><th>Комментарий</th><th>Действия</th></tr></thead>
+        <tbody>
+          ${(erp.orders || []).map((o, idx) => {
+            const uPrice = o.qty > 0 ? o.totalUsd / o.qty : 0;
+            const stBadge = o.status === 'WIP'
+              ? '<span class="badge badge-amber">⏳ В работе (НЗП)</span>'
+              : `<span class="badge badge-green">✅ Готов (${o.doneDate})</span>`;
+            return `
+              <tr>
+                <td>${o.date}</td>
+                <td>${stBadge}</td>
+                <td class="bold">${o.product}</td>
+                <td class="num bold">${fmtN(o.qty)}</td>
+                <td class="num">${fmtUsd(uPrice)}</td>
+                <td class="num bold">${fmtUsd(o.totalUsd)}</td>
+                <td style="font-size:11.5px;color:#475569">${o.comment}</td>
+                <td style="white-space:nowrap">
+                  ${o.status === 'WIP' ? `<button type="button" class="btn btn-success" style="padding:3px 8px" onclick="completeProductionOrder(${idx})">✅ Выполнен</button>` : ''}
+                  <button type="button" class="btn btn-danger" style="padding:3px 7px" onclick="deleteProductionOrder(${idx})">✕</button>
+                </td>
+              </tr>
+            `;
+          }).join('') || '<tr><td colspan="8" style="text-align:center;color:#64748b;padding:12px">Заказов пока нет.</td></tr>'}
+        </tbody>
+      </table>
+
+      <div style="border:1px solid #cbd5e1;border-radius:10px;padding:12px;background:#f8fafc">
+        <div style="font-weight:800;font-size:13.5px;margin-bottom:8px">📐 Конструктор норм расхода (Техкарты моделей — редактирование, добавление, удаление)</div>
+        <form onsubmit="addBomItemRow(event)" class="form-grid" style="grid-template-columns:1.8fr 1.8fr 1fr 1fr auto;gap:8px;margin-bottom:12px">
+          <div>
+            <label>Модель товара (выберите из списка или впишите новую)</label>
+            <input id="bom-prod-name" class="input" list="bom-prod-list" required placeholder="Выберите или введите модель...">
+            <datalist id="bom-prod-list">${datalistOpts}</datalist>
+          </div>
+          <div><label>Материал / Работа</label><select id="bom-mat-name" class="select" required>${matOpts}</select></div>
+          <div><label>Норма на 1 шт.</label><input id="bom-norm" type="number" step="0.0001" class="input" required placeholder="1.25"></div>
+          <div><label>Цена ед. ($)</label><input id="bom-price" type="number" step="0.0001" class="input" required placeholder="2.65"></div>
+          <div><button type="submit" class="btn btn-primary">+ В техкарту</button></div>
+        </form>
+        ${bomCardsHtml}
+      </div>
+    `;
+  }
   function buildOrdersAndBomHtml() {
     const erp = ensureErpStore();
     const prodOpts = (erp.bom || []).map(b => `<option value="${b.product}">${b.product}</option>`).join('');
@@ -1662,6 +1796,20 @@
         renderErpInventoryTab();
         if (invSec.firstElementChild) invSec.firstElementChild.id = 'skos-erp-inv-ready';
       }
+    }
+    
+    // Автоподстановка единого списка моделей (техкарты + товары) во все поля ввода моделей
+    if (typeof getAllCatalogModels === 'function') {
+      let sharedDl = document.getElementById('bom-prod-list');
+      if (!sharedDl) {
+        sharedDl = document.createElement('datalist');
+        sharedDl.id = 'bom-prod-list';
+        document.body.appendChild(sharedDl);
+      }
+      sharedDl.innerHTML = getAllCatalogModels().map(m => `<option value="${m}">`).join('');
+      document.querySelectorAll('#tab-inv input[placeholder*="Брюки"], #tab-inv input[placeholder*="Модель"], #tab-inv input[id*="fg-prod"], #tab-inv input[id*="def-prod"]').forEach(inp => {
+        inp.setAttribute('list', 'bom-prod-list');
+      });
     }
 
     // 2. Вкладка «Расходы и Налоги (КВ/3)» (ищем видимую секцию по заголовку, НЕ меняя её id!)
