@@ -58,6 +58,7 @@
     return e;
   }
 
+    // --- ЖИВЫЕ СПРАВОЧНИКИ ДЛЯ ВСЕХ ВЫПАДАЮЩИХ СПИСКОВ ---
   function getModelsList() {
     const e = ensureStore();
     const map = new Map();
@@ -75,6 +76,12 @@
         map.set(k.toLowerCase(), { name: k, usd: u || prev.usd, hasBom: true });
       }
     });
+    (window.db?.itemSales || []).forEach(s => {
+      const nm = String(s?.name || s?.model || '').trim();
+      if (nm && !map.has(nm.toLowerCase())) {
+        map.set(nm.toLowerCase(), { name: nm, usd: Number(s.usd) || 0 });
+      }
+    });
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
   }
 
@@ -83,25 +90,79 @@
     const m = getModelsList().find(x => x.name.toLowerCase() === k);
     return m ? m.usd : 0;
   }
-  // --- ПОДАРОК 1: ЗАГРУЗКА СТАРТОВЫХ ДАННЫХ ИЗ ВСЕХ 8 ТАБЛИЦ SKOS В 1 КЛИК ---
-  window.seedAllSkosData = function () {
-    if (!confirm('Загрузить стартовые справочники SKOS (материалы, ОС, контрагенты, сотрудники, налоговые долги и техкарты)?\nУже введённые вами записи не удалятся.')) return;
-    const e = ensureStore();
 
-    // Загрузка базовых материалов, техкарт, основных средств (ОС), контрагентов, сотрудников и налоговых долгов
-    // Полный код функции доступен в исходных материалах патча.
-    // ...
+  function getLiveOrgsList() {
+    const set = new Set();
+    (window.db?.orgs || []).forEach(o => { if (o && o.name && !o.archived && !o.hidden) set.add(String(o.name).trim()); });
+    if (!set.size) {
+      ['ИП Каримов Артем', 'ИП Джуманиязова Мавлюда', 'ИП Джуманиязова Эльмира', 'ИП Триков Курбан', 'ИП Керимов Сахет', 'ООО Скос'].forEach(n => set.add(n));
+    }
+    return Array.from(set);
+  }
+
+  // --- ПОЛНАЯ ЗАГРУЗКА СТАРТОВЫХ ДАННЫХ SKOS В 1 КЛИК ---
+  window.seedAllSkosData = function () {
+    if (!confirm('Загрузить стартовые справочники SKOS (материалы, техкарты, ОС, контрагенты, сотрудники и налоговые долги)?\nВаши уже введённые записи не удалятся.')) return;
+    const e = ensureStore();
+    const mats = [
+      ['Ткань лён', 'м2', 'Ткань', 120, 240], ['Ткань флис', 'кг', 'Ткань', 180, 720],
+      ['Ткань жаты', 'м2', 'Ткань', 250, 250], ['Ткань брюк', 'м2', 'Ткань', 150, 397.5],
+      ['Ткань габардин', 'м2', 'Ткань', 90, 177.3], ['Пуговица для брюк', 'шт', 'Фурнитура', 5000, 50],
+      ['Пуговица рубашек', 'шт', 'Фурнитура', 8000, 32], ['Замок для брюк', 'шт', 'Фурнитура', 2000, 40],
+      ['Крючок', 'шт', 'Фурнитура', 2000, 40], ['Карсаж', 'м', 'Фурнитура', 500, 100],
+      ['Ичлик', 'м', 'Фурнитура', 400, 156], ['Клейвой', 'м', 'Фурнитура', 600, 60],
+      ['Резинка 5см', 'м', 'Фурнитура', 800, 64], ['Тканевая этикетка', 'шт', 'Упаковка', 5000, 50],
+      ['Боковая этикетка', 'шт', 'Упаковка', 5000, 400], ['Висячая этикетка', 'шт', 'Упаковка', 5000, 50],
+      ['Размерная этикетка', 'шт', 'Упаковка', 5000, 15], ['Веревка для этикеток', 'шт', 'Упаковка', 5000, 15],
+      ['Пакет 5', 'шт', 'Упаковка', 4000, 240], ['Пакет 10', 'шт', 'Упаковка', 3000, 210]
+    ];
+    mats.forEach(([name, unit, cat, initQty, initUsd]) => {
+      if (!e.materials.some(m => m.name === name)) e.materials.push({ name, unit, cat, initQty, initUsd });
+    });
+    if (!e.bom.some(b => b.product === 'Брюки мужские зауженные')) {
+      e.bom.push({ product: 'Брюки мужские зауженные', items: [
+        { matName: 'Пошив одежды', norm: 1, priceUsd: 2.0 }, { matName: 'Ткань брюк', norm: 1.25, priceUsd: 2.65 },
+        { matName: 'Карсаж', norm: 1.1, priceUsd: 0.20 }, { matName: 'Ичлик', norm: 0.35, priceUsd: 0.39 },
+        { matName: 'Боковая этикетка', norm: 1, priceUsd: 0.08 }, { matName: 'Пакет 10', norm: 10, priceUsd: 0.07 }
+      ]});
+    }
+    if (!e.bom.some(b => b.product === 'Костюм оверсайз')) {
+      e.bom.push({ product: 'Костюм оверсайз', items: [
+        { matName: 'Пошив одежды', norm: 1, priceUsd: 2.8 }, { matName: 'Ткань жаты', norm: 3.5, priceUsd: 1.0 },
+        { matName: 'Резинка 5см', norm: 0.75, priceUsd: 0.08 }, { matName: 'Боковая этикетка', norm: 1, priceUsd: 0.08 }
+      ]});
+    }
+    [
+      ['Курбан', 'Руководитель склада', 'ФОТ склад', 'RUB', 125000], ['Сайид', 'Старший кладовщик', 'ФОТ склад', 'RUB', 100000],
+      ['Касым', 'Производство ТМ', 'ФОТ менеджеры', 'USD', 500], ['Мердан', 'Менеджер МП', 'ФОТ менеджеры', 'USD', 500],
+      ['Саша', 'Контент / Офис', 'ФОТ офис', 'USD', 500]
+    ].forEach(([name, role, art, cur, initDebt]) => {
+      if (!e.staffList.some(s => s.name === name)) e.staffList.push({ name, role, art, status: 'Работает', cur, initDebt });
+    });
+    [
+      ['ООО Сопровождение 1с', 'Программное обеспечение', 'RUB', 0], ['МойСклад', 'Программное обеспечение', 'RUB', 0],
+      ['ИП Спичак Е.Ю.', 'Аренда склада', 'RUB', 0], ['Наталья Николаевна Бухгалтер', 'Бухгалтерия', 'RUB', 0],
+      ['Федеральная таможенная служба', 'Таможенное оформление', 'RUB', 0]
+    ].forEach(([name, art, cur, initDebt]) => {
+      if (!e.contractors.some(c => c.name === name)) e.contractors.push({ name, art, status: 'Работаем', cur, initDebt });
+    });
+    if (!e.osList.length) {
+      e.osList.push(
+        { name: 'Ноутбуки Lenovo / HP (5 шт.)', qty: 5, price: 65000, months: 60, passed: 10, resp: 'Мердан', room: 'Россия' },
+        { name: 'Стеллажи и мебель склада', qty: 12, price: 28000, months: 60, passed: 10, resp: 'Курбан', room: 'Россия' },
+        { name: 'Швейное и раскройное оборудование', qty: 8, price: 95000, months: 60, passed: 8, resp: 'Касым', room: 'Туркменистан' }
+      );
+    }
     pSave();
     if (typeof render === 'function') render();
-    alert('✅ Стартовые данные SKOS успешно загружены во все разделы! Все строки можно свободно редактировать (✏️) и удалять (✕).');
+    alert('✅ Стартовые данные SKOS загружены во все разделы!');
   };
   // --- РАСЧЁТ ЗАПАСОВ С УЧЁТОМ НАЧАЛЬНЫХ ОСТАТКОВ ---
   function calcStocks() {
     const e = ensureStore();
     const map = {};
     (e.materials || []).forEach(m => {
-      const initQ = Number(m.initQty) || 0;
-      const initU = Number(m.initUsd) || 0;
+      const initQ = Number(m.initQty) || 0, initU = Number(m.initUsd) || 0;
       map[m.name] = { name: m.name, unit: m.unit || 'шт', cat: m.cat || 'Ткань', initQty: initQ, initUsd: initU, inQty: 0, inUsd: 0, outQty: 0, avgUsd: initQ > 0 ? initU / initQ : 0, balQty: 0, balUsd: 0 };
     });
     (e.matIn || []).forEach(r => {
@@ -110,11 +171,7 @@
       map[r.matName].inQty += Number(r.qty) || 0;
       map[r.matName].inUsd += Number(r.totalUsd) || 0;
     });
-    Object.values(map).forEach(x => {
-      const totQ = x.initQty + x.inQty;
-      const totU = x.initUsd + x.inUsd;
-      if (totQ > 0) x.avgUsd = totU / totQ;
-    });
+    Object.values(map).forEach(x => { const q = x.initQty + x.inQty, u = x.initUsd + x.inUsd; if (q > 0) x.avgUsd = u / q; });
     (e.orders || []).forEach(o => {
       (o.lines || []).forEach(l => {
         if (l.matName === 'Пошив одежды') return;
@@ -123,20 +180,104 @@
       });
     });
     let rawUsd = 0;
-    Object.values(map).forEach(x => {
-      x.balQty = Math.max(0, x.initQty + x.inQty - x.outQty);
-      x.balUsd = x.balQty * x.avgUsd;
-      rawUsd += x.balUsd;
-    });
+    Object.values(map).forEach(x => { x.balQty = Math.max(0, x.initQty + x.inQty - x.outQty); x.balUsd = x.balQty * x.avgUsd; rawUsd += x.balUsd; });
     const wipUsd = (e.orders || []).filter(o => o.status === 'WIP').reduce((s, o) => s + (Number(o.totalUsd) || 0), 0);
     const fgUsd = (e.fgStocks || []).reduce((s, r) => s + (r.lockedUsd != null ? Number(r.lockedUsd) : (((Number(r.ruQty) || 0) + (Number(r.tmQty) || 0) + (Number(r.wayQty) || 0)) * (Number(r.unitUsd) || 0))), 0);
     return { map, rawUsd, wipUsd, fgUsd, totalUsd: rawUsd + wipUsd + fgUsd };
   }
 
-  // Обработка действий: материалы, приход, пошив, техкарты, готовый товар и брак
+  // --- ПОЛНАЯ РАБОЧАЯ ЛОГИКА ВСЕХ КНОПОК В «ЗАПАСАХ, ПОШИВЕ, ТЕХКАРТАХ И БРАКЕ» ---
   window.stkAction = function (act, a, b) {
-    // Полная логика CRUD-операций (добавление, редактирование, удаление) доступна в полной версии патча
-    // ...
+    const e = ensureStore();
+    if (act === 'tab') { e.stkSub = a; pSave(); renderStkSection(); return; }
+    if (act === 'addMat') {
+      const name = document.getElementById('p4-m-n').value.trim(), unit = document.getElementById('p4-m-u').value.trim() || 'шт', cat = document.getElementById('p4-m-c').value;
+      const initQty = Number(document.getElementById('p4-m-iq').value) || 0, initUsd = Number(document.getElementById('p4-m-iu').value) || 0;
+      if (name) e.materials.unshift({ name, unit, cat, initQty, initUsd });
+    }
+    if (act === 'editMat') {
+      const m = e.materials.at(a); if (!m) return;
+      const n = prompt('Название:', m.name); if (n) m.name = n.trim();
+      const iq = Number(prompt('Начальный остаток:', m.initQty || 0)); if (!isNaN(iq)) m.initQty = iq;
+      const iu = Number(prompt('Начальная сумма ($):', m.initUsd || 0)); if (!isNaN(iu)) m.initUsd = iu;
+    }
+    if (act === 'delMat' && confirm('Удалить материал?')) e.materials.splice(a, 1);
+    if (act === 'addIn') {
+      const date = document.getElementById('p4-in-d').value, matName = document.getElementById('p4-in-m').value;
+      const qty = Number(document.getElementById('p4-in-q').value) || 0, priceUsd = Number(document.getElementById('p4-in-p').value) || 0;
+      const supplier = document.getElementById('p4-in-s').value.trim();
+      if (matName && qty > 0) e.matIn.unshift({ date, matName, qty, priceUsd, totalUsd: qty * priceUsd, supplier });
+    }
+    if (act === 'editIn') {
+      const r = e.matIn.at(a); if (!r) return;
+      const q = Number(prompt('Кол-во:', r.qty)); if (q > 0) { r.qty = q; r.totalUsd = q * r.priceUsd; }
+      const p = Number(prompt('Цена ($):', r.priceUsd)); if (p >= 0) { r.priceUsd = p; r.totalUsd = r.qty * p; }
+    }
+    if (act === 'delIn' && confirm('Удалить приход?')) e.matIn.splice(a, 1);
+    if (act === 'addBom') {
+      const product = document.getElementById('p4-bm-p').value.trim(), matName = document.getElementById('p4-bm-m').value;
+      const norm = Number(document.getElementById('p4-bm-n').value) || 0, priceUsd = Number(document.getElementById('p4-bm-pr').value) || 0;
+      if (!product || norm <= 0) return;
+      let bom = e.bom.find(x => x.product.toLowerCase() === product.toLowerCase());
+      if (!bom) { bom = { product, items: [] }; e.bom.push(bom); }
+      const ex = bom.items.find(x => x.matName === matName);
+      if (ex) { ex.norm = norm; ex.priceUsd = priceUsd; } else bom.items.push({ matName, norm, priceUsd });
+    }
+    if (act === 'editBomLine') {
+      const it = e.bom.at(a)?.items?.at(b); if (!it) return;
+      const n = Number(prompt('Норма на 1 шт.:', it.norm)); if (n > 0) it.norm = n;
+      const p = Number(prompt('Цена ($):', it.priceUsd)); if (p >= 0) it.priceUsd = p;
+    }
+    if (act === 'delBomLine' && confirm('Удалить позицию?')) { e.bom.at(a)?.items?.splice(b, 1); }
+    if (act === 'delBom' && confirm('Удалить всю техкарту?')) { e.bom.splice(a, 1); }
+    if (act === 'addOrd') {
+      const date = document.getElementById('p4-ord-d').value, product = document.getElementById('p4-ord-prod').value;
+      const qty = Number(document.getElementById('p4-ord-qty').value) || 0, comment = document.getElementById('p4-ord-c').value.trim();
+      const bom = e.bom.find(x => x.product.toLowerCase() === product.toLowerCase());
+      if (!bom) return alert('Сначала заполните техкарту для этой модели ниже!');
+      const { map } = calcStocks(); let totalUsd = 0;
+      const lines = bom.items.map(bi => {
+        const q = bi.norm * qty, u = (map[bi.matName]?.avgUsd > 0) ? map[bi.matName].avgUsd : bi.priceUsd;
+        totalUsd += q * u; return { matName: bi.matName, qty: q, priceUsd: u, totalUsd: q * u };
+      });
+      e.orders.unshift({ date, doneDate: '', status: 'WIP', product, qty, totalUsd, comment, lines });
+    }
+    if (act === 'doneOrd') {
+      const o = e.orders.at(a); if (!o) return;
+      o.status = 'DONE'; o.doneDate = new Date().toISOString().slice(0, 10);
+      const u = o.qty > 0 ? o.totalUsd / o.qty : getModelUsd(o.product);
+      e.fgStocks.unshift({ month: o.doneDate.slice(0, 7), product: o.product, ruQty: 0, tmQty: o.qty, wayQty: 0, unitUsd: u });
+    }
+    if (act === 'editOrd') {
+      const o = e.orders.at(a); if (!o) return;
+      const q = Number(prompt('Кол-во штук:', o.qty)); if (q > 0) { const k = q / o.qty; o.qty = q; o.totalUsd *= k; }
+    }
+    if (act === 'delOrd' && confirm('Удалить заказ?')) e.orders.splice(a, 1);
+    if (act === 'saveFg') {
+      const month = document.getElementById('p4-fg-mo').value, product = document.getElementById('p4-fg-p').value.trim();
+      const ruQty = Number(document.getElementById('p4-fg-ru').value) || 0, tmQty = Number(document.getElementById('p4-fg-tm').value) || 0;
+      const wayQty = Number(document.getElementById('p4-fg-way').value) || 0, unitUsd = Number(document.getElementById('p4-fg-u').value) || getModelUsd(product);
+      if (product) e.fgStocks.unshift({ month, product, ruQty, tmQty, wayQty, unitUsd });
+    }
+    if (act === 'lockFg') {
+      e.fgStocks.forEach(r => { if (r.lockedUsd == null) r.lockedUsd = ((Number(r.ruQty) || 0) + (Number(r.tmQty) || 0) + (Number(r.wayQty) || 0)) * (Number(r.unitUsd) || 0); });
+      alert('🔒 Суммы готового товара зафиксированы!');
+    }
+    if (act === 'editFg') {
+      const r = e.fgStocks.at(a); if (!r) return;
+      r.ruQty = Number(prompt('РФ (шт.):', r.ruQty)) || 0; r.tmQty = Number(prompt('ТМ (шт.):', r.tmQty)) || 0; r.wayQty = Number(prompt('Путь (шт.):', r.wayQty)) || 0;
+    }
+    if (act === 'delFg' && confirm('Удалить остаток?')) e.fgStocks.splice(a, 1);
+    if (act === 'addDef') {
+      const date = document.getElementById('p4-df-d').value, product = document.getElementById('p4-df-p').value.trim();
+      const qty = Number(document.getElementById('p4-df-q').value) || 0, reason = document.getElementById('p4-df-r').value.trim();
+      if (product && qty > 0) e.defects.unshift({ date, product, qty, unitUsd: getModelUsd(product), reason });
+    }
+    if (act === 'editDef') {
+      const d = e.defects.at(a); if (!d) return;
+      const q = Number(prompt('Шт. брака:', d.qty)); if (q > 0) d.qty = q;
+    }
+    if (act === 'delDef' && confirm('Удалить брак?')) e.defects.splice(a, 1);
     pSave();
     renderStkSection();
   };
@@ -684,11 +825,46 @@
         </details>
       </div>`;
   }
-  // --- РАСХОДЫ, НАЛОГИ (ДОЛГИ НА 1 ЯНВАРЯ + КВ/3 + ЦЕЛИКОМ) И ЗПВ ---
+    // --- РАСХОДЫ, НАЛОГИ (ДОЛГИ НА 1 ЯНВАРЯ + КВ/3 + ЦЕЛИКОМ) И ЗПВ ---
+  window.addCustomTaxTypeP4 = function () {
+    const inp = document.getElementById('p4-new-tax-type');
+    const name = (inp?.value || '').trim();
+    if (!name) return;
+    const sec = document.getElementById('tab-exp');
+    const taxSel = sec ? sec.querySelectorAll('select').item(1) : null;
+    if (taxSel && !Array.from(taxSel.options).some(o => o.value === name)) {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      taxSel.appendChild(opt);
+      taxSel.value = name;
+    }
+    if (inp) inp.value = '';
+    alert(`✅ Новый вид налога «${name}» добавлен в список!`);
+  };
+
+  window.addTaxDebtRowP4 = function () {
+    const e = ensureStore();
+    const org = document.getElementById('p4-td-org')?.value.trim();
+    const tax = document.getElementById('p4-td-tax')?.value.trim();
+    const debt = Number(document.getElementById('p4-td-val')?.value) || 0;
+    if (!org || !tax) return;
+    e.taxDebts.push({ org, tax, debt });
+    pSave(); enhanceExpSection();
+  };
+
+  window.editTaxDebtRowP4 = function (i) {
+    const d = ensureStore().taxDebts.at(i); if (!d) return;
+    const nTax = prompt('Вид налога:', d.tax); if (nTax) d.tax = nTax.trim();
+    const nVal = Number(prompt('Сумма долга на 1 января (₽):', d.debt)); if (!isNaN(nVal)) d.debt = nVal;
+    pSave(); enhanceExpSection();
+  };
+
   window.addTaxWholeP4 = function () {
     const sec = document.getElementById('tab-exp'); if (!sec) return;
     const sels = sec.querySelectorAll('select');
-    const org = sels.item(0)?.value || 'ИП Каримов Артем', type = sels.item(1)?.value || 'АУСН', yr = sels.item(2)?.value || '2026';
+    const org = sels.item(0)?.value || 'ИП Каримов Артем';
+    const type = sels.item(1)?.value || 'АУСН';
+    const yr = sels.item(2)?.value || '2026';
     const inp = sec.querySelector('input[type="number"]');
     const amt = Number(inp?.value || 0);
     if (amt <= 0) return alert('Введите сумму налога.');
@@ -710,16 +886,27 @@
     let extra = document.getElementById('p4-exp-extra');
     if (!extra) { extra = document.createElement('div'); extra.id = 'p4-exp-extra'; sec.appendChild(extra); }
     const e = ensureStore();
-    const debtRows = e.taxDebts.map((d, i) => `<tr><td class="bold">${d.org}</td><td>${d.tax}</td><td class="num bold ${d.debt > 0 ? 'text-red' : 'text-green'}">${fmtR(d.debt)}</td><td><button type="button" class="btn btn-danger" style="padding:1px 5px" onclick="ensureStore().taxDebts.splice(${i},1);pSave();enhanceExpSection()">✕</button></td></tr>`).join('');
+    const orgOpts = getLiveOrgsList().map(o => `<option value="${o}">`).join('');
+    const debtRows = e.taxDebts.map((d, i) => `<tr><td class="bold">${d.org}</td><td>${d.tax}</td><td class="num bold ${d.debt > 0 ? 'text-red' : 'text-green'}">${fmtR(d.debt)}</td><td style="white-space:nowrap"><button type="button" class="btn" style="padding:1px 5px" onclick="editTaxDebtRowP4(${i})">✏️</button> <button type="button" class="btn btn-danger" style="padding:1px 5px" onclick="ensureStore().taxDebts.splice(${i},1);pSave();enhanceExpSection()">✕</button></td></tr>`).join('');
     extra.innerHTML = `
+      <datalist id="p4-orgs-dl">${orgOpts}</datalist>
       <div class="card" style="margin-top:12px">
-        <div class="card-header"><div class="card-title">🧾 Входящие налоговые долги / переплаты на 1 января (для Баланса)</div><button type="button" class="btn btn-success" onclick="seedAllSkosData()">📥 Загрузить базу SKOS</button></div>
-        <table><thead><tr><th>Юридическое лицо</th><th>Налог</th><th class="num">Долг на 1 января (₽)</th><th></th></tr></thead><tbody>${debtRows || '<tr><td colspan="4" style="text-align:center;color:#64748b;padding:8px">Нажмите «📥 Загрузить базу SKOS»</td></tr>'}</tbody></table>
+        <div class="card-header"><div class="card-title">🧾 Виды налогов и Входящие долги / переплаты на 1 января</div><button type="button" class="btn btn-success" onclick="seedAllSkosData()">📥 Загрузить базу SKOS</button></div>
+        <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+          <input id="p4-new-tax-type" class="input" style="max-width:260px" placeholder="Новый вид налога (напр. Патент)...">
+          <button type="button" class="btn btn-primary" onclick="addCustomTaxTypeP4()">+ Добавить вид налога</button>
+        </div>
+        <form onsubmit="event.preventDefault();addTaxDebtRowP4()" class="form-grid" style="grid-template-columns:1.5fr 1.5fr 1fr auto;gap:6px;margin-bottom:8px">
+          <div><input id="p4-td-org" class="input" list="p4-orgs-dl" required placeholder="Юрлицо (выберите или введите)"></div>
+          <div><input id="p4-td-tax" class="input" required placeholder="Налог (УСН / НДС / АУСН)"></div>
+          <div><input id="p4-td-val" type="number" class="input" required placeholder="Долг на 1 янв. (₽)"></div>
+          <div><button type="submit" class="btn btn-primary">+ Долг</button></div>
+        </form>
+        <table><thead><tr><th>Юридическое лицо</th><th>Налог</th><th class="num">Долг на 1 января (₽)</th><th>Действия</th></tr></thead><tbody>${debtRows || '<tr><td colspan="4" style="text-align:center;color:#64748b;padding:8px">Добавьте строку выше или нажмите «📥 Загрузить базу SKOS»</td></tr>'}</tbody></table>
       </div>
       ${buildZpvHtml()}`;
   }
-
-  // --- ПОДАРОК 2: УПРАВЛЕНЧЕСКИЙ БАЛАНС НА ГЛАВНОЙ СВОДКЕ ---
+  // --- УПРАВЛЕНЧЕСКИЙ БАЛАНС НА ГЛАВНОЙ СВОДКЕ ---
   function enhanceDashBalance() {
     const dash = document.getElementById('tab-dash'); if (!dash) return;
     let box = document.getElementById('p4-dash-bal');
@@ -739,7 +926,7 @@
 
     box.innerHTML = `
       <div class="card" style="margin-top:12px">
-        <div class="card-header"><div class="card-title">⚖️ Управленческий БАЛАНС SKOS (Активы и Пассивы в реальном времени)</div><span class="badge badge-blue">Курс: ${rate} ₽/$</span></div>
+        <div class="card-header"><div class="card-title">⚖️ Управленческий БАЛАНС SKOS (Активы и Пассивы)</div><span class="badge badge-blue">Курс: ${rate} ₽/$</span></div>
         <div class="kpi-grid">
           <div class="kpi-card"><div style="font-size:11px;color:#64748b">Деньги (Счета и кассы)</div><div class="kpi-val">${fmtR(Math.max(0, ddsRub))}</div><div class="kpi-sub">По данным ДДС</div></div>
           <div class="kpi-card"><div style="font-size:11px;color:#64748b">Запасы (Сырьё + НЗП + Товар)</div><div class="kpi-val text-green">${fmtR(stocksRub)}</div><div class="kpi-sub">${fmtU(st.totalUsd)}</div></div>
@@ -749,7 +936,7 @@
       </div>`;
   }
 
-  // --- МЯГКОЕ ПОДКЛЮЧЕНИЕ КО ВСЕМ ВКЛАДКАМ БЕЗ ПОЛОМКИ «ТОВАРЫ, ШК И СЕБЕСТ.» ---
+  // --- ПОДКЛЮЧЕНИЕ К МЕНЮ, СБРОС БЕЛОГО ЭКРАНА И ОБНОВЛЕНИЕ ЗАГОЛОВКОВ ---
   function injectUeButton() {
     if (document.getElementById('nav-ue')) return;
     const sku = document.getElementById('nav-sku');
@@ -760,57 +947,67 @@
     sku.parentNode.insertBefore(btn, sku.nextSibling);
   }
 
+  const crumbNames = {
+    dash: 'SKOS / Сводка и 5 ИП + 1 ООО',
+    abc: 'SKOS / Двойной ABC-анализ',
+    rep: 'SKOS / Отчёты WB / Ozon / ЯМ',
+    sku: 'SKOS / Товары, ШК и Себест.',
+    ue: 'SKOS / Юнит-экономика (Факт МП + План)',
+    stk: 'SKOS / Запасы, Пошив (НЗП), Техкарты и Брак',
+    dds: 'SKOS / ДДС, Выписки и Кассы',
+    exp: 'SKOS / Расходы, Налоги и Зарплатная ведомость',
+    sup: 'SKOS / Контрагенты и Основные средства',
+    set: 'SKOS / Юрлица, Банки и Облако'
+  };
+
+  function syncActiveTabUi() {
+    injectUeButton();
+    const cur = window.db?.tab || 'dash';
+    document.querySelectorAll('main.content > section').forEach(s => {
+      const isAct = s.id === 'tab-' + cur;
+      s.classList.toggle('hidden', !isAct);
+      s.style.display = isAct ? 'block' : 'none';
+    });
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.id === 'nav-' + cur));
+    const cr = document.getElementById('crumb');
+    if (cr && crumbNames[cur] && cr.textContent !== crumbNames[cur]) cr.textContent = crumbNames[cur];
+
+    if (cur === 'dash' && !document.getElementById('p4-dash-bal')) enhanceDashBalance();
+    if (cur === 'ue') {
+      const ue = document.getElementById('tab-ue');
+      if (!ue || !ue.innerHTML.trim()) renderUeSection();
+    }
+    if (cur === 'stk') {
+      const stk = document.getElementById('tab-stk');
+      if (stk && !stk.querySelector('.card-header')) renderStkSection();
+    }
+    if (cur === 'dds' && !document.getElementById('p4-dds-box')) enhanceDdsSection();
+    if (cur === 'exp' && !document.getElementById('p4-exp-extra')) enhanceExpSection();
+    if (cur === 'sup' && !document.getElementById('p4-sup-os-box')) enhanceSupSection();
+  }
+
   const origTab = window.tab;
   window.tab = function (id) {
-    injectUeButton();
-    if (id === 'ue') {
-      if (window.db) window.db.tab = 'ue';
-      document.querySelectorAll('main.content > section').forEach(s => s.classList.toggle('hidden', s.id !== 'tab-ue'));
-      document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.id === 'nav-ue'));
-      const cr = document.getElementById('crumb'); if (cr) cr.textContent = 'SKOS / Юнит-экономика (Факт МП + План)';
-      renderUeSection();
-      return;
-    }
-    const ueS = document.getElementById('tab-ue'), ueN = document.getElementById('nav-ue');
-    if (ueS) ueS.classList.add('hidden');
-    if (ueN) ueN.classList.remove('active');
-    if (typeof origTab === 'function') origTab(id);
-    if (id === 'dash') enhanceDashBalance();
+    if (window.db) window.db.tab = id;
+    if (id !== 'ue' && typeof origTab === 'function') origTab(id);
+    if (id === 'ue') renderUeSection();
     if (id === 'stk') renderStkSection();
     if (id === 'dds') enhanceDdsSection();
     if (id === 'exp') enhanceExpSection();
     if (id === 'sup') enhanceSupSection();
+    if (id === 'dash') enhanceDashBalance();
+    syncActiveTabUi();
   };
 
   const origRender = window.render;
   window.render = function () {
     if (typeof origRender === 'function') origRender();
-    injectUeButton();
-    const cur = window.db?.tab || 'dash';
-    if (cur === 'dash') enhanceDashBalance();
-    if (cur === 'stk') renderStkSection();
-    if (cur === 'dds') enhanceDdsSection();
-    if (cur === 'exp') enhanceExpSection();
-    if (cur === 'sup') enhanceSupSection();
-    if (cur === 'ue') renderUeSection();
+    syncActiveTabUi();
   };
 
+  setInterval(syncActiveTabUi, 250);
   setTimeout(function () {
     injectUeButton();
     if (window.db?.tab) window.tab(window.db.tab);
   }, 200);
-    // --- ЗАЩИТА ОТ СКРЫТИЯ ВКЛАДОК СТАРЫМИ ПАТЧАМИ (УБИРАЕТ БЕЛЫЙ ЭКРАН) ---
-  setInterval(function () {
-    const cur = window.db?.tab || 'dash';
-    const sec = document.getElementById('tab-' + cur);
-    if (sec && sec.classList.contains('hidden')) {
-      document.querySelectorAll('main.content > section').forEach(s => s.classList.toggle('hidden', s.id !== 'tab-' + cur));
-    }
-    if (cur === 'ue' && sec && !sec.innerHTML.trim()) renderUeSection();
-    if (cur === 'stk' && sec && !sec.querySelector('.card-header')) renderStkSection();
-    if (cur === 'dds' && !document.getElementById('p4-dds-box')) enhanceDdsSection();
-    if (cur === 'exp' && !document.getElementById('p4-exp-extra')) enhanceExpSection();
-    if (cur === 'sup' && !document.getElementById('p4-sup-os-box')) enhanceSupSection();
-    if (cur === 'dash' && !document.getElementById('p4-dash-bal')) enhanceDashBalance();
-  }, 300);
 })();
