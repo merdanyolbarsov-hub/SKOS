@@ -1859,12 +1859,12 @@
   });
   setTimeout(syncAllPatch4Views, 300);
 })();
+
   // =========================================================================
-  // ФИНАЛЬНЫЙ ФИКС: 1) Убираем двойной экран  2) Кнопка налога «Целиком за месяц»
-  // 3) Единый выпадающий список моделей и редактирование техкарт
+  // ФИНАЛЬНЫЙ ФИКС (БЕЗ ОШИБОК): 1) Двойной экран  2) Налоги ДДС + Целиком
+  // 3) Выпадающие списки моделей и редактирование техкарт
   // =========================================================================
 
-  // 1. Жёстко прячем все неактивные вкладки, чтобы никогда не было двойного экрана
   function fixDoubleScreen() {
     const activeNav = document.querySelector('.nav-item.active');
     const activeText = activeNav ? activeNav.textContent.trim() : '';
@@ -1879,7 +1879,6 @@
     });
   }
 
-  // 2. Рабочая кнопка «Целиком за месяц» для ЛЮБОГО налога (АУСН, УСН, НДФЛ, Патент и др.)
   window.addWholeMonthTaxAny = function () {
     if (!window.db) return;
     const finSec = Array.from(document.querySelectorAll('section, .tab-pane, [id^="tab-"]')).find(el =>
@@ -1888,11 +1887,11 @@
     if (!finSec) return;
 
     const selects = finSec.querySelectorAll('select');
-    const org = selects[0]?.value || 'ИП';
-    const taxType = selects[1]?.value || 'Налог';
-    const yr = selects[2]?.value || document.getElementById('f-yr')?.value || '2026';
+    const org = (selects && selects[0]) ? selects[0].value : 'ИП';
+    const taxType = (selects && selects[1]) ? selects[1].value : 'Налог';
+    const yr = (selects && selects[2]) ? selects[2].value : (document.getElementById('f-yr')?.value || '2026');
     const amtInput = finSec.querySelector('input[type="number"], input[placeholder*="300000"]');
-    const amount = Number(amtInput?.value) || 0;
+    const amount = Number(amtInput ? amtInput.value : 0) || 0;
 
     if (amount <= 0) {
       alert('Введите сумму налога (например, 300000).');
@@ -1918,7 +1917,7 @@
       yr: String(yr),
       mo: mo,
       q: Math.ceil(Number(mo) / 3),
-      org,
+      org: org,
       type: taxType,
       name: taxType,
       amount: amount,
@@ -1934,77 +1933,6 @@
     alert(`✅ Налог «${taxType}» (${amount.toLocaleString('ru-RU')} ₽) записан ЦЕЛИКОМ на ${mo}.${yr}!`);
   };
 
-  // 3. Единый выпадающий список моделей (все техкарты + все товары из справочника)
-  function getAllCatalogModels() {
-    const erp = ensureErpStore();
-    const set = new Set();
-    (erp.bom || []).forEach(b => { if (b && b.product) set.add(String(b.product).trim()); });
-    if (window.db) {
-      ['products', 'items', 'catalog', 'sku', 'goods'].forEach(k => {
-        if (Array.isArray(window.db[k])) {
-          window.db[k].forEach(it => {
-            const name = typeof it === 'string' ? it : (it.name || it.title || it.product || it.model);
-            if (name) set.add(String(name).trim());
-          });
-        }
-      });
-    }
-    return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b, 'ru'));
-  }
-
-  function refreshModelDropdownsEverywhere() {
-    const erp = ensureErpStore();
-    const models = getAllCatalogModels();
-    const bomSet = new Set((erp.bom || []).map(b => b.product.toLowerCase()));
-
-    // Обновляем <select> при запуске в пошив
-    const ordSel = document.getElementById('erp-ord-prod');
-    if (ordSel) {
-      const cur = ordSel.value;
-      ordSel.innerHTML = models.map(m =>
-        `<option value="${m}">${m}${bomSet.has(m.toLowerCase()) ? ' ✅' : ' (нет техкарты)'}</option>`
-      ).join('');
-      if (cur) ordSel.value = cur;
-    }
-
-    // Обновляем единый <datalist> для конструктора техкарт, готового товара и брака
-    let dl = document.getElementById('bom-prod-list');
-    if (!dl) {
-      dl = document.createElement('datalist');
-      dl.id = 'bom-prod-list';
-      document.body.appendChild(dl);
-    }
-    dl.innerHTML = models.map(m => `<option value="${m}">`).join('');
-
-    document.querySelectorAll('#bom-prod-name, #tab-inv input[placeholder*="Брюки"], #tab-inv input[placeholder*="Модель"], #tab-inv input[id*="fg-prod"], #tab-inv input[id*="def-prod"]').forEach(inp => {
-      inp.setAttribute('list', 'bom-prod-list');
-    });
-  }
-
-  // Перехватываем клики и отрисовку, чтобы все 3 фикса срабатывали мгновенно
-  const _origSync = syncAllPatch4Views;
-  syncAllPatch4Views = function () {
-    _origSync();
-    fixDoubleScreen();
-    refreshModelDropdownsEverywhere();
-
-    const ausnBtn = document.getElementById('skos-ausn-month-btn') ||
-      Array.from(document.querySelectorAll('button')).find(b => (b.textContent || '').includes('Целиком за месяц'));
-    if (ausnBtn) {
-      ausnBtn.textContent = '✅ Целиком за месяц';
-      ausnBtn.onclick = function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        window.addWholeMonthTaxAny();
-      };
-    }
-  };
-
-  document.addEventListener('click', function () {
-    setTimeout(fixDoubleScreen, 50);
-    setTimeout(refreshModelDropdownsEverywhere, 100);
-  });
-  // 4. Умное подтягивание ВСЕХ налогов из ДДС с выбором: разбить на 3 мес. или целиком
   window.pullTaxesFromDds = function () {
     if (!window.db) return;
     const ddsList = window.db.dds || window.db.cashflow || window.db.tx || window.db.bank || [];
@@ -2019,9 +1947,8 @@
     const taxRows = ddsList.filter(r => {
       if (existingIds.has(r.id)) return false;
       const amt = Number(r.amount ?? r.sum ?? r.rub ?? 0);
-      if (amt >= 0 && r.type !== 'out' && r.dir !== 'out' && r.isExpense !== true && !(r.cat || '').toLowerCase().includes('налог')) {
-        // пропускаем поступления, если явно не указана статья налога
-        if (amt > 0 && !String(r.cat || r.article || '').toLowerCase().includes('налог')) return false;
+      if (amt > 0 && r.type !== 'out' && r.dir !== 'out' && r.isExpense !== true && !String(r.cat || r.article || '').toLowerCase().includes('налог')) {
+        return false;
       }
       const txt = `${r.cat || ''} ${r.article || ''} ${r.comment || ''} ${r.desc || ''} ${r.purpose || ''}`.toLowerCase();
       return /налог|фнс|енп|усн|аусн|ндфл|патент|взнос|пфр|фомс|фсс/.test(txt);
@@ -2062,7 +1989,7 @@
           window.db.taxes.unshift({
             id: `tax_${Date.now()}_${added}_${i}`,
             ddsId: r.id || `${dateStr}_${fullAmt}`,
-            yr, mo: mStr, q, org,
+            yr: yr, mo: mStr, q: q, org: org,
             type: label, name: label,
             amount: part, monthAmount: part,
             comment: `1/3 из ДДС от ${dateStr} (${fullAmt.toLocaleString('ru-RU')} ₽)`
@@ -2073,7 +2000,7 @@
         window.db.taxes.unshift({
           id: `tax_${Date.now()}_${added}`,
           ddsId: r.id || `${dateStr}_${fullAmt}`,
-          yr, mo: mStr, q: Math.ceil(moNum / 3), org,
+          yr: yr, mo: mStr, q: Math.ceil(moNum / 3), org: org,
           type: label, name: label,
           amount: fullAmt, monthAmount: fullAmt,
           isMonthly: true,
@@ -2088,3 +2015,81 @@
     if (typeof renderAll === 'function') renderAll();
     alert(`✅ Обработано налоговых платежей из ДДС: ${added} шт.`);
   };
+
+  function getAllCatalogModels() {
+    const erp = ensureErpStore();
+    const set = new Set();
+    (erp.bom || []).forEach(b => { if (b && b.product) set.add(String(b.product).trim()); });
+    if (window.db) {
+      ['products', 'items', 'catalog', 'sku', 'goods'].forEach(k => {
+        if (Array.isArray(window.db[k])) {
+          window.db[k].forEach(it => {
+            const name = typeof it === 'string' ? it : (it.name || it.title || it.product || it.model);
+            if (name) set.add(String(name).trim());
+          });
+        }
+      });
+    }
+    return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b, 'ru'));
+  }
+
+  function refreshModelDropdownsEverywhere() {
+    const erp = ensureErpStore();
+    const models = getAllCatalogModels();
+    const bomSet = new Set((erp.bom || []).map(b => b.product.toLowerCase()));
+
+    const ordSel = document.getElementById('erp-ord-prod');
+    if (ordSel) {
+      const cur = ordSel.value;
+      ordSel.innerHTML = models.map(m =>
+        `<option value="${m}">${m}${bomSet.has(m.toLowerCase()) ? ' ✅' : ' (нет техкарты)'}</option>`
+      ).join('');
+      if (cur) ordSel.value = cur;
+    }
+
+    let dl = document.getElementById('bom-prod-list');
+    if (!dl) {
+      dl = document.createElement('datalist');
+      dl.id = 'bom-prod-list';
+      document.body.appendChild(dl);
+    }
+    dl.innerHTML = models.map(m => `<option value="${m}">`).join('');
+
+    document.querySelectorAll('#bom-prod-name, #tab-inv input[placeholder*="Брюки"], #tab-inv input[placeholder*="Модель"], #tab-inv input[id*="fg-prod"], #tab-inv input[id*="def-prod"]').forEach(inp => {
+      inp.setAttribute('list', 'bom-prod-list');
+    });
+  }
+
+  const _origSync = syncAllPatch4Views;
+  syncAllPatch4Views = function () {
+    _origSync();
+    fixDoubleScreen();
+    refreshModelDropdownsEverywhere();
+
+    const ausnBtn = document.getElementById('skos-ausn-month-btn') ||
+      Array.from(document.querySelectorAll('button')).find(b => (b.textContent || '').includes('Целиком за месяц'));
+    if (ausnBtn) {
+      ausnBtn.textContent = '✅ Целиком за месяц';
+      ausnBtn.onclick = function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.addWholeMonthTaxAny();
+      };
+    }
+
+    const pullBtn = document.getElementById('skos-pull-tax-dds') ||
+      Array.from(document.querySelectorAll('button')).find(b => (b.textContent || '').includes('Подтянуть налоги из ДДС'));
+    if (pullBtn) {
+      pullBtn.onclick = function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.pullTaxesFromDds();
+      };
+    }
+  };
+
+  document.addEventListener('click', function () {
+    setTimeout(fixDoubleScreen, 50);
+    setTimeout(refreshModelDropdownsEverywhere, 100);
+  });
+  setTimeout(syncAllPatch4Views, 400);
