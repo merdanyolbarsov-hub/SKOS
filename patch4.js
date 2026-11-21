@@ -1,92 +1,50 @@
 (function () {
-  if (window.__skosErpV4Ready) return;
-  window.__skosErpV4Ready = true;
+  if (window.__skosErpV5Ready) return;
+  window.__skosErpV5Ready = true;
 
-  // --- ЗАЩИТА ОТ XSS И ВЗЛОМА ---
   function esc(v) {
     return String(v == null ? '' : v)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function pSave() {
     try {
       if (typeof save === 'function') save();
       else if (window.db) localStorage.setItem('skos_v3_prod', JSON.stringify(window.db));
-    } catch (e) { console.error('Save error:', e); }
+    } catch (err) { console.error(err); }
   }
 
   function ensureStore() {
     if (!window.db) window.db = {};
     if (!window.db.erp) window.db.erp = {};
     const e = window.db.erp;
-    if (!Array.isArray(e.materials)) e.materials = [];
-    if (!Array.isArray(e.matIn)) e.matIn = [];
-    if (!Array.isArray(e.orders)) e.orders = [];
-    if (!Array.isArray(e.bom)) e.bom = [];
-    if (!Array.isArray(e.fgStocks)) e.fgStocks = [];
-    if (!Array.isArray(e.defects)) e.defects = [];
-    if (!Array.isArray(e.unitEcon)) e.unitEcon = [];
-    if (!Array.isArray(e.osList)) e.osList = [];
-    if (!Array.isArray(e.contractors)) e.contractors = [];
-    if (!Array.isArray(e.contractorOps)) e.contractorOps = [];
-    if (!Array.isArray(e.staffList)) e.staffList = [];
-    if (!Array.isArray(e.payrollOps)) e.payrollOps = [];
-    if (!Array.isArray(e.taxDebts)) e.taxDebts = [];
+    const arrKeys = ['materials', 'matIn', 'orders', 'bom', 'fgStocks', 'defects', 'unitEcon', 'osList', 'contractors', 'contractorOps', 'staffList', 'payrollOps', 'taxDebts'];
+    arrKeys.forEach(k => { if (!Array.isArray(e[k])) e[k] = []; });
 
-    // Единые редактируемые справочники с поддержкой архива
     if (!Array.isArray(e.dictMatCats)) {
-      e.dictMatCats = [
-        { name: 'Ткань', arch: false },
-        { name: 'Фурнитура', arch: false },
-        { name: 'Упаковка и бирки', arch: false },
-        { name: 'Нитки и клеевые', arch: false }
-      ];
+      e.dictMatCats = [{ name: 'Ткань', arch: false }, { name: 'Фурнитура', arch: false }, { name: 'Упаковка и бирки', arch: false }, { name: 'Нитки и клеевые', arch: false }];
     }
     if (!Array.isArray(e.dictUnits)) {
-      e.dictUnits = [
-        { name: 'м2', arch: false }, { name: 'кг', arch: false },
-        { name: 'м', arch: false }, { name: 'шт', arch: false }, { name: 'рулон', arch: false }
-      ];
+      e.dictUnits = [{ name: 'м2', arch: false }, { name: 'кг', arch: false }, { name: 'м', arch: false }, { name: 'шт', arch: false }, { name: 'рулон', arch: false }];
     }
     if (!Array.isArray(e.dictSuppliers)) {
-      e.dictSuppliers = [
-        { name: 'Турция (ткани)', arch: false },
-        { name: 'Китай (фурнитура)', arch: false },
-        { name: 'РФ (упаковка / склад)', arch: false },
-        { name: 'Туркменистан (цех)', arch: false }
-      ];
+      e.dictSuppliers = [{ name: 'Турция (ткани)', arch: false }, { name: 'Китай (фурнитура)', arch: false }, { name: 'РФ (упаковка)', arch: false }, { name: 'Туркменистан (цех)', arch: false }];
     }
     if (!Array.isArray(e.dictTaxTypes)) {
-      e.dictTaxTypes = [
-        { name: 'АУСН', arch: false }, { name: 'УСН', arch: false },
-        { name: 'НДС', arch: false }, { name: 'ЕНП', arch: false },
-        { name: 'Взносы ИП (фикс. + 1%)', arch: false }, { name: 'Патент', arch: false }
-      ];
+      e.dictTaxTypes = [{ name: 'АУСН', arch: false }, { name: 'УСН', arch: false }, { name: 'НДС', arch: false }, { name: 'ЕНП', arch: false }, { name: 'Взносы ИП', arch: false }, { name: 'Патент', arch: false }];
     }
     if (!Array.isArray(e.ddsArticles)) {
       e.ddsArticles = [
         { name: 'Поступление от ВБ', dir: 'in', opiu: 'Учёт сделок (не дубл.)', arch: false },
         { name: 'Поступление от Озон', dir: 'in', opiu: 'Учёт сделок (не дубл.)', arch: false },
-        { name: 'Поступление от Яндекс Маркет', dir: 'in', opiu: 'Учёт сделок (не дубл.)', arch: false },
         { name: 'Закуп товара / сырья USD', dir: 'out', opiu: 'Учёт запасов (не дубл.)', arch: false },
-        { name: 'Закуп товара / сырья RUB', dir: 'out', opiu: 'Учёт запасов (не дубл.)', arch: false },
-        { name: 'Упаковочные материалы', dir: 'out', opiu: 'Общепроизводственные', arch: false },
-        { name: 'Доставка из Китая / Турции', dir: 'out', opiu: 'Общепроизводственные', arch: false },
-        { name: 'Доставка по РФ до склада', dir: 'out', opiu: 'Общепроизводственные', arch: false },
-        { name: 'Таможенное оформление / ФТС', dir: 'out', opiu: 'Общепроизводственные', arch: false },
         { name: 'Аренда склада', dir: 'out', opiu: 'Учёт поставщиков', arch: false },
-        { name: 'ФОТ склад / менеджеры', dir: 'out', opiu: 'ЗПВ (не дубл.)', arch: false },
-        { name: 'ФОТ офис / собственник', dir: 'out', opiu: 'ЗПВ (не дубл.)', arch: false },
         { name: 'Программное обеспечение / 1С', dir: 'out', opiu: 'Административные', arch: false },
         { name: 'Бухгалтерия / Юрист', dir: 'out', opiu: 'Административные', arch: false },
-        { name: 'УСН / АУСН / НДС / ЕНП / Взносы', dir: 'out', opiu: 'Учёт налогов (не дубл.)', arch: false },
-        { name: 'Перевод между счетами', dir: 'move', opiu: 'Нет в ОПиУ', arch: false },
-        { name: 'Конвертация валют RUB ↔ USD', dir: 'move', opiu: 'Нет в ОПиУ', arch: false },
-        { name: 'Вклады собственников / Дивиденды', dir: 'fin', opiu: 'Нет в ОПиУ', arch: false }
+        { name: 'Таможенное оформление / ФТС', dir: 'out', opiu: 'Общепроизводственные', arch: false },
+        { name: 'УСН / АУСН / НДС / ЕНП', dir: 'out', opiu: 'Учёт налогов (не дубл.)', arch: false },
+        { name: 'Перевод / Конвертация валют', dir: 'move', opiu: 'Нет в ОПиУ', arch: false }
       ];
     }
     if (!e.stkSub) e.stkSub = 'sum';
@@ -95,8 +53,6 @@
     if (!e.dictSub) e.dictSub = 'cats';
     return e;
   }
-
-  // --- МГНОВЕННЫЙ КЭШ МОДЕЛЕЙ И 32 ПАПОК (БЕЗ ТОРМОЗОВ НА 11 248 ШК) ---
   let _mdlCache = null, _mdlKey = '';
   function getModelsList() {
     const e = ensureStore();
@@ -155,7 +111,6 @@
       if (typeof render === 'function') render();
     }
   };
-  // --- ЗАГРУЗКА СТАРТОВЫХ ДАННЫХ SKOS В 1 КЛИК ---
   window.seedAllSkosData = function () {
     if (!confirm('Загрузить стартовые справочники SKOS (материалы, техкарты, ОС, контрагенты, сотрудники и налоговые долги)?\nВаши текущие данные не затрутся.')) return;
     const e = ensureStore();
@@ -214,7 +169,6 @@
     alert('✅ Стартовые справочники и данные SKOS загружены!');
   };
 
-  // --- ДЕЙСТВИЯ ЕДИНОГО РАЗДЕЛА «📚 СПРАВОЧНИКИ И АРХИВ» ---
   window.dictAction = function (act, key, idx) {
     const e = ensureStore();
     if (act === 'sub') { e.dictSub = key; pSave(); renderDictSection(); return; }
@@ -222,9 +176,7 @@
       const inp = document.getElementById('p4-d-new');
       const name = (inp?.value || '').trim();
       if (!name) return;
-      if (!e[key].some(x => x.name.toLowerCase() === name.toLowerCase())) {
-        e[key].unshift({ name, arch: false });
-      }
+      if (!e[key].some(x => x.name.toLowerCase() === name.toLowerCase())) e[key].unshift({ name, arch: false });
       if (inp) inp.value = '';
     }
     if (act === 'editSimple') {
@@ -275,9 +227,9 @@
           <td class="bold">${esc(item.name)}</td>
           <td>${item.arch ? '<span class="badge badge-amber">📦 В архиве</span>' : '<span class="badge badge-green">Активен</span>'}</td>
           <td style="white-space:nowrap">
-            <button type="button" class="btn" style="padding:2px 6px" title="Редактировать" onclick="dictAction('editSimple','${dictKey}',${i})">✏️</button>
-            <button type="button" class="btn" style="padding:2px 6px" title="${item.arch ? 'Вернуть из архива' : 'В архив'}" onclick="dictAction('toggleArch','${dictKey}',${i})">${item.arch ? '📤' : '📦'}</button>
-            <button type="button" class="btn btn-danger" style="padding:2px 6px" title="Удалить" onclick="dictAction('delSimple','${dictKey}',${i})">✕</button>
+            <button type="button" class="btn" style="padding:2px 6px" onclick="dictAction('editSimple','${dictKey}',${i})">✏️</button>
+            <button type="button" class="btn" style="padding:2px 6px" onclick="dictAction('toggleArch','${dictKey}',${i})">${item.arch ? '📤' : '📦'}</button>
+            <button type="button" class="btn btn-danger" style="padding:2px 6px" onclick="dictAction('delSimple','${dictKey}',${i})">✕</button>
           </td>
         </tr>`).join('');
       return `
@@ -291,8 +243,8 @@
     let body = '';
     if (sub === 'cats') body = renderSimpleDict('dictMatCats', 'Новая категория (напр. Трикотаж)...');
     else if (sub === 'units') body = renderSimpleDict('dictUnits', 'Новая ед. изм. (напр. упаковка)...');
-    else if (sub === 'sups') body = renderSimpleDict('dictSuppliers', 'Новый поставщик сырья / фабрика...');
-    else if (sub === 'taxes') body = renderSimpleDict('dictTaxTypes', 'Новый вид налога (напр. Торговый сбор)...');
+    else if (sub === 'sups') body = renderSimpleDict('dictSuppliers', 'Новый поставщик сырья...');
+    else if (sub === 'taxes') body = renderSimpleDict('dictTaxTypes', 'Новый вид налога...');
     else if (sub === 'dds') {
       body = `
         <form onsubmit="event.preventDefault();dictAction('addDdsArt')" class="form-grid" style="grid-template-columns:2fr 1fr 1.5fr auto;gap:8px;margin-bottom:12px">
@@ -303,16 +255,16 @@
         </form>
         <table><thead><tr><th>Статья ДДС</th><th>Направление</th><th>Правило ОПиУ</th><th>Статус</th><th>Действия</th></tr></thead>
         <tbody>${e.ddsArticles.map((a, i) => `<tr style="${a.arch ? 'opacity:0.55' : ''}"><td class="bold">${esc(a.name)}</td><td>${esc(a.dir)}</td><td>${esc(a.opiu)}</td><td>${a.arch ? '📦 Архив' : 'Активна'}</td><td style="white-space:nowrap"><button type="button" class="btn" style="padding:2px 6px" onclick="dictAction('editDdsArt','ddsArticles',${i})">✏️</button><button type="button" class="btn" style="padding:2px 6px" onclick="dictAction('toggleArch','ddsArticles',${i})">${a.arch ? '📤' : '📦'}</button><button type="button" class="btn btn-danger" style="padding:2px 6px" onclick="dictAction('delSimple','ddsArticles',${i})">✕</button></td></tr>`).join('')}</tbody></table>`;
-     else if (sub === 'staff') {
+    } else if (sub === 'staff') {
       body = `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div>
-            <div style="font-weight:800;margin-bottom:6px">👷 Сотрудники (ЗПВ) — редактируются в «Расходы и Налоги»</div>
+            <div style="font-weight:800;margin-bottom:6px">👷 Сотрудники (ЗПВ) — правятся в «Расходы и Налоги»</div>
             <table><thead><tr><th>ФИО</th><th>Статья</th><th>Валюта</th><th>Статус</th></tr></thead>
             <tbody>${e.staffList.map(s => `<tr><td class="bold">${esc(s.name)}</td><td>${esc(s.art)}</td><td>${esc(s.cur)}</td><td>${esc(s.status)}</td></tr>`).join('') || '<tr><td colspan="4">Пусто</td></tr>'}</tbody></table>
           </div>
           <div>
-            <div style="font-weight:800;margin-bottom:6px">🏢 Контрагенты — редактируются в «Поставщики и ОС»</div>
+            <div style="font-weight:800;margin-bottom:6px">🏢 Контрагенты — правятся в «Поставщики и ОС»</div>
             <table><thead><tr><th>Контрагент</th><th>Статья</th><th>Валюта</th></tr></thead>
             <tbody>${e.contractors.map(c => `<tr><td class="bold">${esc(c.name)}</td><td>${esc(c.art)}</td><td>${esc(c.cur)}</td></tr>`).join('') || '<tr><td colspan="3">Пусто</td></tr>'}</tbody></table>
           </div>
@@ -322,17 +274,13 @@
     sec.innerHTML = `
       <div class="card">
         <div class="card-header">
-          <div>
-            <div class="card-title">📚 Единые справочники и Архив SKOS</div>
-            <div style="font-size:11.5px;color:#64748b">Все выпадающие списки в программе строятся строго из этих справочников. Архивные записи скрываются из списков, но сохраняются в истории.</div>
-          </div>
+          <div><div class="card-title">📚 Единые справочники и Архив SKOS</div><div style="font-size:11.5px;color:#64748b">Все выпадающие списки строятся строго из этих справочников.</div></div>
           <button type="button" class="btn btn-success" onclick="seedAllSkosData()">📥 Загрузить стартовые данные SKOS</button>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${tabs}</div>
         ${body}
       </div>`;
   }
-  // --- РАСЧЁТ ЗАПАСОВ С УЧЁТОМ НАЧАЛЬНЫХ ОСТАТКОВ ---
   function calcStocks() {
     const e = ensureStore();
     const map = {};
@@ -370,11 +318,8 @@
     const e = ensureStore();
     if (act === 'tab') { e.stkSub = a; pSave(); renderStkSection(); return; }
     if (act === 'addMat') {
-      const name = document.getElementById('p4-m-n').value.trim();
-      const unit = document.getElementById('p4-m-u').value || 'шт';
-      const cat = document.getElementById('p4-m-c').value || 'Ткань';
-      const initQty = Number(document.getElementById('p4-m-iq').value) || 0;
-      const initUsd = Number(document.getElementById('p4-m-iu').value) || 0;
+      const name = document.getElementById('p4-m-n').value.trim(), unit = document.getElementById('p4-m-u').value || 'шт', cat = document.getElementById('p4-m-c').value || 'Ткань';
+      const initQty = Number(document.getElementById('p4-m-iq').value) || 0, initUsd = Number(document.getElementById('p4-m-iu').value) || 0;
       if (name) e.materials.unshift({ name, unit, cat, initQty, initUsd });
     }
     if (act === 'editMat') {
@@ -512,7 +457,7 @@
     if (st === 'sum') {
       body = `
         <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-          <div style="font-size:12px;color:#1e40af">ℹ️ <b>Контроль остатков:</b> Позиций с малым остатком (&lt;15 ед.): <b>${bal.lowCount}</b>. Все справочники категорий, единиц и поставщиков управляются в «📚 Справочники».</div>
+          <div style="font-size:12px;color:#1e40af">ℹ️ <b>Контроль остатков:</b> Позиций с малым остатком (&lt;15 ед.): <b>${bal.lowCount}</b>. Категории, единицы и поставщики управляются в «📚 Справочники».</div>
           <div style="display:flex;gap:6px"><button type="button" class="btn" onclick="window.tab('dict')">📚 Открыть Справочники</button><button type="button" class="btn btn-success" onclick="seedAllSkosData()">📥 Загрузить базу SKOS</button></div>
         </div>
         <div class="kpi-grid">
@@ -521,7 +466,7 @@
           <div class="kpi-card"><div style="font-size:11px;color:#64748b">Готовый товар</div><div class="kpi-val" style="color:#0284c7">${fmtU(bal.fgUsd)}</div><div class="kpi-sub">${fmtR(bal.fgUsd * rate)}</div></div>
           <div class="kpi-card highlight"><div style="font-size:11px;color:#1d4ed8;font-weight:700">ИТОГО ЗАМОРОЖЕНО</div><div class="kpi-val text-green">${fmtU(bal.totalUsd)}</div><div class="kpi-sub">${fmtR(bal.totalUsd * rate)}</div></div>
         </div>`;
-     else if (st === 'mat') {
+    } else if (st === 'mat') {
       body = `
         <form onsubmit="event.preventDefault();stkAction('addMat')" class="form-grid" style="grid-template-columns:1.8fr 1fr 1.3fr 0.9fr 0.9fr auto;gap:7px;margin-bottom:10px">
           <div><label>Название ткани / фурнитуры</label><input id="p4-m-n" class="input" required placeholder="Напр: Футер 3-нитка"></div>
@@ -539,7 +484,7 @@
             return `<tr><td class="bold">${esc(m.name)}</td><td>${esc(m.cat)}</td><td>${esc(m.unit)}</td><td class="num">${b.initQty.toFixed(1)}</td><td class="num">${b.inQty.toFixed(1)}</td><td class="num">${b.outQty.toFixed(1)}</td><td class="num bold" style="${low}">${b.balQty.toFixed(1)}</td><td class="num">${fmtU(b.avgUsd)}</td><td class="num bold">${fmtU(b.balUsd)}</td><td style="white-space:nowrap"><button type="button" class="btn" style="padding:2px 6px" onclick="stkAction('editMat',${i})">✏️</button><button type="button" class="btn btn-danger" style="padding:2px 6px" onclick="stkAction('delMat',${i})">✕</button></td></tr>`;
           }).join('')}</tbody>
         </table></div>`;
-     else if (st === 'in') {
+    } else if (st === 'in') {
       body = `
         <form onsubmit="event.preventDefault();stkAction('addIn')" class="form-grid" style="grid-template-columns:1fr 2fr 0.9fr 0.9fr 1.6fr auto;gap:7px;margin-bottom:10px">
           <div><label>Дата</label><input id="p4-in-d" type="date" class="input" required value="${new Date().toISOString().slice(0, 10)}"></div>
@@ -552,7 +497,7 @@
         <table><thead><tr><th>Дата</th><th>Материал</th><th class="num">Кол-во</th><th class="num">Цена ($)</th><th class="num">Итого ($)</th><th>Поставщик</th><th>Действия</th></tr></thead>
         <tbody>${e.matIn.map((r, i) => `<tr><td>${esc(r.date)}</td><td class="bold">${esc(r.matName)}</td><td class="num">${r.qty}</td><td class="num">${fmtU(r.priceUsd)}</td><td class="num bold">${fmtU(r.totalUsd)}</td><td>${esc(r.supplier || '')}</td><td style="white-space:nowrap"><button type="button" class="btn" style="padding:2px 6px" onclick="stkAction('editIn',${i})">✏️</button><button type="button" class="btn btn-danger" style="padding:2px 6px" onclick="stkAction('delIn',${i})">✕</button></td></tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:#64748b;padding:10px">Приходов пока нет</td></tr>'}</tbody></table>`;
     }
-     else if (st === 'sew') {
+    } else if (st === 'sew') {
       const boms = e.bom.map((b, bi) => {
         const u = (b.items || []).reduce((s, x) => s + (Number(x.norm) || 0) * (Number(x.priceUsd) || 0), 0);
         return `<details style="border:1px solid #cbd5e1;border-radius:7px;background:#fff;margin-bottom:6px;padding:7px 10px"><summary style="cursor:pointer;font-weight:700;font-size:12.5px;display:flex;justify-content:space-between"><span>▶ ${esc(b.product)} — <span style="color:#0369a1">${fmtU(u)} / шт.</span></span><span><button type="button" class="btn" style="padding:1px 7px;font-size:11px" onclick="event.preventDefault();document.getElementById('p4-bm-p').value='${esc(b.product)}'">+ Позиция</button> <button type="button" class="btn btn-danger" style="padding:1px 7px;font-size:11px" onclick="event.preventDefault();stkAction('delBom',${bi})">🗑️</button></span></summary>
@@ -582,7 +527,7 @@
             <div style="align-self:end"><button type="submit" class="btn btn-primary">+ В техкарту</button></div>
           </form>${boms}
         </div>`;
-     else if (st === 'fg') {
+    } else if (st === 'fg') {
       body = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-weight:800;font-size:13px">📦 Готовая продукция (РФ / Туркменистан / В пути)</span><button type="button" class="btn btn-amber" onclick="stkAction('lockFg')">🔒 Зафиксировать суммы месяца</button></div>
         <form onsubmit="event.preventDefault();stkAction('saveFg')" class="form-grid" style="grid-template-columns:1fr 2fr 0.8fr 0.8fr 0.8fr 0.9fr auto;gap:7px;margin-bottom:10px">
@@ -613,7 +558,6 @@
     }
     sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🏭 Запасы, Пошив (НЗП), Техкарты и Брак</div><div style="display:flex;gap:5px;flex-wrap:wrap">${nav}</div></div>${body}</div>`;
   }
-  // --- ЮНИТ-ЭКОНОМИКА: ФАКТ МП + ПЛАН-КАЛЬКУЛЯТОР ---
   window.ueAction = function (act, val, sub) {
     const e = ensureStore();
     if (act === 'view') e.ueView = val;
@@ -707,7 +651,7 @@
           <tr style="background:#eff6ff;font-weight:800;color:#1e3a8a"><td colspan="4">ИТОГО (${rows.length})</td><td class="num">${t.sQ}</td><td class="num">${t.rQ}</td><td class="num">${tm.nQ}</td><td class="num">${tm.retP.toFixed(1)}%</td><td class="num">${fmtR(tm.nR)}</td><td class="num">${fmtR(tm.avg)}</td><td class="num">${fmtR(tm.nC)}</td><td class="num">${tm.cP.toFixed(1)}%</td><td class="num">${fmtR(t.log)}</td><td class="num">${fmtR(tm.l1)}</td><td class="num">${fmtR(tm.nM)}</td><td class="num ${tm.prof >= 0 ? 'text-green' : 'text-red'}">${fmtR(tm.prof)}</td><td class="num ${tm.rent >= 0 ? 'text-green' : 'text-red'}">${tm.rent.toFixed(1)}%</td></tr></thead>
           <tbody>${rows.map(r => { const m = calc(r), c = m.prof >= 0 ? 'text-green' : 'text-red'; return `<tr><td>${esc(r.org)}</td><td>${esc(r.mp)}</td><td>${Number(r.mo)}</td><td class="bold">${esc(r.model)}</td><td class="num">${r.sQ}</td><td class="num">${r.rQ}</td><td class="num bold">${m.nQ}</td><td class="num">${m.retP.toFixed(1)}%</td><td class="num bold">${fmtR(m.nR)}</td><td class="num">${fmtR(m.avg)}</td><td class="num">${fmtR(m.nC)}</td><td class="num">${m.cP.toFixed(1)}%</td><td class="num">${fmtR(r.log)}</td><td class="num">${fmtR(m.l1)}</td><td class="num">${fmtR(m.nM)}</td><td class="num bold ${c}">${fmtR(m.prof)}</td><td class="num bold ${c}">${m.rent.toFixed(1)}%</td></tr>`; }).join('') || '<tr><td colspan="17" style="text-align:center;color:#64748b;padding:12px">Загрузите отчёты WB / Ozon / ЯМ — таблица заполнится сама</td></tr>'}</tbody>
         </table></div>`;
-     else {
+    } else {
       body = `
         <form onsubmit="event.preventDefault();ueAction('addPlan')" class="form-grid" style="grid-template-columns:2fr 1fr 1fr 0.8fr 0.9fr 0.8fr 0.8fr 0.8fr auto;gap:6px;margin-bottom:10px">
           <div><label>Модель (из справочника)</label><select id="p4-ue-m" class="select">${mOpts}</select></div>
@@ -729,7 +673,6 @@
     }
     sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">📈 Юнит-экономика (Факт по отчётам МП + План-калькулятор)</div><div style="display:flex;gap:6px"><button type="button" class="btn ${e.ueView === 'fact' ? 'btn-primary' : ''}" onclick="ueAction('view','fact')">📊 Факт по отчётам МП</button><button type="button" class="btn ${e.ueView === 'plan' ? 'btn-primary' : ''}" onclick="ueAction('view','plan')">🧮 План-калькулятор</button></div></div>${body}</div>`;
   }
-  // --- НАЛОГИ: КНОПКА «ЦЕЛИКОМ ЗА МЕСЯЦ» + ДОЛГИ НА 1 ЯНВАРЯ + ЗПВ ---
   window.addTaxWholeP4 = function () {
     const sec = document.getElementById('tab-exp'); if (!sec) return;
     const sels = sec.querySelectorAll('select');
@@ -876,7 +819,6 @@
         <tbody>${e.payrollOps.slice(0, 25).map((o, i) => `<tr><td>${esc(o.date)}</td><td class="bold">${esc(o.emp)}</td><td>${esc(o.art)}</td><td>${esc(o.kind)}</td><td class="num bold">${o.cur === 'USD' ? fmtU(o.amt) : fmtR(o.amt)}</td><td style="white-space:nowrap"><button type="button" class="btn" style="padding:1px 5px" onclick="zpvAction('editOp',${i})">✏️</button> <button type="button" class="btn btn-danger" style="padding:1px 5px" onclick="zpvAction('delOp',${i})">✕</button></td></tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:#64748b;padding:6px">Операций ЗПВ пока нет</td></tr>'}</tbody></table>
       </div>`;
   }
-  // --- ПОСТАВЩИКИ (КОНТРАГЕНТЫ RUB/USD) И ОСНОВНЫЕ СРЕДСТВА (ОС) ---
   window.supOsAction = function (act, idx) {
     const e = ensureStore();
     if (act === 'addOs') {
@@ -992,7 +934,6 @@
         }).join('') || '<tr><td colspan="8" style="text-align:center;color:#64748b;padding:8px">Нажмите «📥 Загрузить базу SKOS» сверху</td></tr>'}</tbody></table></div>
       </div>`;
   }
-  // --- УМНЫЙ ИМПОРТ ДДС + БЫСТРАЯ КНОПКА В СПРАВОЧНИК СТАТЕЙ ---
   window.importDdsCsvP4 = function (ev) {
     const f = ev.target.files && ev.target.files.item(0);
     if (!f) return;
@@ -1055,7 +996,6 @@
       </div>`;
   }
 
-  // --- УПРАВЛЕНЧЕСКИЙ БАЛАНС НА ГЛАВНОЙ СВОДКЕ ---
   function enhanceDashBalance() {
     const dash = document.getElementById('tab-dash'); if (!dash) return;
     let box = document.getElementById('p4-dash-bal');
@@ -1085,7 +1025,6 @@
       </div>`;
   }
 
-  // --- ЛЁГКОЕ ПОДКЛЮЧЕНИЕ К МЕНЮ БЕЗ ТОРМОЗОВ И БЕЛОГО ЭКРАНА ---
   function injectNavButtons() {
     const sku = document.getElementById('nav-sku');
     if (sku && sku.parentNode && !document.getElementById('nav-ue')) {
@@ -1146,7 +1085,6 @@
     applyActiveTab(window.db?.tab || 'dash');
   };
 
-  // Защита при подгрузке данных из облака (без тяжёлых циклов)
   const mainEl = document.querySelector('main.content');
   if (mainEl && window.MutationObserver) {
     let lockObs = false;
