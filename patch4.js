@@ -575,6 +575,84 @@
     e.payrollOps.unshift({ date: document.getElementById('zp-d').value || today(), emp: emp, kind: document.getElementById('zp-k').value, amt: amt, cur: st ? st.cur : 'RUB' });
     pSave(); enhanceExpTab();
   };
+  /* === SKOS Finance 3.0 — patch4.js (Блок 5Б: Финальный рендер вкладок и запуск) === */
+  function enhanceExpTab() {
+    const sec = document.getElementById('tab-exp');
+    if (!sec) return;
+    const e = ensureStore(), txTyp = document.getElementById('tx-typ'), txAmt = document.getElementById('tx-amt');
+    if (txTyp && txTyp.dataset.p4 !== '1') { txTyp.innerHTML = optDict(e.dictTaxTypes, txTyp.value, ''); txTyp.dataset.p4 = '1'; }
+    if (txAmt && !document.getElementById('p4-tx-btn')) {
+      const b = document.createElement('button');
+      b.id = 'p4-tx-btn'; b.type = 'button'; b.className = 'btn btn-success'; b.style.marginTop = '6px';
+      b.textContent = '✅ Целиком за месяц'; b.onclick = window.p4TaxFullMonth;
+      txAmt.parentNode.appendChild(b);
+    }
+    let box = document.getElementById('p4-exp-box');
+    if (!box) { box = document.createElement('div'); box.id = 'p4-exp-box'; sec.appendChild(box); }
+    const tdRows = e.taxDebts.map(function (t, i) {
+      return '<tr><td>' + esc(t.org) + '</td><td>' + esc(t.tax) + '</td><td class="num bold">' + fmtR(t.debt) + '</td>' +
+        '<td class="num"><button class="btn" onclick="p4TdEdit(' + i + ')">✏️</button> <button class="btn btn-danger" onclick="p4DelRow(\'taxDebts\',' + i + ')">✕</button></td></tr>';
+    }).join('');
+    const stAct = e.staffList.filter(function (s) { return !s.arch; });
+    const zpRows = stAct.map(function (s) {
+      let bal = num(s.initDebt);
+      e.payrollOps.forEach(function (op) { if (op.emp === s.name) bal += (op.kind === 'Начислено' ? num(op.amt) : -num(op.amt)); });
+      return '<tr><td class="bold">' + esc(s.name) + '</td><td>' + esc(s.role) + '</td><td class="num">' + num(s.initDebt) + ' ' + esc(s.cur) + '</td><td class="num bold">' + bal + ' ' + esc(s.cur) + '</td></tr>';
+    }).join('');
+    box.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">🏛️ Налоговые долги / переплаты на 01.01</div></div>' +
+      '<div class="form-grid" style="margin-bottom:10px"><div><label>Юрлицо</label><select id="td-o" class="select">' + optList(getActiveOrgs(), '', '') + '</select></div><div><label>Налог</label><select id="td-t" class="select">' + optDict(e.dictTaxTypes, '', '') + '</select></div><div><label>Сальдо ₽</label><input id="td-a" type="number" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4TdAdd()">+ Записать</button></div></div>' +
+      '<table><thead><tr><th>Юрлицо</th><th>Налог</th><th class="num">Сальдо 01.01</th><th></th></tr></thead><tbody>' + tdRows + '</tbody></table></div>' +
+      '<div class="card"><div class="card-header"><div class="card-title">👥 Зарплатная ведомость (ЗПВ)</div></div>' +
+      '<div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="zp-d" type="date" class="input" value="' + today() + '"></div><div><label>Сотрудник</label><select id="zp-e" class="select">' + optList(stAct.map(function (x) { return x.name; }), '', '— Сотрудник —') + '</select></div><div><label>Операция</label><select id="zp-k" class="select"><option>Начислено</option><option>Выплачено</option></select></div><div><label>Сумма</label><input id="zp-a" type="number" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4ZpAdd()">+ Провести</button></div></div>' +
+      '<table><thead><tr><th>Сотрудник</th><th>Должность</th><th class="num">Долг 01.01</th><th class="num">Остаток</th></tr></thead><tbody>' + zpRows + '</tbody></table></div>';
+  }
+
+  window.p4CtrAdd = function () {
+    const e = ensureStore(), ctr = document.getElementById('ct-s').value, amt = num(document.getElementById('ct-a').value);
+    if (!ctr || amt <= 0) return alert('Выберите контрагента и сумму!');
+    const info = e.contractors.find(function (c) { return c.name === ctr; });
+    e.contractorOps.unshift({ date: document.getElementById('ct-d').value || today(), ctr: ctr, kind: document.getElementById('ct-k').value, amt: amt, cur: info ? info.cur : 'RUB' });
+    pSave(); enhanceSupTab();
+  };
+
+  window.p4OsAdd = function () {
+    const e = ensureStore(), nm = document.getElementById('os-n').value.trim(), pr = num(document.getElementById('os-p').value);
+    if (!nm || pr <= 0) return alert('Введите название и цену ОС!');
+    e.osList.unshift({ name: nm, qty: num(document.getElementById('os-q').value) || 1, price: pr, months: num(document.getElementById('os-m').value) || 36, passed: num(document.getElementById('os-ps').value) || 0, room: document.getElementById('os-r').value.trim() });
+    pSave(); enhanceSupTab();
+  };
+
+  window.p4OsEdit = function (i) {
+    const o = ensureStore().osList[i];
+    if (!o) return;
+    const p = prompt('Прошло месяцев амортизации:', o.passed || 0);
+    if (p !== null) { o.passed = num(p); pSave(); enhanceSupTab(); }
+  };
+
+  function enhanceSupTab() {
+    const sec = document.getElementById('tab-sup');
+    if (!sec) return;
+    const e = ensureStore();
+    let box = document.getElementById('p4-sup-box');
+    if (!box) { box = document.createElement('div'); box.id = 'p4-sup-box'; sec.insertBefore(box, sec.firstChild); }
+    const cAct = e.contractors.filter(function (c) { return !c.arch; });
+    const cRows = cAct.map(function (c) {
+      let acc = 0, pay = 0;
+      e.contractorOps.forEach(function (op) { if (op.ctr === c.name) { if (op.kind === 'Начислено') acc += num(op.amt); else pay += num(op.amt); } });
+      const end = num(c.initDebt) + acc - pay;
+      return '<tr><td class="bold">' + esc(c.name) + '</td><td>' + esc(c.art) + '</td><td class="num">' + num(c.initDebt) + '</td><td class="num">' + acc + '</td><td class="num">' + pay + '</td><td class="num bold ' + (end > 0 ? 'text-red' : 'text-green') + '">' + end + ' ' + esc(c.cur) + '</td></tr>';
+    }).join('');
+    const oRows = e.osList.map(function (o, i) {
+      const full = num(o.qty || 1) * num(o.price), m = Math.max(1, num(o.months) || 24), rem = Math.max(0, full - (full / m) * Math.min(m, num(o.passed)));
+      return '<tr><td class="bold">' + esc(o.name) + '</td><td class="num">' + fmtR(full) + '</td><td class="num">' + o.passed + '/' + m + '</td><td class="num bold">' + fmtR(rem) + '</td><td class="num"><button class="btn" onclick="p4OsEdit(' + i + ')">✏️</button> <button class="btn btn-danger" onclick="p4DelRow(\'osList\',' + i + ')">✕</button></td></tr>';
+    }).join('');
+    box.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">🤝 Контрагенты SKOS (Сальдо 01.01 + Начислено − Выплачено)</div></div>' +
+      '<div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="ct-d" type="date" class="input" value="' + today() + '"></div><div><label>Контрагент</label><select id="ct-s" class="select">' + optList(cAct.map(function (x) { return x.name; }), '', '— Контрагент —') + '</select></div><div><label>Тип</label><select id="ct-k" class="select"><option>Начислено</option><option>Выплачено</option></select></div><div><label>Сумма</label><input id="ct-a" type="number" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4CtrAdd()">+ Записать</button></div></div>' +
+      '<table><thead><tr><th>Контрагент</th><th>Статья</th><th class="num">Нач.</th><th class="num">Начисл.</th><th class="num">Выплач.</th><th class="num">Остаток</th></tr></thead><tbody>' + cRows + '</tbody></table></div>' +
+      '<div class="card"><div class="card-header"><div class="card-title">🖥️ Основные средства (ОС) и Амортизация</div></div>' +
+      '<div class="form-grid" style="margin-bottom:10px"><div><label>Название</label><input id="os-n" class="input"></div><div><label>Шт</label><input id="os-q" type="number" class="input" value="1"></div><div><label>Цена ₽</label><input id="os-p" type="number" class="input"></div><div><label>Срок мес</label><input id="os-m" type="number" class="input" value="36"></div><div><label>Прошло</label><input id="os-ps" type="number" class="input" value="0"></div><div><label>Где</label><input id="os-r" class="input" value="Цех"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4OsAdd()">+ ОС</button></div></div>' +
+      '<table><thead><tr><th>Объект</th><th class="num">Сумма ₽</th><th class="num">Срок</th><th class="num">Остаточная ₽</th><th></th></tr></thead><tbody>' + oRows + '</tbody></table></div>';
+  }
   function renderDashAddon() {
     const sec = document.getElementById('tab-dash');
     if (!sec) return;
