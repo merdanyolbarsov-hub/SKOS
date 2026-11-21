@@ -303,7 +303,7 @@
         </form>
         <table><thead><tr><th>Статья ДДС</th><th>Направление</th><th>Правило ОПиУ</th><th>Статус</th><th>Действия</th></tr></thead>
         <tbody>${e.ddsArticles.map((a, i) => `<tr style="${a.arch ? 'opacity:0.55' : ''}"><td class="bold">${esc(a.name)}</td><td>${esc(a.dir)}</td><td>${esc(a.opiu)}</td><td>${a.arch ? '📦 Архив' : 'Активна'}</td><td style="white-space:nowrap"><button type="button" class="btn" style="padding:2px 6px" onclick="dictAction('editDdsArt','ddsArticles',${i})">✏️</button><button type="button" class="btn" style="padding:2px 6px" onclick="dictAction('toggleArch','ddsArticles',${i})">${a.arch ? '📤' : '📦'}</button><button type="button" class="btn btn-danger" style="padding:2px 6px" onclick="dictAction('delSimple','ddsArticles',${i})">✕</button></td></tr>`).join('')}</tbody></table>`;
-    } else if (sub === 'staff') {
+     else if (sub === 'staff') {
       body = `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div>
@@ -521,7 +521,7 @@
           <div class="kpi-card"><div style="font-size:11px;color:#64748b">Готовый товар</div><div class="kpi-val" style="color:#0284c7">${fmtU(bal.fgUsd)}</div><div class="kpi-sub">${fmtR(bal.fgUsd * rate)}</div></div>
           <div class="kpi-card highlight"><div style="font-size:11px;color:#1d4ed8;font-weight:700">ИТОГО ЗАМОРОЖЕНО</div><div class="kpi-val text-green">${fmtU(bal.totalUsd)}</div><div class="kpi-sub">${fmtR(bal.totalUsd * rate)}</div></div>
         </div>`;
-    } else if (st === 'mat') {
+     else if (st === 'mat') {
       body = `
         <form onsubmit="event.preventDefault();stkAction('addMat')" class="form-grid" style="grid-template-columns:1.8fr 1fr 1.3fr 0.9fr 0.9fr auto;gap:7px;margin-bottom:10px">
           <div><label>Название ткани / фурнитуры</label><input id="p4-m-n" class="input" required placeholder="Напр: Футер 3-нитка"></div>
@@ -539,7 +539,7 @@
             return `<tr><td class="bold">${esc(m.name)}</td><td>${esc(m.cat)}</td><td>${esc(m.unit)}</td><td class="num">${b.initQty.toFixed(1)}</td><td class="num">${b.inQty.toFixed(1)}</td><td class="num">${b.outQty.toFixed(1)}</td><td class="num bold" style="${low}">${b.balQty.toFixed(1)}</td><td class="num">${fmtU(b.avgUsd)}</td><td class="num bold">${fmtU(b.balUsd)}</td><td style="white-space:nowrap"><button type="button" class="btn" style="padding:2px 6px" onclick="stkAction('editMat',${i})">✏️</button><button type="button" class="btn btn-danger" style="padding:2px 6px" onclick="stkAction('delMat',${i})">✕</button></td></tr>`;
           }).join('')}</tbody>
         </table></div>`;
-    } else if (st === 'in') {
+     else if (st === 'in') {
       body = `
         <form onsubmit="event.preventDefault();stkAction('addIn')" class="form-grid" style="grid-template-columns:1fr 2fr 0.9fr 0.9fr 1.6fr auto;gap:7px;margin-bottom:10px">
           <div><label>Дата</label><input id="p4-in-d" type="date" class="input" required value="${new Date().toISOString().slice(0, 10)}"></div>
@@ -552,7 +552,7 @@
         <table><thead><tr><th>Дата</th><th>Материал</th><th class="num">Кол-во</th><th class="num">Цена ($)</th><th class="num">Итого ($)</th><th>Поставщик</th><th>Действия</th></tr></thead>
         <tbody>${e.matIn.map((r, i) => `<tr><td>${esc(r.date)}</td><td class="bold">${esc(r.matName)}</td><td class="num">${r.qty}</td><td class="num">${fmtU(r.priceUsd)}</td><td class="num bold">${fmtU(r.totalUsd)}</td><td>${esc(r.supplier || '')}</td><td style="white-space:nowrap"><button type="button" class="btn" style="padding:2px 6px" onclick="stkAction('editIn',${i})">✏️</button><button type="button" class="btn btn-danger" style="padding:2px 6px" onclick="stkAction('delIn',${i})">✕</button></td></tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:#64748b;padding:10px">Приходов пока нет</td></tr>'}</tbody></table>`;
     }
-    } else if (st === 'sew') {
+     else if (st === 'sew') {
       const boms = e.bom.map((b, bi) => {
         const u = (b.items || []).reduce((s, x) => s + (Number(x.norm) || 0) * (Number(x.priceUsd) || 0), 0);
         return `<details style="border:1px solid #cbd5e1;border-radius:7px;background:#fff;margin-bottom:6px;padding:7px 10px"><summary style="cursor:pointer;font-weight:700;font-size:12.5px;display:flex;justify-content:space-between"><span>▶ ${esc(b.product)} — <span style="color:#0369a1">${fmtU(u)} / шт.</span></span><span><button type="button" class="btn" style="padding:1px 7px;font-size:11px" onclick="event.preventDefault();document.getElementById('p4-bm-p').value='${esc(b.product)}'">+ Позиция</button> <button type="button" class="btn btn-danger" style="padding:1px 7px;font-size:11px" onclick="event.preventDefault();stkAction('delBom',${bi})">🗑️</button></span></summary>
@@ -582,7 +582,7 @@
             <div style="align-self:end"><button type="submit" class="btn btn-primary">+ В техкарту</button></div>
           </form>${boms}
         </div>`;
-    } else if (st === 'fg') {
+     else if (st === 'fg') {
       body = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-weight:800;font-size:13px">📦 Готовая продукция (РФ / Туркменистан / В пути)</span><button type="button" class="btn btn-amber" onclick="stkAction('lockFg')">🔒 Зафиксировать суммы месяца</button></div>
         <form onsubmit="event.preventDefault();stkAction('saveFg')" class="form-grid" style="grid-template-columns:1fr 2fr 0.8fr 0.8fr 0.8fr 0.9fr auto;gap:7px;margin-bottom:10px">
@@ -707,7 +707,7 @@
           <tr style="background:#eff6ff;font-weight:800;color:#1e3a8a"><td colspan="4">ИТОГО (${rows.length})</td><td class="num">${t.sQ}</td><td class="num">${t.rQ}</td><td class="num">${tm.nQ}</td><td class="num">${tm.retP.toFixed(1)}%</td><td class="num">${fmtR(tm.nR)}</td><td class="num">${fmtR(tm.avg)}</td><td class="num">${fmtR(tm.nC)}</td><td class="num">${tm.cP.toFixed(1)}%</td><td class="num">${fmtR(t.log)}</td><td class="num">${fmtR(tm.l1)}</td><td class="num">${fmtR(tm.nM)}</td><td class="num ${tm.prof >= 0 ? 'text-green' : 'text-red'}">${fmtR(tm.prof)}</td><td class="num ${tm.rent >= 0 ? 'text-green' : 'text-red'}">${tm.rent.toFixed(1)}%</td></tr></thead>
           <tbody>${rows.map(r => { const m = calc(r), c = m.prof >= 0 ? 'text-green' : 'text-red'; return `<tr><td>${esc(r.org)}</td><td>${esc(r.mp)}</td><td>${Number(r.mo)}</td><td class="bold">${esc(r.model)}</td><td class="num">${r.sQ}</td><td class="num">${r.rQ}</td><td class="num bold">${m.nQ}</td><td class="num">${m.retP.toFixed(1)}%</td><td class="num bold">${fmtR(m.nR)}</td><td class="num">${fmtR(m.avg)}</td><td class="num">${fmtR(m.nC)}</td><td class="num">${m.cP.toFixed(1)}%</td><td class="num">${fmtR(r.log)}</td><td class="num">${fmtR(m.l1)}</td><td class="num">${fmtR(m.nM)}</td><td class="num bold ${c}">${fmtR(m.prof)}</td><td class="num bold ${c}">${m.rent.toFixed(1)}%</td></tr>`; }).join('') || '<tr><td colspan="17" style="text-align:center;color:#64748b;padding:12px">Загрузите отчёты WB / Ozon / ЯМ — таблица заполнится сама</td></tr>'}</tbody>
         </table></div>`;
-    } else {
+     else {
       body = `
         <form onsubmit="event.preventDefault();ueAction('addPlan')" class="form-grid" style="grid-template-columns:2fr 1fr 1fr 0.8fr 0.9fr 0.8fr 0.8fr 0.8fr auto;gap:6px;margin-bottom:10px">
           <div><label>Модель (из справочника)</label><select id="p4-ue-m" class="select">${mOpts}</select></div>
