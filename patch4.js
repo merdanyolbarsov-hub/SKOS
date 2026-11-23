@@ -925,9 +925,9 @@
       topbar.appendChild(b);
     }
   }, 500);
-  /* === SKOS Finance 3.0 — patch4.js (Блок 6: Единый вход по паролю + Supabase) === */
-  const SKOS_SUPA_URL = 'https://supabase.co';
-  const SKOS_SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
+  /* === SKOS Finance 3.0 — patch4.js (Блок 6: Умный режим «Только просмотр» + Авто-облако) === */
+  const SKOS_SUPA_URL  = 'https://supabase.co';
+  const SKOS_SUPA_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
   const SKOS_OWNER_PASS = 'Skos#9482!Tm';
   const SKOS_VIEW_PASS  = 'SkosView2026';
 
@@ -954,42 +954,68 @@
     }
   }
 
-  function lockReadOnlyUI(userName) {
+  function autoPullCloudSilent() {
+    injectSupabaseDefaults();
+    // 1. Вызываем штатную функцию загрузки из облака, если она есть в window
+    const fnNames = ['loadFromCloud', 'pullFromCloud', 'syncFromCloud', 'supaLoad', 'cloudLoad', 'fetchCloud'];
+    for (let i = 0; i < fnNames.length; i++) {
+      if (typeof window[fnNames[i]] === 'function') {
+        try { window[fnNames[i]](true); return; } catch (e) {}
+      }
+    }
+    // 2. Иначе тихо кликаем по штатной кнопке «Загрузить» из облака
+    const btn = Array.from(document.querySelectorAll('button')).find(function (b) {
+      return /загрузить из облака|синхронизировать|облако/i.test(b.textContent || '') && !/сохранить/i.test(b.textContent || '');
+    });
+    if (btn) btn.click();
+  }
+
+  function lockReadOnlyUI() {
     window.__skosReadOnly = true;
+    // Блокируем запись в облако из режима гостя
+    const _origFetch = window.fetch;
+    window.fetch = function (url, opts) {
+      const u = String(url || '');
+      const m = ((opts && opts.method) || 'GET').toUpperCase();
+      if (u.indexOf('supabase.co') >= 0 && m !== 'GET') {
+        return Promise.resolve(new Response('{}', { status: 200 }));
+      }
+      return _origFetch.apply(this, arguments);
+    };
+
     if (!document.getElementById('p4-ro-css')) {
       const st = document.createElement('style');
       st.id = 'p4-ro-css';
-      st.textContent = '#tab-set,#nav-set,.btn-danger,.btn-primary,.btn-success,input[type="file"]{display:none!important}input,select,textarea{pointer-events:none!important;background:#f8fafc!important}';
+      // Скрываем только настройки, формы создания/редактирования и опасные кнопки.
+      // Все фильтры (select в фильтрах и шапке) остаются 100% рабочими!
+      st.textContent = [
+        '#tab-set, #nav-set, [data-tab="set"], .form-grid, input[type="file"], .btn-danger, .btn-success { display: none !important; }',
+        '.card-header .btn-primary, td .btn, td .btn-primary { display: none !important; }',
+        'table input, table select { pointer-events: none !important; background: transparent !important; border: none !important; }'
+      ].join('\n');
       document.head.appendChild(st);
     }
-    const hdr = document.querySelector('header, .topbar, main.content');
-    if (hdr && !document.getElementById('p4-ro-badge')) {
-      const b = document.createElement('div');
-      b.id = 'p4-ro-badge';
-      b.style.cssText = 'background:#fef3c7;color:#92400e;padding:6px 12px;font-weight:700;font-size:12px;text-align:center;border-bottom:1px solid #f59e0b';
-      b.innerHTML = '👁️ ТОЛЬКО ПРОСМОТР (' + esc(userName || 'Гость') + ') — данные из облака SKOS ' +
-        '<button style="margin-left:8px;padding:2px 8px;cursor:pointer" onclick="p4ForcePull()">🔄 Обновить из облака</button> ' +
-        '<button style="margin-left:4px;padding:2px 8px;cursor:pointer" onclick="sessionStorage.removeItem(\'skos_auth_role\');location.reload()">🚪 Выйти</button>';
-      hdr.prepend(b);
-    }
-  }
 
-  window.p4ForcePull = function () {
-    injectSupabaseDefaults();
-    const btn = Array.from(document.querySelectorAll('button')).find(function (b) {
-      return /загрузить/i.test(b.textContent || '');
-    });
-    if (btn) btn.click();
-  };
+    // Дополнительно скрываем текстовые кнопки добавления/удаления/импорта, но оставляем фильтры и вкладки
+    const hideWords = /добавить|внести|импорт|убрать дубли|сохранить|записать|провести|списать|обработать|создать|удалить|бэкап/i;
+    const scanButtons = function () {
+      document.querySelectorAll('button').forEach(function (b) {
+        if (b.id === 'p4-lg-btn') return;
+        const txt = (b.textContent || '').trim();
+        if (hideWords.test(txt)) b.style.display = 'none';
+      });
+    };
+    scanButtons();
+    setInterval(scanButtons, 800);
+  }
 
   function showLoginGate() {
     injectSupabaseDefaults();
     const savedRole = sessionStorage.getItem('skos_auth_role');
-    const savedUser = sessionStorage.getItem('skos_auth_user') || '';
     if (savedRole === 'owner') return;
     if (savedRole === 'viewer') {
-      lockReadOnlyUI(savedUser);
-      setTimeout(window.p4ForcePull, 500);
+      lockReadOnlyUI();
+      setTimeout(autoPullCloudSilent, 400);
       return;
     }
 
@@ -999,18 +1025,18 @@
     ov.innerHTML =
       '<div style="background:#fff;padding:28px;border-radius:14px;width:340px;max-width:92vw;box-shadow:0 20px 40px rgba(0,0,0,.35)">' +
         '<div style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:4px">🔐 SKOS Finance 3.0</div>' +
-        '<div style="font-size:13px;color:#64748b;margin-bottom:16px">Управленческий учёт — вход по паролю</div>' +
-        '<label style="font-size:12px;font-weight:600;color:#334155">Логин / Имя</label>' +
+        '<div style="font-size:13px;color:#64748b;margin-bottom:16px">Управленческий учёт — вход в систему</div>' +
+        '<label style="font-size:12px;font-weight:600;color:#334155">Имя / Логин</label>' +
         '<input id="p4-lg-u" style="width:100%;box-sizing:border-box;padding:9px 11px;margin:4px 0 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px" placeholder="Например: Руководитель">' +
         '<label style="font-size:12px;font-weight:600;color:#334155">Пароль доступа</label>' +
         '<input id="p4-lg-p" type="password" style="width:100%;box-sizing:border-box;padding:9px 11px;margin:4px 0 16px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px" placeholder="Введите пароль">' +
-        '<button id="p4-lg-btn" style="width:100%;padding:10px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer">Войти в систему</button>' +
-        '<div id="p4-lg-err" style="color:#dc2626;font-size:12px;margin-top:8px;display:none">⛔ Неверный пароль доступа</div>' +
+        '<button id="p4-lg-btn" style="width:100%;padding:10px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer">Войти</button>' +
+        '<div id="p4-lg-err" style="color:#dc2626;font-size:12px;margin-top:8px;display:none">⛔ Неверный пароль</div>' +
       '</div>';
     document.body.appendChild(ov);
 
     const doLogin = function () {
-      const u = (document.getElementById('p4-lg-u').value || 'Сотрудник').trim();
+      const u = (document.getElementById('p4-lg-u').value || 'Руководитель').trim();
       const p = (document.getElementById('p4-lg-p').value || '').trim();
       if (p === SKOS_OWNER_PASS) {
         sessionStorage.setItem('skos_auth_role', 'owner');
@@ -1021,8 +1047,8 @@
         sessionStorage.setItem('skos_auth_role', 'viewer');
         sessionStorage.setItem('skos_auth_user', u);
         ov.remove();
-        lockReadOnlyUI(u);
-        setTimeout(window.p4ForcePull, 400);
+        lockReadOnlyUI();
+        setTimeout(autoPullCloudSilent, 350);
       } else {
         document.getElementById('p4-lg-err').style.display = 'block';
       }
