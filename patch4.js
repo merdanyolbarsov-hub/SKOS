@@ -714,4 +714,36 @@
       }
     }
   };
+  /* === Прямая синхронизация с Supabase + статус на кнопке === */
+  window.p4ForceCloudSync = async function () {
+    const url = (document.getElementById('sb-url') || {}).value.trim();
+    const key = (document.getElementById('sb-key') || {}).value.trim();
+    const pin = (document.getElementById('sb-pin') || {}).value.trim();
+    if (!url || !key) return alert('Вставьте Project URL и Anon Public Key!');
+    if (window.db) { window.db.cloud = { url: url, key: key, pin: pin }; pSave(); }
+    try {
+      const res = await fetch(url.replace(/\/$/, '') + '/rest/v1/skos_cloud?id=eq.main', {
+        method: 'PATCH',
+        headers: {
+          'apikey': key,
+          'Authorization': 'Bearer ' + key,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation',
+          'x-skos-pin': pin
+        },
+        body: JSON.stringify({ payload: window.db, updated_at: new Date().toISOString() })
+      });
+      if (!res.ok) return alert('Ошибка Supabase (' + res.status + '): проверьте PIN или включите VPN');
+      alert('✅ Успешно сохранено в Supabase! Защита PIN работает.');
+    } catch (e) {
+      alert('❌ Нет связи с Supabase (проверьте интернет или VPN): ' + e.message);
+    }
+  };
+
+  setTimeout(function () {
+    const btn = Array.from(document.querySelectorAll('button')).find(function (b) {
+      return b.textContent.indexOf('Сохранить и синхронизировать') >= 0;
+    });
+    if (btn) btn.onclick = window.p4ForceCloudSync;
+  }, 400);
 })();
