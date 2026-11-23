@@ -925,7 +925,7 @@
       topbar.appendChild(b);
     }
   }, 500);
-  /* === SKOS Finance 3.0 — patch4.js (Блок 6: Вход по паролю + Прямая автозагрузка из skos_cloud) === */
+  /* === SKOS Finance 3.0 — patch4.js (Блок 6: Финальный вход + Умный режим Гостя) === */
   let __manualCloudClick = false;
   document.addEventListener('click', function (ev) {
     if (ev.target && /облако|синхронизировать/i.test(ev.target.textContent || '')) __manualCloudClick = true;
@@ -964,9 +964,9 @@
       const rMain = await fetch(SKOS_SUPA_URL + '/rest/v1/skos_cloud?id=eq.main&select=payload', { headers: hdrs });
       if (!rMain.ok) return;
       const rows = await rMain.json();
-      if (!rows || !rows.length || !rows[0].payload) return;
+      if (!rows || !rows.length || !rows.payload) return;
 
-      const data = rows[0].payload;
+      const data = rows.payload;
       const chunks = Number(data.skusChunks || 0);
       if (chunks > 0) {
         const allSkus = [];
@@ -974,8 +974,8 @@
           const rSku = await fetch(SKOS_SUPA_URL + '/rest/v1/skos_cloud?id=eq.skus_' + c + '&select=payload', { headers: hdrs });
           if (rSku.ok) {
             const sRows = await rSku.json();
-            if (sRows && sRows[0] && Array.isArray(sRows[0].payload)) {
-              sRows[0].payload.forEach(function (item) {
+            if (sRows && sRows && Array.isArray(sRows.payload)) {
+              sRows.payload.forEach(function (item) {
                 allSkus.push({ name: item.n, art: item.a, col: item.c, size: item.s, barcode: item.bc, costUsd: item.usd });
               });
             }
@@ -990,6 +990,7 @@
     } catch (e) {}
   }
 
+  // Блокировка изменений ТОЛЬКО для гостя (Админа не затрагивает)
   function lockReadOnlyUI() {
     window.__skosReadOnly = true;
     const _origFetch = window.fetch;
@@ -1006,14 +1007,19 @@
       const st = document.createElement('style');
       st.id = 'p4-ro-css';
       st.textContent = [
-        '#tab-set, #nav-set, [data-tab="set"], .form-grid, input[type="file"], .btn-danger, .btn-success { display: none !important; }',
-        '.card-header .btn-primary, td .btn, td .btn-primary { display: none !important; }',
+        // Скрываем настройки, загрузку файлов, красные/зелёные кнопки действий
+        '#tab-set, #nav-set, [data-tab="set"], input[type="file"], .btn-danger, .btn-success { display: none !important; }',
+        // Скрываем формы ввода, но оставляем все строки фильтров (включая 7 фильтров ABC-анализа)
+        '.form-grid:has(input:not([type="checkbox"]):not([type="radio"])) { display: none !important; }',
+        // Скрываем кнопки редактирования в таблицах
+        'td .btn, td .btn-primary { display: none !important; }',
         'table input, table select { pointer-events: none !important; background: transparent !important; border: none !important; }'
       ].join('\n');
       document.head.appendChild(st);
     }
 
-    const hideWords = /добавить|внести|импорт|убрать дубли|сохранить|записать|провести|списать|обработать|создать|удалить|бэкап|облако|закрыт|открыт|очистить/i;
+    // Скрываем кнопки редактирования, удаления, замка, облака, загрузки и карандаш «✏️ Папка»
+    const hideWords = /добавить|внести|импорт|убрать дубли|сохранить|записать|провести|списать|обработать|создать|удалить|бэкап|облако|закрыт|открыт|очистить|загрузить|✏|папка/i;
     const scanButtons = function () {
       document.querySelectorAll('button').forEach(function (b) {
         if (b.id === 'p4-lg-btn') return;
@@ -1022,7 +1028,7 @@
       });
     };
     scanButtons();
-    setInterval(scanButtons, 800);
+    setInterval(scanButtons, 600);
   }
 
   function showLoginGate() {
