@@ -925,4 +925,111 @@
       topbar.appendChild(b);
     }
   }, 500);
+  /* === SKOS Finance 3.0 — patch4.js (Блок 6: Единый вход по паролю + Supabase) === */
+  const SKOS_SUPA_URL = 'https://supabase.co';
+  const SKOS_SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
+  const SKOS_OWNER_PASS = 'Skos#9482!Tm';
+  const SKOS_VIEW_PASS  = 'SkosView2026';
+
+  function injectSupabaseDefaults() {
+    const pairs = [
+      ['skos_supa_url', SKOS_SUPA_URL], ['supabase_url', SKOS_SUPA_URL], ['sb_url', SKOS_SUPA_URL],
+      ['skos_supa_key', SKOS_SUPA_KEY], ['supabase_key', SKOS_SUPA_KEY], ['sb_key', SKOS_SUPA_KEY],
+      ['skos_supa_pin', SKOS_OWNER_PASS], ['supabase_pin', SKOS_OWNER_PASS], ['sb_pin', SKOS_OWNER_PASS]
+    ];
+    pairs.forEach(function (p) { if (!localStorage.getItem(p)) localStorage.setItem(p, p); });
+    if (window.db && typeof window.db === 'object') {
+      window.db.supaUrl = window.db.supaUrl || SKOS_SUPA_URL;
+      window.db.supaKey = window.db.supaKey || SKOS_SUPA_KEY;
+      window.db.supaPin = window.db.supaPin || SKOS_OWNER_PASS;
+    }
+    const sec = document.getElementById('tab-set');
+    if (sec) {
+      sec.querySelectorAll('input').forEach(function (inp) {
+        const ph = (inp.placeholder || '') + ' ' + ((inp.previousElementSibling && inp.previousElementSibling.textContent) || '');
+        if (!inp.value && /url/i.test(ph)) inp.value = SKOS_SUPA_URL;
+        if (!inp.value && /anon|key/i.test(ph)) inp.value = SKOS_SUPA_KEY;
+        if (!inp.value && /пин|pin|парол/i.test(ph)) inp.value = SKOS_OWNER_PASS;
+      });
+    }
+  }
+
+  function lockReadOnlyUI(userName) {
+    window.__skosReadOnly = true;
+    if (!document.getElementById('p4-ro-css')) {
+      const st = document.createElement('style');
+      st.id = 'p4-ro-css';
+      st.textContent = '#tab-set,#nav-set,.btn-danger,.btn-primary,.btn-success,input[type="file"]{display:none!important}input,select,textarea{pointer-events:none!important;background:#f8fafc!important}';
+      document.head.appendChild(st);
+    }
+    const hdr = document.querySelector('header, .topbar, main.content');
+    if (hdr && !document.getElementById('p4-ro-badge')) {
+      const b = document.createElement('div');
+      b.id = 'p4-ro-badge';
+      b.style.cssText = 'background:#fef3c7;color:#92400e;padding:6px 12px;font-weight:700;font-size:12px;text-align:center;border-bottom:1px solid #f59e0b';
+      b.innerHTML = '👁️ ТОЛЬКО ПРОСМОТР (' + esc(userName || 'Гость') + ') — данные из облака SKOS ' +
+        '<button style="margin-left:8px;padding:2px 8px;cursor:pointer" onclick="p4ForcePull()">🔄 Обновить из облака</button> ' +
+        '<button style="margin-left:4px;padding:2px 8px;cursor:pointer" onclick="sessionStorage.removeItem(\'skos_auth_role\');location.reload()">🚪 Выйти</button>';
+      hdr.prepend(b);
+    }
+  }
+
+  window.p4ForcePull = function () {
+    injectSupabaseDefaults();
+    const btn = Array.from(document.querySelectorAll('button')).find(function (b) {
+      return /загрузить/i.test(b.textContent || '');
+    });
+    if (btn) btn.click();
+  };
+
+  function showLoginGate() {
+    injectSupabaseDefaults();
+    const savedRole = sessionStorage.getItem('skos_auth_role');
+    const savedUser = sessionStorage.getItem('skos_auth_user') || '';
+    if (savedRole === 'owner') return;
+    if (savedRole === 'viewer') {
+      lockReadOnlyUI(savedUser);
+      setTimeout(window.p4ForcePull, 500);
+      return;
+    }
+
+    const ov = document.createElement('div');
+    ov.id = 'p4-login-gate';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.92);z-index:99999;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif';
+    ov.innerHTML =
+      '<div style="background:#fff;padding:28px;border-radius:14px;width:340px;max-width:92vw;box-shadow:0 20px 40px rgba(0,0,0,.35)">' +
+        '<div style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:4px">🔐 SKOS Finance 3.0</div>' +
+        '<div style="font-size:13px;color:#64748b;margin-bottom:16px">Управленческий учёт — вход по паролю</div>' +
+        '<label style="font-size:12px;font-weight:600;color:#334155">Логин / Имя</label>' +
+        '<input id="p4-lg-u" style="width:100%;box-sizing:border-box;padding:9px 11px;margin:4px 0 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px" placeholder="Например: Руководитель">' +
+        '<label style="font-size:12px;font-weight:600;color:#334155">Пароль доступа</label>' +
+        '<input id="p4-lg-p" type="password" style="width:100%;box-sizing:border-box;padding:9px 11px;margin:4px 0 16px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px" placeholder="Введите пароль">' +
+        '<button id="p4-lg-btn" style="width:100%;padding:10px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer">Войти в систему</button>' +
+        '<div id="p4-lg-err" style="color:#dc2626;font-size:12px;margin-top:8px;display:none">⛔ Неверный пароль доступа</div>' +
+      '</div>';
+    document.body.appendChild(ov);
+
+    const doLogin = function () {
+      const u = (document.getElementById('p4-lg-u').value || 'Сотрудник').trim();
+      const p = (document.getElementById('p4-lg-p').value || '').trim();
+      if (p === SKOS_OWNER_PASS) {
+        sessionStorage.setItem('skos_auth_role', 'owner');
+        sessionStorage.setItem('skos_auth_user', u);
+        ov.remove();
+        injectSupabaseDefaults();
+      } else if (p === SKOS_VIEW_PASS) {
+        sessionStorage.setItem('skos_auth_role', 'viewer');
+        sessionStorage.setItem('skos_auth_user', u);
+        ov.remove();
+        lockReadOnlyUI(u);
+        setTimeout(window.p4ForcePull, 400);
+      } else {
+        document.getElementById('p4-lg-err').style.display = 'block';
+      }
+    };
+    document.getElementById('p4-lg-btn').onclick = doLogin;
+    document.getElementById('p4-lg-p').onkeydown = function (ev) { if (ev.key === 'Enter') doLogin(); };
+  }
+
+  setTimeout(showLoginGate, 120);
 })();
