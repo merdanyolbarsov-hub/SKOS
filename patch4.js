@@ -775,4 +775,30 @@
     if (topCloudBtn) topCloudBtn.onclick = function () { window.p4ForceCloudSync(false); };
     }
   }, 400);
+  /* === Режим ТОЛЬКО ПРОСМОТР (при вводе гостевого PIN: SkosView2026) === */
+  function applyReadOnlyMode() {
+    const pin = ((window.db && window.db.cloud && window.db.cloud.pin) || '').trim();
+    if (pin !== 'SkosView2026') return;
+    document.querySelectorAll('button').forEach(function (b) {
+      const txt = b.textContent || '';
+      if (b.classList.contains('nav-btn')) return;
+      if (txt.indexOf('Облако') >= 0 || txt.indexOf('синхронизировать') >= 0 || txt.indexOf('Бэкап') >= 0) return;
+      if (txt.indexOf('+') >= 0 || txt.indexOf('✏') >= 0 || txt.indexOf('✕') >= 0 || txt.indexOf('📦') >= 0 ||
+          txt.indexOf('Удалить') >= 0 || txt.indexOf('Очистить') >= 0 || txt.indexOf('Сохранить') >= 0 ||
+          txt.indexOf('Загрузить') >= 0 || txt.indexOf('Открыт') >= 0 || txt.indexOf('Целиком') >= 0) {
+        b.style.display = 'none';
+      }
+    });
+    const crumb = document.getElementById('crumb');
+    if (crumb && crumb.textContent.indexOf('ПРОСМОТР') < 0) {
+      crumb.textContent += ' [👁️ РЕЖИМ ТОЛЬКО ПРОСМОТР]';
+    }
+  }
+
+  const _prevRenderRo = window.render;
+  window.render = function () {
+    if (typeof _prevRenderRo === 'function') _prevRenderRo.apply(this, arguments);
+    applyReadOnlyMode();
+  };
+  setTimeout(applyReadOnlyMode, 500);
 })();
