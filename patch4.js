@@ -769,6 +769,10 @@
       b2.textContent = '🏷️ Синхр. базу ШК (пачками)';
       b2.onclick = function () { window.p4ForceCloudSync(true); };
       btn.insertAdjacentElement('afterend', b2);
+          const topCloudBtn = Array.from(document.querySelectorAll('.topbar button')).find(function (b) {
+      return b.textContent.indexOf('Облако') >= 0;
+    });
+    if (topCloudBtn) topCloudBtn.onclick = function () { window.p4ForceCloudSync(false); };
     }
   }, 400);
 })();
