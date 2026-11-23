@@ -714,13 +714,21 @@
       }
     }
   };
-  /* === Прямая синхронизация с Supabase + статус на кнопке === */
+  /* === Быстрая синхронизация с Supabase без таймаута 57014 === */
   window.p4ForceCloudSync = async function () {
     const url = (document.getElementById('sb-url') || {}).value.trim();
     const key = (document.getElementById('sb-key') || {}).value.trim();
     const pin = (document.getElementById('sb-pin') || {}).value.trim();
     if (!url || !key) return alert('Вставьте Project URL и Anon Public Key!');
     if (window.db) { window.db.cloud = { url: url, key: key, pin: pin }; pSave(); }
+
+    const slimDb = Object.assign({}, window.db);
+    if (Array.isArray(slimDb.skus)) {
+      slimDb.skus = slimDb.skus.map(function (s) {
+        return { n: s.name, a: s.art, c: s.col, z: s.siz, b: s.bc, u: s.usd };
+      });
+    }
+
     try {
       const res = await fetch(url.replace(/\/$/, '') + '/rest/v1/skos_cloud?id=eq.main', {
         method: 'PATCH',
@@ -728,15 +736,15 @@
           'apikey': key,
           'Authorization': 'Bearer ' + key,
           'Content-Type': 'application/json',
-          'Prefer': 'return=representation',
+          'Prefer': 'return=minimal',
           'x-skos-pin': pin
         },
-        body: JSON.stringify({ payload: window.db, updated_at: new Date().toISOString() })
+        body: JSON.stringify({ payload: slimDb, updated_at: new Date().toISOString() })
       });
-      if (!res.ok) return alert('Ошибка Supabase (' + res.status + '): проверьте PIN или включите VPN');
-      alert('✅ Успешно сохранено в Supabase! Защита PIN работает.');
+      if (!res.ok) return alert('Ошибка Supabase (' + res.status + '): проверьте PIN');
+      alert('✅ Успешно сохранено в Supabase без таймаута!');
     } catch (e) {
-      alert('❌ Нет связи с Supabase (проверьте интернет или VPN): ' + e.message);
+      alert('❌ Ошибка сети: ' + e.message);
     }
   };
 
