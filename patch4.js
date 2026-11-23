@@ -573,4 +573,70 @@
   };
 
   setTimeout(renderActiveOnly, 80);
+  /* === SKOS Finance 3.0 — patch4.js (Модуль 6: Статьи ОПиУ в справочнике и мгновенный отклик вкладок) === */
+  function ensureOpiuDict(e) {
+    if (!Array.isArray(e.dictOpiuArticles) || !e.dictOpiuArticles.length) {
+      e.dictOpiuArticles = [
+        { name: 'Аренда склада', arch: false },
+        { name: 'Программное обеспечение', arch: false },
+        { name: 'Административные и юридические услуги', arch: false },
+        { name: 'Федеральная таможенная служба', arch: false },
+        { name: 'Закуп товара / сырья USD', arch: false },
+        { name: 'Общепроизводственные расходы', arch: false },
+        { name: 'ФОТ и персонал', arch: false }
+      ];
+    }
+    return e.dictOpiuArticles;
+  }
+
+  const _prevDictTab = renderDictTab;
+  renderDictTab = function () {
+    const e = ensureStore();
+    ensureOpiuDict(e);
+    _prevDictTab();
+    const sec = document.getElementById('tab-dict');
+    if (!sec) return;
+    const bar = sec.querySelector('div[style*="flex-wrap:wrap"]');
+    if (bar && !document.getElementById('p4-btn-opiu')) {
+      const b = document.createElement('button');
+      b.id = 'p4-btn-opiu';
+      b.className = 'btn ' + (e.dictSub === 'opiu' ? 'btn-primary' : '');
+      b.textContent = '📊 Статьи ОПиУ (' + e.dictOpiuArticles.length + ')';
+      b.onclick = function () { window.p4DictSub('opiu'); };
+      bar.insertBefore(b, bar.firstChild);
+    }
+    if (e.dictSub === 'opiu') {
+      const rows = e.dictOpiuArticles.map(function (it, i) {
+        return '<tr style="' + (it.arch ? 'opacity:0.55;' : '') + '"><td class="bold">' + esc(it.name) + '</td><td>Статья ОПиУ</td>' +
+          '<td class="num"><button class="btn" onclick="p4DictEdit(\'dictOpiuArticles\',' + i + ')">✏️</button> ' +
+          '<button class="btn" onclick="p4DictArch(\'dictOpiuArticles\',' + i + ')">' + (it.arch ? '📤' : '📦') + '</button> ' +
+          '<button class="btn btn-danger" onclick="p4DictDel(\'dictOpiuArticles\',' + i + ')">✕</button></td></tr>';
+      }).join('');
+      const card = sec.querySelector('.card');
+      if (card) {
+        const oldG = card.querySelector('.form-grid');
+        const oldT = card.querySelector('table');
+        if (oldG) oldG.innerHTML = '<div><label>Новая статья ОПиУ</label><input id="d-nm" class="input" placeholder="Например: Логистика РФ"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4DictAdd(\'dictOpiuArticles\')">+ Добавить</button></div>';
+        if (oldT) oldT.querySelector('tbody').innerHTML = rows || '<tr><td colspan="3">Пусто</td></tr>';
+      }
+    } else if (e.dictSub === 'ctrs') {
+      const artSel = document.getElementById('d-art');
+      if (artSel) {
+        artSel.innerHTML = optDict(e.dictOpiuArticles, artSel.value, '');
+        const lbl = artSel.parentNode.querySelector('label');
+        if (lbl && !lbl.querySelector('button')) {
+          lbl.innerHTML = 'Статья ОПиУ <button type="button" class="btn" style="padding:0 5px" onclick="p4QuickAdd(\'dictOpiuArticles\',\'Статья ОПиУ\',\'d-art\')">➕</button>';
+        }
+      }
+    }
+  };
+
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target && ev.target.closest('.nav-btn');
+    if (btn && btn.id && btn.id.indexOf('nav-') === 0) {
+      const id = btn.id.slice(4);
+      if (window.db) window.db.tab = id;
+      setTimeout(renderActiveOnly, 25);
+    }
+  });
 })();
