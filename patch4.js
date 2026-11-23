@@ -801,4 +801,65 @@
     applyReadOnlyMode();
   };
   setTimeout(applyReadOnlyMode, 500);
+  /* === Пользовательские папки в Единых справочниках === */
+  window.p4AddCustomDictFolder = function () {
+    const title = prompt('Название новой папки справочника (например: Цвета, Склады, Упаковка):');
+    if (!title || !title.trim()) return;
+    const e = ensureStore();
+    if (!Array.isArray(e.customDictFolders)) e.customDictFolders = [];
+    const id = 'cust_' + Date.now();
+    e[id] = [];
+    e.customDictFolders.push({ id: id, key: id, title: '📁 ' + title.trim() });
+    e.dictSub = id;
+    pSave();
+    renderDictTab();
+  };
+
+  const _prevDictCustom = renderDictTab;
+  renderDictTab = function () {
+    const e = ensureStore();
+    if (!Array.isArray(e.customDictFolders)) e.customDictFolders = [];
+    _prevDictCustom();
+    const sec = document.getElementById('tab-dict');
+    if (!sec) return;
+    const bar = sec.querySelector('div[style*="flex-wrap:wrap"]');
+    if (!bar) return;
+
+    e.customDictFolders.forEach(function (f) {
+      if (!Array.isArray(e[f.key])) e[f.key] = [];
+      const b = document.createElement('button');
+      b.className = 'btn ' + (e.dictSub === f.key ? 'btn-primary' : '');
+      b.textContent = f.title + ' (' + e[f.key].length + ')';
+      b.onclick = function () { window.p4DictSub(f.key); };
+      bar.appendChild(b);
+
+      if (e.dictSub === f.key) {
+        const rows = e[f.key].map(function (it, i) {
+          return '<tr style="' + (it.arch ? 'opacity:0.55;' : '') + '"><td class="bold">' + esc(it.name) + '</td><td>' + esc(f.title) + '</td>' +
+            '<td class="num"><button class="btn" onclick="p4DictEdit(\'' + f.key + '\',' + i + ')">✏️</button> ' +
+            '<button class="btn" onclick="p4DictArch(\'' + f.key + '\',' + i + ')">' + (it.arch ? '📤' : '📦') + '</button> ' +
+            '<button class="btn btn-danger" onclick="p4DictDel(\'' + f.key + '\',' + i + ')">✕</button></td></tr>';
+        }).join('');
+        const card = sec.querySelector('.card');
+        if (card) {
+          const oldG = card.querySelector('.form-grid');
+          const oldT = card.querySelector('table');
+          if (oldG) oldG.innerHTML = '<div><label>Новый пункт (' + esc(f.title) + ')</label><input id="d-nm" class="input" placeholder="Введите название..."></div><div><button class="btn btn-primary" style="width:100%" onclick="p4DictAdd(\'' + f.key + '\')">+ Добавить</button></div>';
+          if (oldT) oldT.querySelector('tbody').innerHTML = rows || '<tr><td colspan="3" style="text-align:center;color:#94a3b8">В этой папке пока пусто</td></tr>';
+        }
+      }
+    });
+
+    const addFolderBtn = document.createElement('button');
+    addFolderBtn.className = 'btn btn-success';
+    addFolderBtn.textContent = '+ Новая папка';
+    addFolderBtn.onclick = window.p4AddCustomDictFolder;
+    bar.appendChild(addFolderBtn);
+  };
+/* === Переводим верхнюю кнопку «Облако» и syncCloud на быстрый режим === */
+  window.syncCloud = function () {
+    if (typeof window.p4ForceCloudSync === 'function') {
+      window.p4ForceCloudSync(false);
+    }
+  };
 })();
