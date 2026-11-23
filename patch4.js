@@ -694,4 +694,24 @@
     }
     return _origFetch.call(this, url, opts);
   };
+  /* === Проверка и уведомление при синхронизации с Supabase === */
+  const _origSyncCloud = window.syncCloud;
+  window.syncCloud = async function (showAlert) {
+    const uEl = document.getElementById('sb-url');
+    const kEl = document.getElementById('sb-key');
+    const pEl = document.getElementById('sb-pin');
+    if (window.db && window.db.cloud) {
+      if (uEl && uEl.value.trim()) window.db.cloud.url = uEl.value.trim();
+      if (kEl && kEl.value.trim()) window.db.cloud.key = kEl.value.trim();
+      if (pEl && pEl.value.trim()) window.db.cloud.pin = pEl.value.trim();
+      pSave();
+    }
+    if (typeof _origSyncCloud === 'function') {
+      try {
+        await _origSyncCloud(true);
+      } catch (err) {
+        alert('Ошибка облака: ' + (err && err.message ? err.message : err));
+      }
+    }
+  };
 })();
