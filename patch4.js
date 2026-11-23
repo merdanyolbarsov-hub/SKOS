@@ -682,4 +682,16 @@
       if (curSec) { curSec.classList.remove('hidden'); curSec.style.display = ''; }
     }
   }, true);
+  /* === Защита заголовком x-skos-pin для Supabase === */
+  const _origFetch = window.fetch;
+  window.fetch = function (url, opts) {
+    if (typeof url === 'string' && url.indexOf('supabase.co') >= 0) {
+      opts = opts || {};
+      const h = new Headers(opts.headers || {});
+      const pin = (window.db && window.db.cloud && window.db.cloud.pin) || 'Skos#9482!Tm';
+      h.set('x-skos-pin', pin);
+      opts.headers = h;
+    }
+    return _origFetch.call(this, url, opts);
+  };
 })();
