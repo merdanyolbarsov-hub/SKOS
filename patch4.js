@@ -1013,7 +1013,7 @@
       document.head.appendChild(st);
     }
 
-    const hideWords = /добавить|внести|импорт|убрать дубли|сохранить|записать|провести|списать|обработать|создать|удалить|бэкап|облако/i;
+    const hideWords = /добавить|внести|импорт|убрать дубли|сохранить|записать|провести|списать|обработать|создать|удалить|бэкап|облако|закрыт|открыт|очистить/i;
     const scanButtons = function () {
       document.querySelectorAll('button').forEach(function (b) {
         if (b.id === 'p4-lg-btn') return;
