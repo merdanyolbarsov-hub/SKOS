@@ -639,4 +639,47 @@
       setTimeout(renderActiveOnly, 25);
     }
   });
+  /* === SKOS Finance 3.0 — patch4.js (Модуль 7: Фикс подвкладок Запасов и видимости ДДС) === */
+  const _origStkSub = window.p4StkSub;
+  window.p4StkSub = function (sub) {
+    const clean = String(sub || 'sum').split(',')[0].trim();
+    if (typeof _origStkSub === 'function') _origStkSub(clean);
+  };
+
+  const _origStkRender = renderStkTab;
+  renderStkTab = function () {
+    _origStkRender();
+    const sec = document.getElementById('tab-stk');
+    if (!sec) return;
+    const sub = ensureStore().stkSub || 'sum';
+    const btns = sec.querySelectorAll('div[style*="flex-wrap:wrap"] button');
+    const labels = [
+      ['sum', '📊 Свод'],
+      ['mat', '🧵 Материалы'],
+      ['inc', '📥 Приход'],
+      ['ord', '✂️ Пошив/Техкарты'],
+      ['fg', '📦 ГП и Брак']
+    ];
+    for (let i = 0; i < btns.length && i < labels.length; i++) {
+      const key = labels[i][0];
+      const title = labels[i][1];
+      btns[i].textContent = title;
+      btns[i].className = 'btn ' + (key === sub ? 'btn-primary' : '');
+      btns[i].onclick = function () { window.p4StkSub(key); };
+    }
+  };
+
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target && ev.target.closest('.nav-btn');
+    if (!btn || !btn.id || btn.id.indexOf('nav-') !== 0) return;
+    const id = btn.id.slice(4);
+    if (id !== 'dict') {
+      const dSec = document.getElementById('tab-dict');
+      if (dSec) { dSec.classList.add('hidden'); dSec.style.display = 'none'; }
+      const dNav = document.getElementById('nav-dict');
+      if (dNav) dNav.classList.remove('active');
+      const curSec = document.getElementById('tab-' + id);
+      if (curSec) { curSec.classList.remove('hidden'); curSec.style.display = ''; }
+    }
+  }, true);
 })();
