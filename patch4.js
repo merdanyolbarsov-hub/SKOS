@@ -926,8 +926,8 @@
     }
   }, 500);
   /* === SKOS Finance 3.0 — patch4.js (Блок 6: Умный режим «Только просмотр» + Авто-облако) === */
-  const SKOS_SUPA_URL  = 'https://supabase.co';
-  const SKOS_SUPA_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
+  const SKOS_SUPA_URL   = 'https://supabase.co';
+  const SKOS_SUPA_KEY   = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
   const SKOS_OWNER_PASS = 'Skos#9482!Tm';
   const SKOS_VIEW_PASS  = 'SkosView2026';
 
@@ -937,7 +937,9 @@
       ['skos_supa_key', SKOS_SUPA_KEY], ['supabase_key', SKOS_SUPA_KEY], ['sb_key', SKOS_SUPA_KEY],
       ['skos_supa_pin', SKOS_OWNER_PASS], ['supabase_pin', SKOS_OWNER_PASS], ['sb_pin', SKOS_OWNER_PASS]
     ];
-    pairs.forEach(function (p) { if (!localStorage.getItem(p)) localStorage.setItem(p, p); });
+    pairs.forEach(function (p) {
+      if (!localStorage.getItem(p[0])) localStorage.setItem(p[0], p[1]);
+    });
     if (window.db && typeof window.db === 'object') {
       window.db.supaUrl = window.db.supaUrl || SKOS_SUPA_URL;
       window.db.supaKey = window.db.supaKey || SKOS_SUPA_KEY;
@@ -956,23 +958,22 @@
 
   function autoPullCloudSilent() {
     injectSupabaseDefaults();
-    // 1. Вызываем штатную функцию загрузки из облака, если она есть в window
+    const _origAlert = window.alert;
+    window.alert = function (msg) {
+      if (window.__skosReadOnly) return;
+      return _origAlert.apply(this, arguments);
+    };
+
     const fnNames = ['loadFromCloud', 'pullFromCloud', 'syncFromCloud', 'supaLoad', 'cloudLoad', 'fetchCloud'];
     for (let i = 0; i < fnNames.length; i++) {
       if (typeof window[fnNames[i]] === 'function') {
         try { window[fnNames[i]](true); return; } catch (e) {}
       }
     }
-    // 2. Иначе тихо кликаем по штатной кнопке «Загрузить» из облака
-    const btn = Array.from(document.querySelectorAll('button')).find(function (b) {
-      return /загрузить из облака|синхронизировать|облако/i.test(b.textContent || '') && !/сохранить/i.test(b.textContent || '');
-    });
-    if (btn) btn.click();
   }
 
   function lockReadOnlyUI() {
     window.__skosReadOnly = true;
-    // Блокируем запись в облако из режима гостя
     const _origFetch = window.fetch;
     window.fetch = function (url, opts) {
       const u = String(url || '');
@@ -986,8 +987,6 @@
     if (!document.getElementById('p4-ro-css')) {
       const st = document.createElement('style');
       st.id = 'p4-ro-css';
-      // Скрываем только настройки, формы создания/редактирования и опасные кнопки.
-      // Все фильтры (select в фильтрах и шапке) остаются 100% рабочими!
       st.textContent = [
         '#tab-set, #nav-set, [data-tab="set"], .form-grid, input[type="file"], .btn-danger, .btn-success { display: none !important; }',
         '.card-header .btn-primary, td .btn, td .btn-primary { display: none !important; }',
@@ -996,8 +995,7 @@
       document.head.appendChild(st);
     }
 
-    // Дополнительно скрываем текстовые кнопки добавления/удаления/импорта, но оставляем фильтры и вкладки
-    const hideWords = /добавить|внести|импорт|убрать дубли|сохранить|записать|провести|списать|обработать|создать|удалить|бэкап/i;
+    const hideWords = /добавить|внести|импорт|убрать дубли|сохранить|записать|провести|списать|обработать|создать|удалить|бэкап|облако/i;
     const scanButtons = function () {
       document.querySelectorAll('button').forEach(function (b) {
         if (b.id === 'p4-lg-btn') return;
