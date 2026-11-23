@@ -925,7 +925,18 @@
       topbar.appendChild(b);
     }
   }, 500);
-  /* === SKOS Finance 3.0 — patch4.js (Блок 6: Умный режим «Только просмотр» + Авто-облако) === */
+  /* === SKOS Finance 3.0 — patch4.js (Блок 6: Вход по паролю + Прямая автозагрузка из skos_cloud) === */
+  let __manualCloudClick = false;
+  document.addEventListener('click', function (ev) {
+    if (ev.target && /облако|синхронизировать/i.test(ev.target.textContent || '')) __manualCloudClick = true;
+  }, true);
+  const __origAlertGlobal = window.alert;
+  window.alert = function (msg) {
+    if (typeof msg === 'string' && /сохранены в облако/i.test(msg) && !__manualCloudClick) return;
+    __manualCloudClick = false;
+    return __origAlertGlobal.apply(this, arguments);
+  };
+
   const SKOS_SUPA_URL   = 'https://supabase.co';
   const SKOS_SUPA_KEY   = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
   const SKOS_OWNER_PASS = 'Skos#9482!Tm';
@@ -937,39 +948,46 @@
       ['skos_supa_key', SKOS_SUPA_KEY], ['supabase_key', SKOS_SUPA_KEY], ['sb_key', SKOS_SUPA_KEY],
       ['skos_supa_pin', SKOS_OWNER_PASS], ['supabase_pin', SKOS_OWNER_PASS], ['sb_pin', SKOS_OWNER_PASS]
     ];
-    pairs.forEach(function (p) {
-      if (!localStorage.getItem(p[0])) localStorage.setItem(p[0], p[1]);
-    });
+    pairs.forEach(function (p) { if (!localStorage.getItem(p)) localStorage.setItem(p, p); });
     if (window.db && typeof window.db === 'object') {
       window.db.supaUrl = window.db.supaUrl || SKOS_SUPA_URL;
       window.db.supaKey = window.db.supaKey || SKOS_SUPA_KEY;
       window.db.supaPin = window.db.supaPin || SKOS_OWNER_PASS;
     }
-    const sec = document.getElementById('tab-set');
-    if (sec) {
-      sec.querySelectorAll('input').forEach(function (inp) {
-        const ph = (inp.placeholder || '') + ' ' + ((inp.previousElementSibling && inp.previousElementSibling.textContent) || '');
-        if (!inp.value && /url/i.test(ph)) inp.value = SKOS_SUPA_URL;
-        if (!inp.value && /anon|key/i.test(ph)) inp.value = SKOS_SUPA_KEY;
-        if (!inp.value && /пин|pin|парол/i.test(ph)) inp.value = SKOS_OWNER_PASS;
-      });
-    }
   }
 
-  function autoPullCloudSilent() {
+  // Прямое чтение всей базы (main + пачки skus_1..N) напрямую из таблицы skos_cloud в Supabase
+  async function directPullFromSkosCloud() {
     injectSupabaseDefaults();
-    const _origAlert = window.alert;
-    window.alert = function (msg) {
-      if (window.__skosReadOnly) return;
-      return _origAlert.apply(this, arguments);
-    };
+    try {
+      const hdrs = { apikey: SKOS_SUPA_KEY, Authorization: 'Bearer ' + SKOS_SUPA_KEY };
+      const rMain = await fetch(SKOS_SUPA_URL + '/rest/v1/skos_cloud?id=eq.main&select=payload', { headers: hdrs });
+      if (!rMain.ok) return;
+      const rows = await rMain.json();
+      if (!rows || !rows.length || !rows[0].payload) return;
 
-    const fnNames = ['loadFromCloud', 'pullFromCloud', 'syncFromCloud', 'supaLoad', 'cloudLoad', 'fetchCloud'];
-    for (let i = 0; i < fnNames.length; i++) {
-      if (typeof window[fnNames[i]] === 'function') {
-        try { window[fnNames[i]](true); return; } catch (e) {}
+      const data = rows[0].payload;
+      const chunks = Number(data.skusChunks || 0);
+      if (chunks > 0) {
+        const allSkus = [];
+        for (let c = 1; c <= chunks; c++) {
+          const rSku = await fetch(SKOS_SUPA_URL + '/rest/v1/skos_cloud?id=eq.skus_' + c + '&select=payload', { headers: hdrs });
+          if (rSku.ok) {
+            const sRows = await rSku.json();
+            if (sRows && sRows[0] && Array.isArray(sRows[0].payload)) {
+              sRows[0].payload.forEach(function (item) {
+                allSkus.push({ name: item.n, art: item.a, col: item.c, size: item.s, barcode: item.bc, costUsd: item.usd });
+              });
+            }
+          }
+        }
+        if (allSkus.length) data.skus = allSkus;
       }
-    }
+
+      window.db = Object.assign(window.db || {}, data);
+      try { localStorage.setItem('skos_v3_prod', JSON.stringify(window.db)); } catch (e) {}
+      if (typeof window.render === 'function') window.render();
+    } catch (e) {}
   }
 
   function lockReadOnlyUI() {
@@ -1013,7 +1031,7 @@
     if (savedRole === 'owner') return;
     if (savedRole === 'viewer') {
       lockReadOnlyUI();
-      setTimeout(autoPullCloudSilent, 400);
+      directPullFromSkosCloud();
       return;
     }
 
@@ -1046,7 +1064,7 @@
         sessionStorage.setItem('skos_auth_user', u);
         ov.remove();
         lockReadOnlyUI();
-        setTimeout(autoPullCloudSilent, 350);
+        directPullFromSkosCloud();
       } else {
         document.getElementById('p4-lg-err').style.display = 'block';
       }
