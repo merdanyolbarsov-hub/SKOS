@@ -1,8 +1,8 @@
-/* === SKOS Finance 3.0 — patch4.js (Блок 1: Ядро и навигация) === */
+/* === SKOS Finance 3.0 — patch4.js (Модуль 1: Ядро и навигация) === */
 (function () {
   'use strict';
-  if (window.__skosP4Active) return;
-  window.__skosP4Active = true;
+  if (window.__skosP4Final) return;
+  window.__skosP4Final = true;
 
   function esc(v) {
     return String(v == null ? '' : v)
@@ -32,29 +32,20 @@
     if (!window.db || typeof window.db !== 'object') window.db = {};
     if (!window.db.erp || typeof window.db.erp !== 'object') window.db.erp = {};
     const e = window.db.erp;
-    ['materials', 'matIn', 'orders', 'bom', 'fgStocks', 'defects', 'unitEcon', 'osList', 'contractors', 'contractorOps', 'staffList', 'payrollOps', 'taxDebts'].forEach(function (k) {
+    ['materials', 'matIn', 'orders', 'bom', 'fgStocks', 'defects', 'osList', 'contractors', 'contractorOps', 'staffList', 'payrollOps', 'taxDebts'].forEach(function (k) {
       if (!Array.isArray(e[k])) e[k] = [];
     });
     if (!Array.isArray(e.dictMatCats)) e.dictMatCats = [{ name: 'Ткань', arch: false }, { name: 'Фурнитура', arch: false }, { name: 'Упаковка и бирки', arch: false }, { name: 'Услуги пошива', arch: false }];
     if (!Array.isArray(e.dictUnits)) e.dictUnits = [{ name: 'м2', arch: false }, { name: 'кг', arch: false }, { name: 'м', arch: false }, { name: 'шт', arch: false }, { name: 'усл', arch: false }];
     if (!Array.isArray(e.dictSuppliers)) e.dictSuppliers = [{ name: 'Турция', arch: false }, { name: 'Китай', arch: false }, { name: 'РФ', arch: false }, { name: 'Туркменистан', arch: false }];
     if (!Array.isArray(e.dictTaxTypes)) e.dictTaxTypes = [{ name: 'АУСН', arch: false }, { name: 'УСН', arch: false }, { name: 'НДС', arch: false }, { name: 'ЕНП', arch: false }, { name: 'Взносы ИП', arch: false }, { name: 'Патент', arch: false }];
-    if (!Array.isArray(e.ddsArticles)) e.ddsArticles = [{ name: 'Поступление от ВБ', dir: 'in', opiu: 'Нет (из отчётов МП)', arch: false }, { name: 'Оплата поставщику', dir: 'out', opiu: 'Нет (по актам)', arch: false }, { name: 'Уплата налога', dir: 'out', opiu: 'Нет (раздел Налоги)', arch: false }, { name: 'РКО / Прочий расход', dir: 'out', opiu: 'Да (в ОПиУ)', arch: false }];
+    if (!Array.isArray(e.ddsArticles)) e.ddsArticles = [{ name: 'Поступление от ВБ/Озон', dir: 'in', opiu: 'Нет (из отчётов МП)', arch: false }, { name: 'Оплата поставщику', dir: 'out', opiu: 'Нет (по актам)', arch: false }, { name: 'Уплата налога', dir: 'out', opiu: 'Нет (раздел Налоги)', arch: false }, { name: 'РКО / Прочий расход', dir: 'out', opiu: 'Да (в ОПиУ)', arch: false }];
     if (!e.dictSub) e.dictSub = 'ctrs';
     if (!e.stkSub) e.stkSub = 'sum';
-    if (!e.ueView) e.ueView = 'fact';
-    if (!e.ueFilter) e.ueFilter = { mp: 'ALL', org: 'ALL', mo: 'ALL', q: '' };
     return e;
   }
 
-  function ensureMenu() {
-    const navSku = document.getElementById('nav-sku');
-    if (navSku && !document.getElementById('nav-ue')) {
-      const b = document.createElement('button');
-      b.className = 'nav-btn'; b.id = 'nav-ue'; b.textContent = '📈 Юнит-экономика';
-      b.onclick = function () { window.tab('ue'); };
-      navSku.insertAdjacentElement('afterend', b);
-    }
+  function ensureDictNav() {
     const navSet = document.getElementById('nav-set');
     if (navSet && !document.getElementById('nav-dict')) {
       const b = document.createElement('button');
@@ -63,19 +54,16 @@
       navSet.insertAdjacentElement('afterend', b);
     }
     const main = document.querySelector('main.content');
-    if (!main) return;
-    ['ue', 'dict'].forEach(function (id) {
-      if (!document.getElementById('tab-' + id)) {
-        const s = document.createElement('section');
-        s.id = 'tab-' + id; s.className = 'hidden';
-        main.appendChild(s);
-      }
-    });
+    if (main && !document.getElementById('tab-dict')) {
+      const s = document.createElement('section');
+      s.id = 'tab-dict'; s.className = 'hidden';
+      main.appendChild(s);
+    }
   }
 
-  function syncTabs(active) {
-    ensureMenu();
-    ['dash', 'abc', 'rep', 'sku', 'ue', 'stk', 'dds', 'exp', 'sup', 'set', 'dict'].forEach(function (t) {
+  function syncTabState(active) {
+    ensureDictNav();
+    ['dash', 'abc', 'rep', 'sku', 'stk', 'dds', 'exp', 'sup', 'set', 'dict'].forEach(function (t) {
       const sec = document.getElementById('tab-' + t);
       const nav = document.getElementById('nav-' + t);
       const on = (t === active);
@@ -86,17 +74,17 @@
 
   const _origTab = window.tab;
   window.tab = function (id) {
-    ensureMenu();
-    if (id === 'ue' || id === 'dict') {
-      if (window.db) window.db.tab = id;
-      syncTabs(id);
+    ensureDictNav();
+    if (id === 'dict') {
+      if (window.db) window.db.tab = 'dict';
+      syncTabState('dict');
       if (typeof window.render === 'function') window.render();
       return;
     }
     if (typeof _origTab === 'function') _origTab(id);
-    syncTabs(id);
+    syncTabState(id);
   };
-/* === SKOS Finance 3.0 — patch4.js (Блок 2: Списки и раздел «Справочники») === */
+/* === SKOS Finance 3.0 — patch4.js (Модуль 2: Кэш 32 папок, списки и действия Справочников) === */
   let _mCache = null, _mKey = '';
   function getModelsList() {
     const e = ensureStore();
@@ -150,11 +138,22 @@
     return optList(getModelsList().map(function (m) { return m.name; }), sel, empty || '— Модель —');
   }
 
+  window.p4QuickAdd = function (key, title, selId) {
+    const val = prompt('Добавить в справочник «' + title + '»:');
+    if (!val || !val.trim()) return;
+    const e = ensureStore(), nm = val.trim();
+    const ex = e[key].find(function (x) { return x.name.toLowerCase() === nm.toLowerCase(); });
+    if (ex) ex.arch = false;
+    else e[key].unshift({ name: nm, arch: false });
+    pSave();
+    if (typeof window.render === 'function') window.render();
+    if (selId) setTimeout(function () { const el = document.getElementById(selId); if (el) el.value = nm; }, 20);
+  };
+
   window.p4DictSub = function (sub) { ensureStore().dictSub = sub; pSave(); renderDictTab(); };
 
   window.p4DictAdd = function (key) {
-    const e = ensureStore();
-    const nm = (document.getElementById('d-nm') || {}).value;
+    const e = ensureStore(), nm = (document.getElementById('d-nm') || {}).value;
     if (!nm || !nm.trim()) return alert('Введите название!');
     const name = nm.trim();
     if (key === 'ddsArticles') {
@@ -190,7 +189,7 @@
     const e = ensureStore();
     if (e[key] && e[key][idx] && confirm('Удалить «' + e[key][idx].name + '»?')) { e[key].splice(idx, 1); pSave(); renderDictTab(); }
   };
-/* === SKOS Finance 3.0 — patch4.js (Блок 2Б: Рендер раздела «Справочники») === */
+/* === SKOS Finance 3.0 — patch4.js (Модуль 3: Рендер Справочников и Юнит-показатели на 1 шт в ABC) === */
   function renderDictTab() {
     const sec = document.getElementById('tab-dict');
     if (!sec) return;
@@ -214,7 +213,7 @@
     let extra = '';
     if (cur.key === 'ddsArticles') {
       extra = '<div><label>Тип</label><select id="d-dir" class="select"><option value="in">+ Приход</option><option value="out">− Расход</option><option value="move">↔ Перевод</option></select></div>' +
-        '<div><label>В ОПиУ</label><select id="d-opiu" class="select"><option>Да (в ОПиУ)</option><option>Нет (из отчётов МП)</option><option>Нет (по актам)</option><option>Нет (раздел Налоги)</option><option>Нет (перевод)</option></select></div>';
+        '<div><label>Учёт в ОПиУ</label><select id="d-opiu" class="select"><option>Нет (из отчётов МП)</option><option>Нет (по актам)</option><option>Нет (раздел Налоги)</option><option>Нет (перевод)</option><option>Да (в ОПиУ)</option></select></div>';
     } else if (cur.key === 'staffList') {
       extra = '<div><label>Должность</label><input id="d-role" class="input" placeholder="Кладовщик"></div>' +
         '<div><label>Статья ФОТ</label><select id="d-art" class="select"><option>ФОТ склад</option><option>ФОТ менеджеры</option><option>ФОТ офис</option><option>ФОТ собственник</option></select></div>' +
@@ -242,105 +241,44 @@
     }).join('');
 
     sec.innerHTML =
-      '<div class="card"><div class="card-header"><div class="card-title">📚 Справочники по папкам (Добавление / Редактирование / Архив / Удаление)</div></div>' +
+      '<div class="card"><div class="card-header"><div class="card-title">📚 Единые справочники SKOS по папкам</div></div>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' + tabsHtml + '</div>' +
       '<div class="form-grid" style="margin-bottom:12px"><div><label>Название</label><input id="d-nm" class="input" placeholder="Введите название..."></div>' + extra +
       '<div><button class="btn btn-primary" style="width:100%" onclick="p4DictAdd(\'' + cur.key + '\')">+ Добавить</button></div></div>' +
       '<div style="overflow-x:auto"><table><thead><tr><th>Название</th><th>Параметры</th><th class="num">Действия</th></tr></thead><tbody>' +
       (rows || '<tr><td colspan="3" style="text-align:center;color:#94a3b8">В этой папке пока пусто</td></tr>') + '</tbody></table></div></div>';
   }
-/* === SKOS Finance 3.0 — patch4.js (Блок 3: Юнит-экономика — Факт по МП и План) === */
-  window.p4UeMode = function (m) { ensureStore().ueView = m; pSave(); renderUeTab(); };
-  window.p4UeFlt = function (k, v) { ensureStore().ueFilter[k] = v; renderUeTab(); };
 
-  window.p4UePlanAdd = function () {
-    const e = ensureStore();
-    const model = document.getElementById('ue-m').value;
-    if (!model) return alert('Выберите модель!');
-    e.unitEcon.unshift({
-      model: model, mp: document.getElementById('ue-mp').value,
-      price: num(document.getElementById('ue-pr').value), comm: num(document.getElementById('ue-cm').value),
-      log: num(document.getElementById('ue-lg').value), bo: num(document.getElementById('ue-bo').value) || 85,
-      ads: num(document.getElementById('ue-ad').value), tax: num(document.getElementById('ue-tx').value) || 6
-    });
-    pSave(); renderUeTab();
-  };
-
-  window.p4UePlanEdit = function (i) {
-    const e = ensureStore(), u = e.unitEcon[i];
-    if (!u) return;
-    const np = prompt('Новая цена продажи ₽:', u.price);
-    if (np !== null) u.price = num(np);
-    const nc = prompt('Комиссия %:', u.comm);
-    if (nc !== null) u.comm = num(nc);
-    pSave(); renderUeTab();
-  };
-
-  window.p4UePlanDel = function (i) {
-    const e = ensureStore();
-    if (confirm('Удалить расчёт?')) { e.unitEcon.splice(i, 1); pSave(); renderUeTab(); }
-  };
-
-  function renderUeTab() {
-    const sec = document.getElementById('tab-ue');
+  function enhanceAbcPerUnit() {
+    const sec = document.getElementById('tab-abc');
     if (!sec) return;
-    const e = ensureStore(), rate = rateNow(), isFact = e.ueView !== 'plan';
-    let body = '';
-
-    if (isFact) {
-      const f = e.ueFilter, map = new Map();
-      (window.db && window.db.itemSales || []).forEach(function (s) {
-        if (!s) return;
-        const org = String(s.org || 'Без юрлица'), mp = String(s.mp || 'WB');
-        const per = String(s.per || s.date || '').slice(0, 7) || '—', mo = per.length >= 7 ? per.slice(5, 7) : 'ALL';
-        const mod = String(s.model || s.name || s.art || 'Товар');
-        if ((f.mp !== 'ALL' && mp !== f.mp) || (f.org !== 'ALL' && org !== f.org) || (f.mo !== 'ALL' && mo !== f.mo)) return;
-        if (f.q && mod.toLowerCase().indexOf(f.q.toLowerCase()) < 0) return;
-        const k = org + '|' + mp + '|' + per + '|' + mod;
-        const c = map.get(k) || { org: org, mp: mp, per: per, mod: mod, qty: 0, rev: 0, fee: 0, cogs: 0 };
-        const q = num(s.qty || s.sQty || 1), cg = num(s.cogs) > 0 ? num(s.cogs) : (num(s.usd) * rate * q);
-        if (s.isRet) { c.qty -= q; c.rev -= num(s.rev); c.cogs -= cg; }
-        else { c.qty += q; c.rev += num(s.rev); c.cogs += cg; }
-        c.fee += num(s.com) + num(s.log) + num(s.ads) + num(s.fee);
-        map.set(k, c);
+    const tbl = sec.querySelector('table');
+    if (!tbl) return;
+    const hdrRow = tbl.querySelector('thead tr');
+    if (hdrRow && !hdrRow.dataset.p4Unit) {
+      hdrRow.dataset.p4Unit = '1';
+      ['Цена/шт', 'Прибыль/шт'].forEach(function (lbl) {
+        const th = document.createElement('th');
+        th.className = 'num'; th.textContent = lbl;
+        hdrRow.appendChild(th);
       });
-      let tQ = 0, tR = 0, tF = 0, tC = 0, tP = 0;
-      const rows = Array.from(map.values()).map(function (r) {
-        const p = r.rev - r.fee - r.cogs, mar = r.rev > 0 ? (p / r.rev * 100) : 0;
-        tQ += r.qty; tR += r.rev; tF += r.fee; tC += r.cogs; tP += p;
-        return '<tr><td>' + esc(r.per) + '</td><td>' + esc(r.org) + '</td><td>' + esc(r.mp) + '</td><td class="bold">' + esc(r.mod) + '</td>' +
-          '<td class="num">' + Math.round(r.qty) + '</td><td class="num">' + fmtR(r.rev) + '</td><td class="num">' + fmtR(r.fee) + '</td>' +
-          '<td class="num">' + fmtR(r.cogs) + '</td><td class="num bold ' + (p >= 0 ? 'text-green' : 'text-red') + '">' + fmtR(p) + '</td><td class="num">' + mar.toFixed(1) + '%</td></tr>';
-      }).join('');
-      const tot = '<tr style="background:#eff6ff;font-weight:800"><td colspan="4">ИТОГО</td><td class="num">' + Math.round(tQ) + '</td><td class="num">' + fmtR(tR) + '</td><td class="num">' + fmtR(tF) + '</td><td class="num">' + fmtR(tC) + '</td><td class="num">' + fmtR(tP) + '</td><td class="num">' + (tR > 0 ? (tP / tR * 100).toFixed(1) : '0.0') + '%</td></tr>';
-      body = '<div class="form-grid" style="margin-bottom:10px">' +
-        '<div><label>МП</label><select class="select" onchange="p4UeFlt(\'mp\',this.value)"><option value="ALL">Все</option><option>WB</option><option>OZON</option><option>YM</option></select></div>' +
-        '<div><label>Юрлицо</label><select class="select" onchange="p4UeFlt(\'org\',this.value)"><option value="ALL">Все</option>' + optList(getActiveOrgs(), f.org, '') + '</select></div>' +
-        '<div><label>Поиск</label><input class="input" value="' + esc(f.q) + '" oninput="p4UeFlt(\'q\',this.value)" placeholder="Модель..."></div></div>' +
-        '<div style="overflow-x:auto"><table><thead><tr><th>Период</th><th>Юрлицо</th><th>МП</th><th>Модель</th><th class="num">Шт</th><th class="num">Выручка</th><th class="num">Услуги МП</th><th class="num">Себест.</th><th class="num">Прибыль</th><th class="num">Маржа</th></tr></thead><tbody>' + tot + rows + '</tbody></table></div>';
-    } else {
-      const usdMap = new Map(getModelsList().map(function (m) { return [m.name.toLowerCase(), m.usd]; }));
-      const rows = e.unitEcon.map(function (u, i) {
-        const cg = (usdMap.get(String(u.model).toLowerCase()) || 0) * rate;
-        const p = u.price - u.price * (u.comm + u.ads + u.tax) / 100 - (u.log / ((u.bo || 85) / 100)) - cg;
-        return '<tr><td class="bold">' + esc(u.model) + '</td><td>' + esc(u.mp) + '</td><td class="num">' + fmtR(u.price) + '</td><td class="num">' + fmtR(cg) + '</td>' +
-          '<td class="num bold ' + (p >= 0 ? 'text-green' : 'text-red') + '">' + fmtR(p) + '</td>' +
-          '<td class="num"><button class="btn" onclick="p4UePlanEdit(' + i + ')">✏️</button> <button class="btn btn-danger" onclick="p4UePlanDel(' + i + ')">✕</button></td></tr>';
-      }).join('');
-      body = '<div class="form-grid" style="margin-bottom:10px"><div><label>Модель</label><select id="ue-m" class="select">' + optModels('', '') + '</select></div>' +
-        '<div><label>МП</label><select id="ue-mp" class="select"><option>WB</option><option>OZON</option><option>YM</option></select></div>' +
-        '<div><label>Цена ₽</label><input id="ue-pr" type="number" class="input" value="2500"></div>' +
-        '<div><label>Ком.%</label><input id="ue-cm" type="number" class="input" value="25"></div>' +
-        '<div><label>Лог.₽</label><input id="ue-lg" type="number" class="input" value="95"></div>' +
-        '<div><label>Выкуп%</label><input id="ue-bo" type="number" class="input" value="85"></div>' +
-        '<div><label>ДРР%</label><input id="ue-ad" type="number" class="input" value="10"></div>' +
-        '<div><label>Налог%</label><input id="ue-tx" type="number" class="input" value="6"></div>' +
-        '<div><button class="btn btn-primary" style="width:100%" onclick="p4UePlanAdd()">+ Расчёт</button></div></div>' +
-        '<table><thead><tr><th>Модель</th><th>МП</th><th class="num">Цена</th><th class="num">Себест.</th><th class="num">Прибыль/шт</th><th class="num">Действия</th></tr></thead><tbody>' + rows + '</tbody></table>';
     }
-    sec.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">📈 Юнит-экономика</div><div style="display:flex;gap:6px"><button class="btn ' + (isFact ? 'btn-primary' : '') + '" onclick="p4UeMode(\'fact\')">📊 Факт МП</button><button class="btn ' + (!isFact ? 'btn-primary' : '') + '" onclick="p4UeMode(\'plan\')">🧮 План</button></div></div>' + body + '</div>';
+    const trs = tbl.querySelectorAll('tbody tr');
+    for (let i = 0; i < trs.length; i++) {
+      const tds = trs[i].querySelectorAll('td');
+      if (tds.length < 8 || trs[i].dataset.p4Unit === '1') continue;
+      trs[i].dataset.p4Unit = '1';
+      const qty = num(tds.textContent);
+      const rev = num(tds.textContent);
+      const prof = num(tds.textContent);
+      const pUnit = qty > 0 ? (rev / qty) : 0;
+      const mUnit = qty > 0 ? (prof / qty) : 0;
+      const td1 = document.createElement('td'); td1.className = 'num'; td1.textContent = fmtR(pUnit);
+      const td2 = document.createElement('td'); td2.className = 'num bold ' + (mUnit >= 0 ? 'text-green' : 'text-red'); td2.textContent = fmtR(mUnit);
+      trs[i].appendChild(td1); trs[i].appendChild(td2);
+    }
   }
-/* === SKOS Finance 3.0 — patch4.js (Блок 4А: Склад — расчёт остатков и редактирование/добавление) === */
+/* === SKOS Finance 3.0 — patch4.js (Модуль 4А: Склад — расчёты и операции) === */
   function calcStockStats(e) {
     const map = new Map();
     e.materials.forEach(function (m, idx) {
@@ -368,27 +306,24 @@
   }
 
   window.p4StkSub = function (s) { ensureStore().stkSub = s; pSave(); renderStkTab(); };
-
   window.p4DelRow = function (key, idx) {
     const e = ensureStore();
     if (e[key] && e[key][idx] && confirm('Удалить запись?')) { e[key].splice(idx, 1); pSave(); if (typeof window.render === 'function') window.render(); }
   };
 
   window.p4EditMat = function (idx) {
-    const e = ensureStore(), m = e.materials[idx];
+    const m = ensureStore().materials[idx];
     if (!m) return;
-    const q = prompt('Начальный остаток (' + m.name + '):', m.initQty);
-    if (q !== null) m.initQty = num(q);
-    const u = prompt('Начальная сумма $:', m.initUsd);
-    if (u !== null) m.initUsd = num(u);
+    const q = prompt('Начальный остаток (' + m.name + '):', m.initQty); if (q !== null) m.initQty = num(q);
+    const u = prompt('Начальная сумма $:', m.initUsd); if (u !== null) m.initUsd = num(u);
     pSave(); renderStkTab();
   };
 
   window.p4EditFg = function (idx) {
-    const e = ensureStore(), f = e.fgStocks[idx];
+    const f = ensureStore().fgStocks[idx];
     if (!f) return;
-    const ru = prompt('Остаток РФ шт:', f.ruQty); if (ru !== null) f.ruQty = num(ru);
-    const tm = prompt('Остаток ТМ шт:', f.tmQty); if (tm !== null) f.tmQty = num(tm);
+    const ru = prompt('Склад РФ шт:', f.ruQty); if (ru !== null) f.ruQty = num(ru);
+    const tm = prompt('Склад ТМ шт:', f.tmQty); if (tm !== null) f.tmQty = num(tm);
     const way = prompt('В пути шт:', f.wayQty); if (way !== null) f.wayQty = num(way);
     f.lockedUsd = (num(f.ruQty) + num(f.tmQty) + num(f.wayQty)) * num(f.unitUsd);
     pSave(); renderStkTab();
@@ -419,7 +354,7 @@
   };
 
   window.p4OrderDone = function (i) {
-    const e = ensureStore(), o = e.orders[i];
+    const o = ensureStore().orders[i];
     if (o && confirm('Завершить пошив и списать сырьё?')) { o.status = 'DONE'; o.doneDate = today(); pSave(); renderStkTab(); }
   };
 
@@ -446,9 +381,14 @@
     e.defects.unshift({ date: document.getElementById('sd-d').value || today(), product: prod, qty: q, unitUsd: num(document.getElementById('sd-u').value), reason: document.getElementById('sd-r').value.trim() || 'Брак' });
     pSave(); renderStkTab();
   };
-    const nav = [
-      ['sum', '📊 Свод'], ['mat', '🧵 Материалы'], ['inc', '📥 Приход'], ['ord', '✂️ Пошив/Техкарты'], ['fg', '📦 ГП и Брак']
-    ].map(function (t) { return '<button class="btn ' + (t === sub ? 'btn-primary' : '') + '" onclick="p4StkSub(\'' + t + '\')">' + t + '</button>'; }).join('');
+/* === SKOS Finance 3.0 — patch4.js (Модуль 4Б: Рендер склада #tab-stk) === */
+  function renderStkTab() {
+    const sec = document.getElementById('tab-stk');
+    if (!sec) return;
+    const e = ensureStore(), st = calcStockStats(e), rate = rateNow(), sub = e.stkSub || 'sum';
+    const matNames = st.matRows.map(function (m) { return m.name; });
+    const nav = [['sum', '📊 Свод'], ['mat', '🧵 Материалы'], ['inc', '📥 Приход'], ['ord', '✂️ Пошив/Техкарты'], ['fg', '📦 ГП и Брак']]
+      .map(function (t) { return '<button class="btn ' + (t === sub ? 'btn-primary' : '') + '" onclick="p4StkSub(\'' + t + '\')">' + t + '</button>'; }).join('');
 
     let body = '';
     if (sub === 'sum') {
@@ -461,13 +401,13 @@
       const rows = st.matRows.map(function (m) {
         return '<tr><td class="bold">' + esc(m.name) + '</td><td>' + esc(m.cat) + '</td><td class="num bold">' + m.qty.toFixed(2) + ' ' + esc(m.unit) + '</td><td class="num">' + fmtU(m.usd) + '</td><td class="num"><button class="btn" onclick="p4EditMat(' + m.idx + ')">✏️</button> <button class="btn btn-danger" onclick="p4DelRow(\'materials\',' + m.idx + ')">✕</button></td></tr>';
       }).join('');
-      body = '<div class="form-grid" style="margin-bottom:10px"><div><label>Название</label><input id="sm-nm" class="input"></div><div><label>Категория</label><select id="sm-cat" class="select">' + optDict(e.dictMatCats, '', '') + '</select></div><div><label>Ед.</label><select id="sm-un" class="select">' + optDict(e.dictUnits, '', '') + '</select></div><div><label>Ост.</label><input id="sm-q" type="number" class="input" value="0"></div><div><label>Сумма $</label><input id="sm-u" type="number" step="0.01" class="input" value="0"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4MatAdd()">+ Сырьё</button></div></div>' +
+      body = '<div class="form-grid" style="margin-bottom:10px"><div><label>Название</label><input id="sm-nm" class="input"></div><div><label>Кат. <button type="button" class="btn" style="padding:0 4px" onclick="p4QuickAdd(\'dictMatCats\',\'Категория\',\'sm-cat\')">➕</button></label><select id="sm-cat" class="select">' + optDict(e.dictMatCats, '', '') + '</select></div><div><label>Ед. <button type="button" class="btn" style="padding:0 4px" onclick="p4QuickAdd(\'dictUnits\',\'Ед. изм.\',\'sm-un\')">➕</button></label><select id="sm-un" class="select">' + optDict(e.dictUnits, '', '') + '</select></div><div><label>Ост.</label><input id="sm-q" type="number" class="input" value="0"></div><div><label>Сумма $</label><input id="sm-u" type="number" step="0.01" class="input" value="0"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4MatAdd()">+ Сырьё</button></div></div>' +
         '<table><thead><tr><th>Материал</th><th>Кат.</th><th class="num">Остаток</th><th class="num">Сумма $</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
     } else if (sub === 'inc') {
       const rows = e.matIn.map(function (x, i) {
         return '<tr><td>' + esc(x.date) + '</td><td class="bold">' + esc(x.matName) + '</td><td>' + esc(x.supplier) + '</td><td class="num">' + x.qty + '</td><td class="num bold">' + fmtU(x.totalUsd) + '</td><td class="num"><button class="btn btn-danger" onclick="p4DelRow(\'matIn\',' + i + ')">✕</button></td></tr>';
       }).join('');
-      body = '<div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="si-d" type="date" class="input" value="' + today() + '"></div><div><label>Сырьё</label><select id="si-m" class="select">' + optList(matNames, '', '— Сырьё —') + '</select></div><div><label>Поставщик</label><select id="si-s" class="select">' + optDict(e.dictSuppliers, '', '') + '</select></div><div><label>Кол-во</label><input id="si-q" type="number" class="input"></div><div><label>Цена $</label><input id="si-p" type="number" step="0.01" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4MatInAdd()">+ Приход</button></div></div>' +
+      body = '<div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="si-d" type="date" class="input" value="' + today() + '"></div><div><label>Сырьё</label><select id="si-m" class="select">' + optList(matNames, '', '— Сырьё —') + '</select></div><div><label>Поставщик <button type="button" class="btn" style="padding:0 4px" onclick="p4QuickAdd(\'dictSuppliers\',\'Поставщик\',\'si-s\')">➕</button></label><select id="si-s" class="select">' + optDict(e.dictSuppliers, '', '') + '</select></div><div><label>Шт</label><input id="si-q" type="number" class="input"></div><div><label>Цена $</label><input id="si-p" type="number" step="0.01" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4MatInAdd()">+ Приход</button></div></div>' +
         '<table><thead><tr><th>Дата</th><th>Сырьё</th><th>Поставщик</th><th class="num">Шт</th><th class="num">Итого $</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
     } else if (sub === 'ord') {
       const oRows = e.orders.map(function (o, i) {
@@ -496,58 +436,13 @@
     }
     sec.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">🏭 Запасы, Брак и Фурнитура</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' + nav + '</div>' + body + '</div>';
   }
-/* === SKOS Finance 3.0 — patch4.js (Блок 5А: ДДС, Расходы/Налоги, Контрагенты и ОС) === */
-  window.p4DdsEdit = function (idx) {
-    const list = window.db && window.db.dds;
-    if (!Array.isArray(list) || !list[idx]) return;
-    const it = list[idx];
-    const nc = prompt('Статья / Назначение:', it.cat || it.comment || '');
-    if (nc !== null && nc.trim()) { it.cat = nc.trim(); it.comment = nc.trim(); }
-    const na = prompt('Сумма:', it.amt || 0);
-    if (na !== null) it.amt = num(na);
-    pSave(); if (typeof window.render === 'function') window.render();
-  };
-
-  window.p4DdsDel = function (idx) {
-    const list = window.db && window.db.dds;
-    if (Array.isArray(list) && list[idx] && confirm('Удалить операцию ДДС?')) {
-      list.splice(idx, 1); pSave(); if (typeof window.render === 'function') window.render();
-    }
-  };
-
-  function enhanceDdsTab() {
-    const sec = document.getElementById('tab-dds');
-    if (!sec) return;
-    if (!document.getElementById('p4-dds-dict-btn')) {
-      const hdr = sec.querySelector('.card-header');
-      if (hdr) {
-        const b = document.createElement('button');
-        b.id = 'p4-dds-dict-btn'; b.type = 'button'; b.className = 'btn';
-        b.textContent = '📚 Справочник статей ДДС';
-        b.onclick = function () { window.tab('dict'); window.p4DictSub('dds'); };
-        hdr.appendChild(b);
-      }
-    }
-    const tb = document.getElementById('tb-dds') || sec.querySelector('tbody');
-    if (!tb || !window.db || !Array.isArray(window.db.dds)) return;
-    const trs = tb.querySelectorAll('tr');
-    for (let i = 0; i < trs.length; i++) {
-      if (trs[i].dataset.p4Btns === '1' || !window.db.dds[i]) continue;
-      trs[i].dataset.p4Btns = '1';
-      const td = document.createElement('td');
-      td.className = 'num'; td.style.whiteSpace = 'nowrap';
-      td.innerHTML = '<button class="btn" onclick="p4DdsEdit(' + i + ')">✏️</button> <button class="btn btn-danger" onclick="p4DdsDel(' + i + ')">✕</button>';
-      trs[i].appendChild(td);
-    }
-  }
-
+/* === SKOS Finance 3.0 — patch4.js (Модуль 5А: Налоги целиком за месяц, Долги 01.01 и ЗПВ) === */
   window.p4TaxFullMonth = function () {
     const amtEl = document.getElementById('tx-amt');
     if (!amtEl) return;
     const sum = num(amtEl.value);
     if (sum <= 0) return alert('Введите сумму налога!');
-    const moStr = prompt('Месяц (1–12), куда записать налог целиком:', '11');
-    const m = parseInt(moStr, 10);
+    const m = parseInt(prompt('Месяц (1–12), куда записать налог целиком:', '11'), 10);
     if (!(m >= 1 && m <= 12)) return alert('Укажите число от 1 до 12!');
     const mo = (m < 10 ? '0' : '') + m, yr = (document.getElementById('tx-yr') || {}).value || '2026', per = yr + '-' + mo;
     if (window.db && window.db.locked && window.db.locked[per]) return alert('Месяц закрыт!');
@@ -556,17 +451,8 @@
     amtEl.value = ''; pSave(); if (typeof window.render === 'function') window.render();
   };
 
-  window.p4TdAdd = function () {
-    ensureStore().taxDebts.unshift({ org: document.getElementById('td-o').value, tax: document.getElementById('td-t').value, debt: num(document.getElementById('td-a').value) });
-    pSave(); enhanceExpTab();
-  };
-
-  window.p4TdEdit = function (i) {
-    const t = ensureStore().taxDebts[i];
-    if (!t) return;
-    const v = prompt('Новое сальдо на 01.01 (+ долг / − переплата):', t.debt);
-    if (v !== null) { t.debt = num(v); pSave(); enhanceExpTab(); }
-  };
+  window.p4TdAdd = function () { ensureStore().taxDebts.unshift({ org: document.getElementById('td-o').value, tax: document.getElementById('td-t').value, debt: num(document.getElementById('td-a').value) }); pSave(); enhanceExpTab(); };
+  window.p4TdEdit = function (i) { const t = ensureStore().taxDebts[i]; if (!t) return; const v = prompt('Новое сальдо 01.01:', t.debt); if (v !== null) { t.debt = num(v); pSave(); enhanceExpTab(); } };
 
   window.p4ZpAdd = function () {
     const e = ensureStore(), emp = document.getElementById('zp-e').value, amt = num(document.getElementById('zp-a').value);
@@ -575,23 +461,20 @@
     e.payrollOps.unshift({ date: document.getElementById('zp-d').value || today(), emp: emp, kind: document.getElementById('zp-k').value, amt: amt, cur: st ? st.cur : 'RUB' });
     pSave(); enhanceExpTab();
   };
-  /* === SKOS Finance 3.0 — patch4.js (Блок 5Б: Финальный рендер вкладок и запуск) === */
+
   function enhanceExpTab() {
     const sec = document.getElementById('tab-exp');
     if (!sec) return;
     const e = ensureStore(), txTyp = document.getElementById('tx-typ'), txAmt = document.getElementById('tx-amt');
     if (txTyp && txTyp.dataset.p4 !== '1') { txTyp.innerHTML = optDict(e.dictTaxTypes, txTyp.value, ''); txTyp.dataset.p4 = '1'; }
     if (txAmt && !document.getElementById('p4-tx-btn')) {
-      const b = document.createElement('button');
-      b.id = 'p4-tx-btn'; b.type = 'button'; b.className = 'btn btn-success'; b.style.marginTop = '6px';
-      b.textContent = '✅ Целиком за месяц'; b.onclick = window.p4TaxFullMonth;
-      txAmt.parentNode.appendChild(b);
+      const b = document.createElement('button'); b.id = 'p4-tx-btn'; b.type = 'button'; b.className = 'btn btn-success'; b.style.marginTop = '6px';
+      b.textContent = '✅ Целиком за месяц'; b.onclick = window.p4TaxFullMonth; txAmt.parentNode.appendChild(b);
     }
     let box = document.getElementById('p4-exp-box');
     if (!box) { box = document.createElement('div'); box.id = 'p4-exp-box'; sec.appendChild(box); }
     const tdRows = e.taxDebts.map(function (t, i) {
-      return '<tr><td>' + esc(t.org) + '</td><td>' + esc(t.tax) + '</td><td class="num bold">' + fmtR(t.debt) + '</td>' +
-        '<td class="num"><button class="btn" onclick="p4TdEdit(' + i + ')">✏️</button> <button class="btn btn-danger" onclick="p4DelRow(\'taxDebts\',' + i + ')">✕</button></td></tr>';
+      return '<tr><td>' + esc(t.org) + '</td><td>' + esc(t.tax) + '</td><td class="num bold">' + fmtR(t.debt) + '</td><td class="num"><button class="btn" onclick="p4TdEdit(' + i + ')">✏️</button> <button class="btn btn-danger" onclick="p4DelRow(\'taxDebts\',' + i + ')">✕</button></td></tr>';
     }).join('');
     const stAct = e.staffList.filter(function (s) { return !s.arch; });
     const zpRows = stAct.map(function (s) {
@@ -599,14 +482,14 @@
       e.payrollOps.forEach(function (op) { if (op.emp === s.name) bal += (op.kind === 'Начислено' ? num(op.amt) : -num(op.amt)); });
       return '<tr><td class="bold">' + esc(s.name) + '</td><td>' + esc(s.role) + '</td><td class="num">' + num(s.initDebt) + ' ' + esc(s.cur) + '</td><td class="num bold">' + bal + ' ' + esc(s.cur) + '</td></tr>';
     }).join('');
-    box.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">🏛️ Налоговые долги / переплаты на 01.01</div></div>' +
+    box.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">🏛️ Входящие налоговые долги / переплаты на 01.01</div></div>' +
       '<div class="form-grid" style="margin-bottom:10px"><div><label>Юрлицо</label><select id="td-o" class="select">' + optList(getActiveOrgs(), '', '') + '</select></div><div><label>Налог</label><select id="td-t" class="select">' + optDict(e.dictTaxTypes, '', '') + '</select></div><div><label>Сальдо ₽</label><input id="td-a" type="number" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4TdAdd()">+ Записать</button></div></div>' +
       '<table><thead><tr><th>Юрлицо</th><th>Налог</th><th class="num">Сальдо 01.01</th><th></th></tr></thead><tbody>' + tdRows + '</tbody></table></div>' +
-      '<div class="card"><div class="card-header"><div class="card-title">👥 Зарплатная ведомость (ЗПВ)</div></div>' +
+      '<div class="card"><div class="card-header"><div class="card-title">👥 Зарплатная ведомость SKOS (ЗПВ)</div></div>' +
       '<div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="zp-d" type="date" class="input" value="' + today() + '"></div><div><label>Сотрудник</label><select id="zp-e" class="select">' + optList(stAct.map(function (x) { return x.name; }), '', '— Сотрудник —') + '</select></div><div><label>Операция</label><select id="zp-k" class="select"><option>Начислено</option><option>Выплачено</option></select></div><div><label>Сумма</label><input id="zp-a" type="number" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4ZpAdd()">+ Провести</button></div></div>' +
       '<table><thead><tr><th>Сотрудник</th><th>Должность</th><th class="num">Долг 01.01</th><th class="num">Остаток</th></tr></thead><tbody>' + zpRows + '</tbody></table></div>';
   }
-
+/* === SKOS Finance 3.0 — patch4.js (Модуль 5Б: Контрагенты/ОС, Баланс и запуск) === */
   window.p4CtrAdd = function () {
     const e = ensureStore(), ctr = document.getElementById('ct-s').value, amt = num(document.getElementById('ct-a').value);
     if (!ctr || amt <= 0) return alert('Выберите контрагента и сумму!');
@@ -622,12 +505,7 @@
     pSave(); enhanceSupTab();
   };
 
-  window.p4OsEdit = function (i) {
-    const o = ensureStore().osList[i];
-    if (!o) return;
-    const p = prompt('Прошло месяцев амортизации:', o.passed || 0);
-    if (p !== null) { o.passed = num(p); pSave(); enhanceSupTab(); }
-  };
+  window.p4OsEdit = function (i) { const o = ensureStore().osList[i]; if (!o) return; const p = prompt('Прошло месяцев амортизации:', o.passed || 0); if (p !== null) { o.passed = num(p); pSave(); enhanceSupTab(); } };
 
   function enhanceSupTab() {
     const sec = document.getElementById('tab-sup');
@@ -653,12 +531,12 @@
       '<div class="form-grid" style="margin-bottom:10px"><div><label>Название</label><input id="os-n" class="input"></div><div><label>Шт</label><input id="os-q" type="number" class="input" value="1"></div><div><label>Цена ₽</label><input id="os-p" type="number" class="input"></div><div><label>Срок мес</label><input id="os-m" type="number" class="input" value="36"></div><div><label>Прошло</label><input id="os-ps" type="number" class="input" value="0"></div><div><label>Где</label><input id="os-r" class="input" value="Цех"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4OsAdd()">+ ОС</button></div></div>' +
       '<table><thead><tr><th>Объект</th><th class="num">Сумма ₽</th><th class="num">Срок</th><th class="num">Остаточная ₽</th><th></th></tr></thead><tbody>' + oRows + '</tbody></table></div>';
   }
-  function renderDashAddon() {
+
+  function renderDashBalance() {
     const sec = document.getElementById('tab-dash');
     if (!sec) return;
     const e = ensureStore(), rate = rateNow(), st = calcStockStats(e);
-    const elF = document.getElementById('k-frz');
-    if (elF) elF.textContent = fmtR(st.totalUsd * rate);
+    const elF = document.getElementById('k-frz'); if (elF) elF.textContent = fmtR(st.totalUsd * rate);
     let cash = 0, osRem = 0;
     const ib = (window.db && window.db.initBalances) || {};
     Object.keys(ib).forEach(function (k) { cash += num(ib[k]) * (/c[3-6]/.test(k) ? rate : 1); });
@@ -677,16 +555,15 @@
   }
 
   function renderActiveOnly() {
-    ensureStore(); ensureMenu();
+    ensureStore(); ensureDictNav();
     const cur = (window.db && window.db.tab) || 'dash';
-    if (cur === 'dash') renderDashAddon();
-    else if (cur === 'ue') renderUeTab();
+    if (cur === 'dash') renderDashBalance();
+    else if (cur === 'abc') enhanceAbcPerUnit();
     else if (cur === 'stk') renderStkTab();
-    else if (cur === 'dds') enhanceDdsTab();
     else if (cur === 'exp') enhanceExpTab();
     else if (cur === 'sup') enhanceSupTab();
     else if (cur === 'dict') renderDictTab();
-    if (cur === 'ue' || cur === 'dict') syncTabs(cur);
+    if (cur === 'dict') syncTabState('dict');
   }
 
   const _origRender = window.render;
