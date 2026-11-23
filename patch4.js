@@ -714,35 +714,45 @@
       }
     }
   };
-  /* === Быстрая синхронизация с Supabase без таймаута 57014 === */
-  window.p4ForceCloudSync = async function () {
-    const url = (document.getElementById('sb-url') || {}).value.trim();
-    const key = (document.getElementById('sb-key') || {}).value.trim();
-    const pin = (document.getElementById('sb-pin') || {}).value.trim();
+  /* === Масштабируемая синхронизация: финансы (main) + ШК пачками по 10 000 (skus_0, skus_1...) === */
+  window.p4ForceCloudSync = async function (withSkus) {
+    const url = ((document.getElementById('sb-url') || {}).value || (window.db && window.db.cloud && window.db.cloud.url) || '').trim().replace(/\/$/, '');
+    const key = ((document.getElementById('sb-key') || {}).value || (window.db && window.db.cloud && window.db.cloud.key) || '').trim();
+    const pin = ((document.getElementById('sb-pin') || {}).value || (window.db && window.db.cloud && window.db.cloud.pin) || '').trim();
     if (!url || !key) return alert('Вставьте Project URL и Anon Public Key!');
     if (window.db) { window.db.cloud = { url: url, key: key, pin: pin }; pSave(); }
 
-    const slimDb = Object.assign({}, window.db);
-    if (Array.isArray(slimDb.skus)) {
-      slimDb.skus = slimDb.skus.map(function (s) {
-        return { n: s.name, a: s.art, c: s.col, z: s.siz, b: s.bc, u: s.usd };
-      });
-    }
+    const hdrs = {
+      'apikey': key, 'Authorization': 'Bearer ' + key,
+      'Content-Type': 'application/json', 'Prefer': 'return=minimal,resolution=merge-duplicates',
+      'x-skos-pin': pin
+    };
+    const allSkus = Array.isArray(window.db.skus) ? window.db.skus : [];
+    const chunks = Math.max(1, Math.ceil(allSkus.length / 10000));
+    const finDb = Object.assign({}, window.db, { skus: [], skusChunks: chunks, skusTotal: allSkus.length });
 
     try {
-      const res = await fetch(url.replace(/\/$/, '') + '/rest/v1/skos_cloud?id=eq.main', {
-        method: 'PATCH',
-        headers: {
-          'apikey': key,
-          'Authorization': 'Bearer ' + key,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
-          'x-skos-pin': pin
-        },
-        body: JSON.stringify({ payload: slimDb, updated_at: new Date().toISOString() })
+      const rMain = await fetch(url + '/rest/v1/skos_cloud?on_conflict=id', {
+        method: 'POST', headers: hdrs,
+        body: JSON.stringify([{ id: 'main', payload: finDb, updated_at: new Date().toISOString() }])
       });
-      if (!res.ok) return alert('Ошибка Supabase (' + res.status + '): проверьте PIN');
-      alert('✅ Успешно сохранено в Supabase без таймаута!');
+      if (!rMain.ok) return alert('Ошибка сохранения финансов (' + rMain.status + ')');
+
+      if (withSkus) {
+        for (let c = 0; c < chunks; c++) {
+          const part = allSkus.slice(c * 10000, (c + 1) * 10000).map(function (s) {
+            return { n: s.name, a: s.art, c: s.col, z: s.siz, b: s.bc, u: s.usd };
+          });
+          const rSku = await fetch(url + '/rest/v1/skos_cloud?on_conflict=id', {
+            method: 'POST', headers: hdrs,
+            body: JSON.stringify([{ id: 'skus_' + c, payload: part, updated_at: new Date().toISOString() }])
+          });
+          if (!rSku.ok) return alert('Ошибка пачки ШК #' + c + ' (' + rSku.status + ')');
+        }
+        alert('✅ Финансы и база ШК (' + allSkus.length + ' шт, пачек: ' + chunks + ') сохранены в облако!');
+      } else {
+        alert('✅ Финансы, отчёты и справочники мгновенно сохранены в облако!');
+      }
     } catch (e) {
       alert('❌ Ошибка сети: ' + e.message);
     }
@@ -752,6 +762,13 @@
     const btn = Array.from(document.querySelectorAll('button')).find(function (b) {
       return b.textContent.indexOf('Сохранить и синхронизировать') >= 0;
     });
-    if (btn) btn.onclick = window.p4ForceCloudSync;
+    if (btn && !document.getElementById('p4-sync-skus-btn')) {
+      btn.onclick = function () { window.p4ForceCloudSync(false); };
+      const b2 = document.createElement('button');
+      b2.id = 'p4-sync-skus-btn'; b2.type = 'button'; b2.className = 'btn btn-primary'; b2.style.marginLeft = '6px';
+      b2.textContent = '🏷️ Синхр. базу ШК (пачками)';
+      b2.onclick = function () { window.p4ForceCloudSync(true); };
+      btn.insertAdjacentElement('afterend', b2);
+    }
   }, 400);
 })();
