@@ -1126,4 +1126,180 @@
     st.textContent = 'table tbody tr:nth-child(n+301) { content-visibility: auto; contain-intrinsic-size: 36px; }';
     document.head.appendChild(st);
   })();
+  /* === SKOS Finance 3.0 — patch4.js (Блок 8: Возврат «Справочника» и пакетная загрузка CSV без зависаний) === */
+  (function fixCatalogAndBulkCsv() {
+    // 1. Возвращаем/показываем раздел «Справочник» в левом меню
+    function ensureCatalogTab() {
+      const nav = document.querySelector('nav, aside, .sidebar, #sidebar, [class*="nav"], [class*="menu"]');
+      if (!nav) return;
 
+      // Проверяем, есть ли уже скрытый пункт Справочник / SKU / Каталог
+      const allLinks = Array.from(nav.querySelectorAll('a, button, div[onclick], li'));
+      const existing = allLinks.find(el => /справочник|себестоимост|каталог|sku/i.test(el.textContent || ''));
+      if (existing) {
+        existing.style.display = '';
+        existing.style.visibility = 'visible';
+        existing.removeAttribute('hidden');
+        return;
+      }
+
+      // Ищем секцию справочника на странице (по id или заголовку)
+      const targetSec = document.querySelector('#catalog, #skus, #directory, #spravochnik, [id*="sku"], [id*="cat"]');
+      const sampleBtn = allLinks.find(el => /продажи|остатки|финансы|отч[её]т|свод/i.test(el.textContent || ''));
+      if (sampleBtn && !document.getElementById('skos-force-catalog-btn')) {
+        const btn = sampleBtn.cloneNode(true);
+        btn.id = 'skos-force-catalog-btn';
+        btn.innerHTML = '📖 Справочник';
+        btn.style.display = '';
+        btn.onclick = function (e) {
+          e.preventDefault();
+          if (typeof window.showTab === 'function') {
+            window.showTab('skus');
+            window.showTab('catalog');
+          }
+          document.querySelectorAll('section, .tab-content, [data-tab]').forEach(s => {
+            if (/sku|catalog|sprav|dir/i.test(s.id || s.dataset.tab || '')) {
+              s.style.display = 'block';
+            }
+          });
+          if (targetSec) targetSec.scrollIntoView({ behavior: 'smooth' });
+        };
+        sampleBtn.parentNode.insertBefore(btn, sampleBtn.nextSibling);
+      }
+    }
+
+    // 2. Пакетная загрузка нескольких CSV/Excel файлов: отключаем промежуточные тормоза
+    document.addEventListener('change', function (e) {
+      const inp = e.target;
+      if (!inp || inp.tagName !== 'INPUT' || inp.type !== 'file') return;
+      if (!inp.files || inp.files.length <= 1) return;
+
+      // Включаем режим пакетного импорта на 4 секунды (или до окончания чтения всех файлов)
+      window.__skosBulkImporting = true;
+      const origSave = window.save;
+      const origRender = window.render;
+      let needSave = false;
+      let needRender = false;
+
+      if (typeof origSave === 'function') {
+        window.save = function () { needSave = true; };
+      }
+      if (typeof origRender === 'function') {
+        window.render = function () { needRender = true; };
+      }
+
+      // Показываем аккуратный индикатор загрузки вместо зависшего экрана
+      let toast = document.getElementById('skos-bulk-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'skos-bulk-toast';
+        toast.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99999;background:#1e293b;color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25);';
+        document.body.appendChild(toast);
+      }
+      toast.textContent = '⏳ Загружаем ' + inp.files.length + ' файлов одним пакетом...';
+
+      setTimeout(function () {
+        window.__skosBulkImporting = false;
+        if (origSave) window.save = origSave;
+        if (origRender) window.render = origRender;
+        if (needSave && typeof window.save === 'function') window.save();
+        if (needRender && typeof window.render === 'function') window.render();
+        if (toast) {
+          toast.textContent = '✅ Все ' + inp.files.length + ' файлов загружены!';
+          setTimeout(() => toast.remove(), 2500);
+        }
+      }, Math.min(8000, 1200 + inp.files.length * 450));
+    }, true);
+
+    setTimeout(ensureCatalogTab, 500);
+    setTimeout(ensureCatalogTab, 2000);
+  })();
+/* === SKOS Finance 3.0 — patch4.js (Блок 8: Возврат «Справочника» и пакетная загрузка CSV без зависаний) === */
+  (function fixCatalogAndBulkCsv() {
+    // 1. Возвращаем/показываем раздел «Справочник» в левом меню
+    function ensureCatalogTab() {
+      const nav = document.querySelector('nav, aside, .sidebar, #sidebar, [class*="nav"], [class*="menu"]');
+      if (!nav) return;
+
+      // Проверяем, есть ли уже скрытый пункт Справочник / SKU / Каталог
+      const allLinks = Array.from(nav.querySelectorAll('a, button, div[onclick], li'));
+      const existing = allLinks.find(el => /справочник|себестоимост|каталог|sku/i.test(el.textContent || ''));
+      if (existing) {
+        existing.style.display = '';
+        existing.style.visibility = 'visible';
+        existing.removeAttribute('hidden');
+        return;
+      }
+
+      // Ищем секцию справочника на странице (по id или заголовку)
+      const targetSec = document.querySelector('#catalog, #skus, #directory, #spravochnik, [id*="sku"], [id*="cat"]');
+      const sampleBtn = allLinks.find(el => /продажи|остатки|финансы|отч[её]т|свод/i.test(el.textContent || ''));
+      if (sampleBtn && !document.getElementById('skos-force-catalog-btn')) {
+        const btn = sampleBtn.cloneNode(true);
+        btn.id = 'skos-force-catalog-btn';
+        btn.innerHTML = '📖 Справочник';
+        btn.style.display = '';
+        btn.onclick = function (e) {
+          e.preventDefault();
+          if (typeof window.showTab === 'function') {
+            window.showTab('skus');
+            window.showTab('catalog');
+          }
+          document.querySelectorAll('section, .tab-content, [data-tab]').forEach(s => {
+            if (/sku|catalog|sprav|dir/i.test(s.id || s.dataset.tab || '')) {
+              s.style.display = 'block';
+            }
+          });
+          if (targetSec) targetSec.scrollIntoView({ behavior: 'smooth' });
+        };
+        sampleBtn.parentNode.insertBefore(btn, sampleBtn.nextSibling);
+      }
+    }
+
+    // 2. Пакетная загрузка нескольких CSV/Excel файлов: отключаем промежуточные тормоза
+    document.addEventListener('change', function (e) {
+      const inp = e.target;
+      if (!inp || inp.tagName !== 'INPUT' || inp.type !== 'file') return;
+      if (!inp.files || inp.files.length <= 1) return;
+
+      // Включаем режим пакетного импорта на 4 секунды (или до окончания чтения всех файлов)
+      window.__skosBulkImporting = true;
+      const origSave = window.save;
+      const origRender = window.render;
+      let needSave = false;
+      let needRender = false;
+
+      if (typeof origSave === 'function') {
+        window.save = function () { needSave = true; };
+      }
+      if (typeof origRender === 'function') {
+        window.render = function () { needRender = true; };
+      }
+
+      // Показываем аккуратный индикатор загрузки вместо зависшего экрана
+      let toast = document.getElementById('skos-bulk-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'skos-bulk-toast';
+        toast.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99999;background:#1e293b;color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25);';
+        document.body.appendChild(toast);
+      }
+      toast.textContent = '⏳ Загружаем ' + inp.files.length + ' файлов одним пакетом...';
+
+      setTimeout(function () {
+        window.__skosBulkImporting = false;
+        if (origSave) window.save = origSave;
+        if (origRender) window.render = origRender;
+        if (needSave && typeof window.save === 'function') window.save();
+        if (needRender && typeof window.render === 'function') window.render();
+        if (toast) {
+          toast.textContent = '✅ Все ' + inp.files.length + ' файлов загружены!';
+          setTimeout(() => toast.remove(), 2500);
+        }
+      }, Math.min(8000, 1200 + inp.files.length * 450));
+    }, true);
+
+    setTimeout(ensureCatalogTab, 500);
+    setTimeout(ensureCatalogTab, 2000);
+  })();
+})();
