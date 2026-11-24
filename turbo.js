@@ -1,15 +1,75 @@
-/* === SKOS Finance 3.0 — turbo.js (Надёжный ускоритель вкладок, фильтров и памяти) === */
+/* === SKOS Finance 3.0 — turbo.js (Ускоритель + мгновенный расчёт Цена/шт и Прибыль/шт в ABC) === */
 (function () {
-  if (window.__SKOS_TURBO_V1__) return;
-  window.__SKOS_TURBO_V1__ = true;
+  if (window.__SKOS_TURBO_V2__) return;
+  window.__SKOS_TURBO_V2__ = true;
 
-  // 1. Защита от частого опроса DOM старыми таймерами (минимум 1500 мс)
+  // --- 1. Мгновенный расчёт ЦЕНА/ШТ и ПРИБЫЛЬ/ШТ в таблице ABC ---
+  function parseNum(str) {
+    const noParens = String(str || '').replace(/\([^)]*\)/g, '');
+    const clean = noParens.replace(/[^\d.,-]/g, '').replace(',', '.');
+    const n = parseFloat(clean);
+    return isNaN(n) ? 0 : n;
+  }
+  function fmtRub(n) {
+    return Math.round(n).toLocaleString('ru-RU') + ' ₽';
+  }
+
+  function fillAbcUnitCols() {
+    const cells = document.querySelectorAll('td, div');
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i];
+      if (cell.children.length > 0) continue;
+      const txt = cell.textContent.trim();
+      // Находим колонку ДОЛЯ ПРИБ. (например "59.7%", "40.3%", "0.0%")
+      if (!/^-?\d+\.\d+%$/.test(txt)) continue;
+
+      const row = cell.parentElement;
+      if (!row || row.children.length < 9) continue;
+
+      const cols = Array.from(row.children);
+      const idxShare = cols.indexOf(cell);
+      const cellPrice = cols[idxShare + 1];
+      const cellProfit = cols[idxShare + 2];
+      if (!cellPrice || !cellProfit) continue;
+
+      let qty = 0, rev = 0, prof = 0;
+      for (let c = 0; c < idxShare; c++) {
+        const t = cols[c].textContent.trim();
+        if (t.includes('%') && /\d+/.test(t) && qty === 0) {
+          qty = parseNum(t);
+        } else if (t.includes('₽')) {
+          if (rev === 0) rev = parseNum(t);
+          else prof = parseNum(t);
+        }
+      }
+
+      if (qty > 0) {
+        const pTxt = fmtRub(rev / qty);
+        const prTxt = fmtRub(prof / qty);
+        if (cellPrice.textContent !== pTxt) {
+          cellPrice.textContent = pTxt;
+          cellPrice.style.whiteSpace = 'nowrap';
+        }
+        if (cellProfit.textContent !== prTxt) {
+          cellProfit.textContent = prTxt;
+          cellProfit.style.whiteSpace = 'nowrap';
+          cellProfit.style.color = prof >= 0 ? '#16a34a' : '#dc2626';
+          cellProfit.style.fontWeight = '600';
+        }
+      } else {
+        if (cellPrice.textContent !== '0 ₽') cellPrice.textContent = '0 ₽';
+        if (cellProfit.textContent !== '0 ₽') cellProfit.textContent = '0 ₽';
+      }
+    }
+  }
+
+  // --- 2. Защита от частых старых setInterval ---
   const origSetInterval = window.setInterval;
   window.setInterval = function (fn, delay) {
     return origSetInterval.call(window, fn, (!delay || delay < 1500) ? 1500 : delay);
   };
 
-  // 2. Умная отложенная запись в localStorage (не тормозит интерфейс во время кликов)
+  // --- 3. Отложенная запись в localStorage (без тормозов при кликах) ---
   const origSetItem = Storage.prototype.setItem;
   let pendingValue = null;
   let saveTimer = null;
@@ -18,9 +78,7 @@
     if (pendingValue !== null) {
       const val = pendingValue;
       pendingValue = null;
-      try {
-        origSetItem.call(localStorage, 'skos_v3_prod', val);
-      } catch (e) {}
+      try { origSetItem.call(localStorage, 'skos_v3_prod', val); } catch (e) {}
     }
   }
 
@@ -39,7 +97,7 @@
     if (document.hidden) flushSave();
   });
 
-  // 3. Склеиваем множественные вызовы render() в один кадр (убирает двойные/тройные зависания)
+  // --- 4. Склеиваем вызовы render() + сразу после каждого render заполняем Цена/шт ---
   function wrapRender() {
     if (typeof window.render === 'function' && !window.render.__turboWrapped) {
       const origRender = window.render;
@@ -50,6 +108,7 @@
         requestAnimationFrame(function () {
           queued = false;
           origRender.apply(window, arguments);
+          fillAbcUnitCols();
         });
       };
       fastRender.__turboWrapped = true;
@@ -61,13 +120,21 @@
   setTimeout(wrapRender, 300);
   setTimeout(wrapRender, 1500);
 
-  // 4. Аппаратное ускорение отрисовки длинных таблиц и списков (не рендерит невидимые строки)
+  // Следим за появлением таблицы ABC при первой загрузке/обновлении страницы
+  const obs = new MutationObserver(function () {
+    fillAbcUnitCols();
+  });
+  if (document.body) {
+    obs.observe(document.body, { childList: true, subtree: true });
+  } else {
+    document.addEventListener('DOMContentLoaded', function () {
+      obs.observe(document.body, { childList: true, subtree: true });
+      fillAbcUnitCols();
+    });
+  }
+
+  // --- 5. Аппаратное ускорение длинных таблиц ---
   const css = document.createElement('style');
-  css.textContent = `
-    table tbody tr:nth-child(n+60) {
-      content-visibility: auto;
-      contain-intrinsic-size: 36px;
-    }
-  `;
+  css.textContent = 'table tbody tr:nth-child(n+60) { content-visibility: auto; contain-intrinsic-size: 36px; }';
   document.head.appendChild(css);
 })();
