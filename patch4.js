@@ -1857,4 +1857,40 @@
   css.textContent = 'table tbody tr:nth-child(n+50) { content-visibility: auto; contain-intrinsic-size: 36px; }';
   document.head.appendChild(css);
 })();
+  /* === SKOS Finance 3.0 — patch4.js (Блок 13: Блокировка паразитных запросов к Supabase при кликах) === */
+  (function blockBackgroundSupabaseLag() {
+    if (window.__SKOS_NET_SHIELD__) return;
+    window.__SKOS_NET_SHIELD__ = true;
+
+    const pageLoadTime = Date.now();
+    let manualCloudUnlockUntil = 0;
+
+    // Разрешаем сеть ТОЛЬКО если пользователь сам нажал кнопку «Облако» / «Синхронизировать»
+    document.addEventListener('click', function (e) {
+      const btn = e.target.closest('button, a, [role="button"]');
+      if (!btn) return;
+      const txt = (btn.textContent || '').toLowerCase();
+      if (txt.includes('облако') || txt.includes('синхрон') || txt.includes('cloud') || txt.includes('выгрузить')) {
+        manualCloudUnlockUntil = Date.now() + 20000; // даём 20 секунд на ручную синхронизацию с облаком
+      }
+    }, true);
+
+    const origFetch = window.fetch;
+    window.fetch = function (resource, init) {
+      const url = typeof resource === 'string' ? resource : (resource && resource.url ? resource.url : '');
+      if (url.includes('supabase.co')) {
+        const isInitialBoot = (Date.now() - pageLoadTime) < 6000;
+        const isManualCloud = Date.now() < manualCloudUnlockUntil;
+
+        // Если это не старт страницы и не ручное нажатие кнопки «Облако» — мгновенно отменяем лишний запрос!
+        if (!isInitialBoot && !isManualCloud) {
+          return Promise.resolve(new Response('[]', {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }
+      }
+      return origFetch.apply(this, arguments);
+    };
+  })();
 })();
