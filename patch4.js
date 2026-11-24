@@ -1527,4 +1527,116 @@
     setTimeout(forceFillAbcUnitPrices, 500);
     setTimeout(forceFillAbcUnitPrices, 1800);
   })();
+  /* === SKOS Finance 3.0 — patch4.js (Блок 12: Точное заполнение Цена/шт + авто-сбор Цветов и Размеров из отчётов) === */
+  (function fixAbcColumnsAndAutoColorsSizes() {
+    const parseNum = (str) => {
+      const noParens = String(str || '').replace(/\([^)]*\)/g, '');
+      const clean = noParens.replace(/[^\d.,-]/g, '').replace(',', '.');
+      const n = parseFloat(clean);
+      return isNaN(n) ? 0 : n;
+    };
+    const fmtRub = (n) => Math.round(n).toLocaleString('ru-RU') + ' ₽';
+
+    // 1. Находим каждую строку ABC по ячейке с процентом (например "74.3%") и заполняем 2 колонки справа от неё
+    function fillAbcRightColumns() {
+      const allCells = document.querySelectorAll('td, div');
+      for (let i = 0; i < allCells.length; i++) {
+        const cell = allCells[i];
+        if (cell.children.length > 0) continue;
+        const txt = cell.textContent.trim();
+        // Ищем колонку ДОЛЯ ПРИБ. (формат "74.3%" или "0.0%")
+        if (!/^-?\d+\.\d+%$/.test(txt)) continue;
+
+        const row = cell.parentElement;
+        if (!row || row.children.length < 9) continue;
+
+        const cols = Array.from(row.children);
+        const idxShare = cols.indexOf(cell);
+        // Слева от ДОЛЯ ПРИБ. идут: ЧИСТ. ШТ (idxShare - 4), ВОЗВР (idxShare - 3), ВЫРУЧКА (idxShare - 2), СЕБЕСТ (idxShare - 1)...
+        // Найдём ячейку с "₽" для ВЫРУЧКА и ПРИБЫЛЬ, и ячейку с "(100%)" или числом для ЧИСТ. ШТ
+        let qty = 0, rev = 0, prof = 0;
+        for (let c = 0; c < idxShare; c++) {
+          const t = cols[c].textContent.trim();
+          if (t.includes('%') && /\d+/.test(t) && qty === 0) {
+            qty = parseNum(t);
+          } else if (t.includes('₽')) {
+            if (rev === 0) rev = parseNum(t);
+            else prof = parseNum(t); // последняя ячейка с ₽ перед ДОЛЯ ПРИБ. — это ПРИБЫЛЬ
+          }
+        }
+
+        const cellPrice = cols[idxShare + 1];
+        const cellProfit = cols[idxShare + 2];
+        if (cellPrice && cellProfit) {
+          if (qty > 0) {
+            cellPrice.textContent = fmtRub(rev / qty);
+            cellPrice.style.whiteSpace = 'nowrap';
+            cellProfit.textContent = fmtRub(prof / qty);
+            cellProfit.style.whiteSpace = 'nowrap';
+            cellProfit.style.color = prof >= 0 ? '#16a34a' : '#dc2626';
+            cellProfit.style.fontWeight = '600';
+          } else {
+            cellPrice.textContent = '0 ₽';
+            cellProfit.textContent = '0 ₽';
+          }
+        }
+      }
+    }
+
+    // 2. Собираем все уникальные цвета и размеры из загруженных отчётов и наполняем фильтры в ABC
+    function populateColorAndSizeFilters() {
+      const db = window.db || window.state || window.data;
+      if (!db || typeof db !== 'object') return;
+
+      const colors = new Set();
+      const sizes = new Set();
+
+      // Ищем по всем массивам внутри db (отчёты продаж, остатки, справочник)
+      Object.keys(db).forEach(function (key) {
+        const arr = db[key];
+        if (!Array.isArray(arr)) return;
+        for (let i = 0; i < arr.length; i++) {
+          const item = arr[i];
+          if (!item || typeof item !== 'object') continue;
+          const c = item.color || item.цвет || item.Color || item['Цвет'];
+          const s = item.size || item.размер || item.Size || item['Размер'] || item.techSize;
+          if (c && String(c).trim() && c !== '—' && c !== '0') colors.add(String(c).trim());
+          if (s && String(s).trim() && s !== '—' && s !== '0') sizes.add(String(s).trim());
+        }
+      });
+
+      if (colors.size > 0) {
+        const colorSel = Array.from(document.querySelectorAll('select')).find(
+          sel => sel.options && sel.options && /Все цвета/i.test(sel.options.textContent)
+        );
+        if (colorSel && colorSel.options.length <= 1) {
+          Array.from(colors).sort().forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            colorSel.appendChild(opt);
+          });
+        }
+      }
+
+      if (sizes.size > 0) {
+        const sizeSel = Array.from(document.querySelectorAll('select')).find(
+          sel => sel.options && sel.options && /Все размеры/i.test(sel.options.textContent)
+        );
+        if (sizeSel && sizeSel.options.length <= 1) {
+          Array.from(sizes).sort().forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.textContent = s;
+            sizeSel.appendChild(opt);
+          });
+        }
+      }
+    }
+
+    setInterval(function () {
+      fillAbcRightColumns();
+      populateColorAndSizeFilters();
+    }, 700);
+  })();
 })();
