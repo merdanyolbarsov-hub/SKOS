@@ -1,32 +1,3 @@
-/* === УБИЙЦА СТАРЫХ ТОРМОЗОВ (вставить в самый верх patch4.js) === */
-(function killLegacyLag() {
-  // 1. Запрещаем старым блокам запускать слишком частые setInterval (быстрее чем раз в 1.5 сек)
-  const _origSetInterval = window.setInterval;
-  window.setInterval = function (fn, delay) {
-    const safeDelay = (!delay || delay < 1500) ? 1500 : delay;
-    return _origSetInterval.call(window, fn, safeDelay);
-  };
-
-  // 2. Блокируем повторную тяжёлую запись в localStorage чаще чем раз в 3 секунды
-  let _lastSaveTime = 0;
-  let _saveQueue = null;
-  const _origSetItem = Storage.prototype.setItem;
-  Storage.prototype.setItem = function (key, val) {
-    if (key === 'skos_v3_prod') {
-      const now = Date.now();
-      if (now - _lastSaveTime < 3000) {
-        clearTimeout(_saveQueue);
-        _saveQueue = setTimeout(() => {
-          _lastSaveTime = Date.now();
-          try { _origSetItem.call(localStorage, key, val); } catch (e) {}
-        }, 3000);
-        return;
-      }
-      _lastSaveTime = now;
-    }
-    return _origSetItem.apply(this, arguments);
-  };
-})();
 /* === SKOS Finance 3.0 — patch4.js (Модуль 1: Ядро и навигация) === */
 (function () {
   'use strict';
