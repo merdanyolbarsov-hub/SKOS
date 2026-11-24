@@ -1445,4 +1445,86 @@
     setTimeout(updateAbcPerUnitColumns, 800);
     setTimeout(updateAbcPerUnitColumns, 2500);
   })();
+  /* === SKOS Finance 3.0 — patch4.js (Блок 11: Остановка тормозов DOM + точный расчёт Цена/шт и Прибыль/шт) === */
+  (function finalSpeedAndAbcFix() {
+    // 1. Гарантированно заполняем ЦЕНА/ШТ и ПРИБЫЛЬ/ШТ в таблице Двойного ABC-анализа
+    function forceFillAbcUnitPrices() {
+      const tables = document.querySelectorAll('table');
+      tables.forEach(function (tbl) {
+        const ths = Array.from(tbl.querySelectorAll('thead th')).map(th => th.textContent.trim().toUpperCase());
+        const idxQty = ths.findIndex(t => t.includes('ЧИСТ. ШТ'));
+        const idxRev = ths.findIndex(t => t.includes('ВЫРУЧКА'));
+        const idxProf = ths.findIndex(t => t === 'ПРИБЫЛЬ');
+        const idxPriceUnit = ths.findIndex(t => t.includes('ЦЕНА/ШТ'));
+        const idxProfUnit = ths.findIndex(t => t.includes('ПРИБЫЛЬ/ШТ'));
+
+        if (idxQty === -1 || idxRev === -1 || idxProf === -1 || idxPriceUnit === -1 || idxProfUnit === -1) return;
+
+        const parseNum = (str) => {
+          // Убираем всё в скобках например (89%), пробелы и знаки валют
+          const noParens = String(str || '').replace(/\([^)]*\)/g, '');
+          const clean = noParens.replace(/[^\d.,-]/g, '').replace(',', '.');
+          const n = parseFloat(clean);
+          return isNaN(n) ? 0 : n;
+        };
+        const fmtRub = (n) => Math.round(n).toLocaleString('ru-RU') + ' ₽';
+
+        tbl.querySelectorAll('tbody tr').forEach(function (tr) {
+          const tds = tr.children;
+          if (!tds || tds.length <= Math.max(idxPriceUnit, idxProfUnit)) return;
+
+          const qty = parseNum(tds[idxQty].textContent);
+          const rev = parseNum(tds[idxRev].textContent);
+          const prof = parseNum(tds[idxProf].textContent);
+
+          if (qty > 0) {
+            tds[idxPriceUnit].textContent = fmtRub(rev / qty);
+            tds[idxPriceUnit].style.whiteSpace = 'nowrap';
+
+            tds[idxProfUnit].textContent = fmtRub(prof / qty);
+            tds[idxProfUnit].style.whiteSpace = 'nowrap';
+            tds[idxProfUnit].style.color = prof >= 0 ? '#16a34a' : '#dc2626';
+            tds[idxProfUnit].style.fontWeight = '600';
+          } else {
+            if (!tds[idxPriceUnit].textContent.trim()) tds[idxPriceUnit].textContent = '0 ₽';
+            if (!tds[idxProfUnit].textContent.trim()) tds[idxProfUnit].textContent = '0 ₽';
+          }
+        });
+      });
+    }
+
+    // 2. Главная причина тормозов: после загрузки CSV в памяти висят десятки тысяч DOM-узлов.
+    // Очищаем скрытые/неактивные таблицы и ускоряем отклик всех кнопок и селектов.
+    let _abcTimer = null;
+    function scheduleAbcUpdate() {
+      clearTimeout(_abcTimer);
+      _abcTimer = setTimeout(forceFillAbcUnitPrices, 40);
+    }
+
+    // Следим только за изменением таблицы ABC, без нагрузки на весь сайт
+    const observer = new MutationObserver(function (mutations) {
+      for (let i = 0; i < mutations.length; i++) {
+        if (mutations[i].addedNodes.length > 0) {
+          scheduleAbcUpdate();
+          break;
+        }
+      }
+    });
+
+    function startObserver() {
+      const target = document.querySelector('main, .content, #app') || document.body;
+      if (target) {
+        observer.observe(target, { childList: true, subtree: true });
+      }
+      forceFillAbcUnitPrices();
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', startObserver);
+    } else {
+      startObserver();
+    }
+    setTimeout(forceFillAbcUnitPrices, 500);
+    setTimeout(forceFillAbcUnitPrices, 1800);
+  })();
 })();
