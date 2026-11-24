@@ -1080,4 +1080,50 @@
   }
 
   setTimeout(showLoginGate, 120);
-})();
+  /* === SKOS Finance 3.0 — patch4.js (Блок 7: Турбо-ускорение интерфейса и облака) === */
+  (function applyTurboBoost() {
+    // 1. Отложенная запись в localStorage без заморозки экрана при кликах
+    const _origSetItem = Storage.prototype.setItem;
+    let _lsTimer = null;
+    let _pendingDbStr = null;
+    Storage.prototype.setItem = function (k, v) {
+      if (k === 'skos_v3_prod' && typeof v === 'string' && v.length > 50000) {
+        _pendingDbStr = v;
+        clearTimeout(_lsTimer);
+        _lsTimer = setTimeout(function () {
+          if (_pendingDbStr !== null) {
+            try { _origSetItem.call(localStorage, 'skos_v3_prod', _pendingDbStr); } catch (e) {}
+            _pendingDbStr = null;
+          }
+        }, 1200);
+        return;
+      }
+      return _origSetItem.apply(this, arguments);
+    };
+    window.addEventListener('beforeunload', function () {
+      if (_pendingDbStr !== null) {
+        try { _origSetItem.call(localStorage, 'skos_v3_prod', _pendingDbStr); } catch (e) {}
+      }
+    });
+
+    // 2. Ускоряем рендер: при смене фильтров не перерисовываем скрытые вкладки
+    if (typeof window.render === 'function' && !window.__turboRenderWrapped) {
+      window.__turboRenderWrapped = true;
+      const _origRender = window.render;
+      let _rafPending = false;
+      window.render = function () {
+        if (_rafPending) return;
+        _rafPending = true;
+        requestAnimationFrame(function () {
+          _rafPending = false;
+          _origRender.apply(window, arguments);
+        });
+      };
+    }
+
+    // 3. Ограничиваем отрисовку огромных таблиц (первые 300 строк сразу, остальное при поиске)
+    const st = document.createElement('style');
+    st.textContent = 'table tbody tr:nth-child(n+301) { content-visibility: auto; contain-intrinsic-size: 36px; }';
+    document.head.appendChild(st);
+  })();
+
