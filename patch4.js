@@ -1302,4 +1302,147 @@
     setTimeout(ensureCatalogTab, 500);
     setTimeout(ensureCatalogTab, 2000);
   })();
+  /* === SKOS Finance 3.0 — patch4.js (Блоки 9 + 10: Максимальное ускорение + Цена/шт в ABC + Бэкап) === */
+  (function maxTurboAbcAndBackup() {
+    // --- БЛОК 9: Ускорение больших таблиц и синхронизация Цвет/Размер ---
+    const style = document.createElement('style');
+    style.textContent = `
+      table tbody tr { contain: layout style; }
+      table tbody tr:nth-child(n+81) { content-visibility: auto; contain-intrinsic-size: 38px; }
+    `;
+    document.head.appendChild(style);
+
+    function syncColorsAndSizesToReports() {
+      const db = window.db || window.state || window.data;
+      if (!db || typeof db !== 'object') return;
+
+      const skuList = Array.isArray(db.skus) ? db.skus : (Array.isArray(db.catalog) ? db.catalog : []);
+      const reports = Array.isArray(db.reports) ? db.reports : (Array.isArray(db.sales) ? db.sales : []);
+      if (!skuList.length || !reports.length) return;
+
+      const skuMap = new Map();
+      for (let i = 0; i < skuList.length; i++) {
+        const s = skuList[i];
+        const code = String(s.sku || s.barcode || s.shk || '').trim();
+        if (code) skuMap.set(code, s);
+      }
+
+      for (let i = 0; i < reports.length; i++) {
+        const r = reports[i];
+        const code = String(r.sku || r.barcode || r.shk || '').trim();
+        const found = skuMap.get(code);
+        if (found) {
+          if ((!r.color || r.color === '—') && found.color) r.color = found.color;
+          if ((!r.size || r.size === '—') && found.size) r.size = found.size;
+          if ((!r.model || r.model === '—') && (found.folder || found.model || found.group)) {
+            r.model = found.folder || found.model || found.group;
+          }
+        }
+      }
+    }
+
+    if (!window.__maxTurboInstalled) {
+      window.__maxTurboInstalled = true;
+
+      document.addEventListener('click', function (e) {
+        const btn = e.target.closest('button, a, select');
+        if (!btn) return;
+        setTimeout(function () {
+          const searchInp = document.querySelector('input[placeholder*="ШК"], input[placeholder*="SKU"]');
+          if (searchInp && searchInp.value.trim()) return;
+          document.querySelectorAll('table tbody').forEach(function (tbody) {
+            if (tbody.children.length > 200) {
+              for (let i = 200; i < tbody.children.length; i++) {
+                tbody.children[i].style.display = 'none';
+              }
+            }
+          });
+        }, 30);
+      }, true);
+
+      setTimeout(syncColorsAndSizesToReports, 1000);
+      document.addEventListener('change', function (e) {
+        if (e.target && e.target.type === 'file') {
+          setTimeout(syncColorsAndSizesToReports, 1500);
+          setTimeout(syncColorsAndSizesToReports, 4000);
+        }
+      }, true);
+    }
+
+    // --- БЛОК 10: Расчёт ЦЕНА/ШТ и ПРИБЫЛЬ/ШТ в ABC + рабочая загрузка Бэкапа ---
+    function updateAbcPerUnitColumns() {
+      const headings = Array.from(document.querySelectorAll('h1, h2, h3, div')).find(
+        el => el.children.length === 0 && /Двойной ABC-анализ/i.test(el.textContent || '')
+      );
+      if (!headings) return;
+
+      document.querySelectorAll('table').forEach(function (tbl) {
+        const ths = Array.from(tbl.querySelectorAll('thead th')).map(th => th.textContent.trim().toUpperCase());
+        const idxQty = ths.findIndex(t => t.includes('ЧИСТ. ШТ'));
+        const idxRev = ths.findIndex(t => t.includes('ВЫРУЧКА'));
+        const idxProf = ths.findIndex(t => t === 'ПРИБЫЛЬ');
+        const idxPriceUnit = ths.findIndex(t => t.includes('ЦЕНА/ШТ'));
+        const idxProfUnit = ths.findIndex(t => t.includes('ПРИБЫЛЬ/ШТ'));
+
+        if (idxQty === -1 || idxRev === -1 || idxProf === -1 || idxPriceUnit === -1 || idxProfUnit === -1) return;
+
+        const parseNum = (str) => {
+          const clean = String(str || '').replace(/\([^)]*\)/g, '').replace(/[^\d.,-]/g, '').replace(',', '.');
+          const n = parseFloat(clean);
+          return isNaN(n) ? 0 : n;
+        };
+        const fmtRub = (n) => Math.round(n).toLocaleString('ru-RU') + ' ₽';
+
+        tbl.querySelectorAll('tbody tr').forEach(function (tr) {
+          const tds = tr.children;
+          if (!tds || tds.length <= Math.max(idxPriceUnit, idxProfUnit)) return;
+
+          const qty = parseNum(tds[idxQty].textContent);
+          const rev = parseNum(tds[idxRev].textContent);
+          const prof = parseNum(tds[idxProf].textContent);
+
+          if (qty > 0) {
+            if (parseNum(tds[idxPriceUnit].textContent) === 0 && rev !== 0) {
+              tds[idxPriceUnit].textContent = fmtRub(rev / qty);
+            }
+            if (parseNum(tds[idxProfUnit].textContent) === 0 && prof !== 0) {
+              tds[idxProfUnit].textContent = fmtRub(prof / qty);
+              tds[idxProfUnit].style.color = prof >= 0 ? '#16a34a' : '#dc2626';
+              tds[idxProfUnit].style.fontWeight = '600';
+            }
+          }
+        });
+      });
+    }
+
+    document.addEventListener('change', function (e) {
+      const inp = e.target;
+      if (!inp || inp.tagName !== 'INPUT' || inp.type !== 'file' || !inp.files || !inp.files[0]) return;
+      const file = inp.files[0];
+      if (!/\.json$/i.test(file.name)) return;
+
+      const reader = new FileReader();
+      reader.onload = function (ev) {
+        try {
+          const parsed = JSON.parse(ev.target.result);
+          if (!parsed || typeof parsed !== 'object') return;
+          localStorage.setItem('skos_v3_prod', JSON.stringify(parsed));
+          if (window.db && typeof window.db === 'object') {
+            Object.assign(window.db, parsed);
+          }
+          if (typeof window.render === 'function') window.render();
+          setTimeout(updateAbcPerUnitColumns, 150);
+          alert('✅ Бэкап «' + file.name + '» успешно загружен! Если цифры не обновились, обновите страницу (F5).');
+        } catch (err) {
+          alert('❌ Ошибка чтения JSON-бэкапа: ' + err.message);
+        }
+      };
+      reader.readAsText(file, 'utf-8');
+    }, false);
+
+    document.addEventListener('click', () => setTimeout(updateAbcPerUnitColumns, 60), true);
+    document.addEventListener('change', () => setTimeout(updateAbcPerUnitColumns, 60), true);
+    setTimeout(updateAbcPerUnitColumns, 800);
+    setTimeout(updateAbcPerUnitColumns, 2500);
+  })();
 })();
