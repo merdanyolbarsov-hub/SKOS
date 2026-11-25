@@ -1621,5 +1621,49 @@
     }
     return _origPullSupa.apply(this, arguments);
   };
+    /* === Фикс-блок 6: Вшиваем постоянное Google Облако (вместо заблокированного Supabase) === */
+  const GOOGLE_CLOUD_URL = 'https://script.google.com/macros/s/AKfycbykO61PvGEaWLWPPL4QkWwgWDedg1o_AzWbL0-tDQ5Q4pZN3iczmt0r8R5_9PfIBUwHng/exec';
+  window.db.cloud = { url: GOOGLE_CLOUD_URL, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
+  if (document.getElementById('sb-url')) document.getElementById('sb-url').value = GOOGLE_CLOUD_URL;
+
+  window.pushCloud = async function (manual) {
+    if (window.__skosReadOnly) return;
+    window.flushLocalSave();
+    window.db.cloud.url = GOOGLE_CLOUD_URL;
+    window.showToastProgress('⏳ Сохранение в Google Облако...');
+    try {
+      await fetch(GOOGLE_CLOUD_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(window.db)
+      });
+      window.showToastProgress('✅ Сохранено в Google Облако!', 2500);
+      if (manual) {
+        alert('✅ Всё успешно сохранено в Google Облако!\n• Товаров (ШК): ' + (window.db.skus || []).length + ' шт.\n• Отчётов МП: ' + (window.db.reports || []).length + '\n• Операций ДДС: ' + (window.db.dds || []).length);
+      }
+    } catch (e) {
+      window.showToastProgress('❌ Ошибка Google Облака', 3000);
+      if (manual) alert('❌ Ошибка Google Облака: ' + e.message);
+    }
+  };
+
+  window.pullCloud = async function (silent) {
+    try {
+      const res = await fetch(GOOGLE_CLOUD_URL + '?t=' + Date.now());
+      const data = await res.json();
+      if (data && typeof data === 'object' && (Array.isArray(data.orgs) || Array.isArray(data.skus))) {
+        Object.assign(window.db, data);
+        window.db.cloud.url = GOOGLE_CLOUD_URL;
+        if (document.getElementById('sb-url')) document.getElementById('sb-url').value = GOOGLE_CLOUD_URL;
+        window.ensureStore();
+        window.flushLocalSave();
+        window.onPerChange();
+        if (!silent) alert('✅ База успешно загружена из Google Облака!');
+      }
+    } catch (e) {
+      if (!silent) alert('❌ Ошибка чтения Google Облака: ' + e.message);
+    }
+  };
 })();
 
