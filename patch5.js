@@ -318,4 +318,77 @@
     if (topCloudBtn) topCloudBtn.onclick = function () { window.p4ForceCloudSync(false); };
     if (typeof render === 'function') render();
   }, 450);
+    // 6. ТУРБО-УСКОРИТЕЛЬ ПЕРЕКЛЮЧЕНИЯ ВКЛАДОК (рисуем ТОЛЬКО открытую вкладку)
+  let lastSkuRenderHash = '';
+
+  const origRenderFolders = window.renderSkuFolders;
+  if (typeof origRenderFolders === 'function') {
+    window.renderSkuFolders = function (q) {
+      if (window.db && db.tab !== 'sku') return;
+      const curHash = (db.skus ? db.skus.length : 0) + '_' + String(q || document.getElementById('sku-q')?.value || '') + '_' + (localStorage.getItem('skos_v3_folder_names') || '').length;
+      if (curHash === lastSkuRenderHash && document.getElementById('skos-folders-wrap')?.innerHTML) return;
+      lastSkuRenderHash = curHash;
+      return origRenderFolders.apply(this, arguments);
+    };
+  }
+
+  // Сбрасываем кэш папок только при реальном изменении товаров
+  const origOpenEditFolder = window.openEditFolderModal;
+  if (typeof origOpenEditFolder === 'function') {
+    window.openEditFolderModal = function () {
+      lastSkuRenderHash = '';
+      return origOpenEditFolder.apply(this, arguments);
+    };
+  }
+
+  // При переключении вкладок отключаем тяжёлые функции закрытых разделов
+  const baseRender = window.render;
+  window.render = function () {
+    const active = (window.db && db.tab) || 'dash';
+
+    const savedAbc = window.renderAbc;
+    const savedEnhAbc = window.renderEnhancedAbc;
+    const savedExpStats = window.renderExpFolderStats;
+
+    if (active !== 'abc') {
+      window.renderAbc = function () {};
+      window.renderEnhancedAbc = function () {};
+    }
+    if (active !== 'dash' && active !== 'exp') {
+      window.renderExpFolderStats = function () {};
+    }
+
+    // Если открыта не вкладка Товары — временно прячем длинный список от базового renderLists
+    let stashedSkus = null;
+    if (active !== 'sku' && window.db && Array.isArray(db.skus) && db.skus.length > 50) {
+      stashedSkus = db.skus;
+      db.skus = [];
+    }
+
+    try {
+      if (typeof baseRender === 'function') baseRender.apply(this, arguments);
+    } finally {
+      if (stashedSkus) db.skus = stashedSkus;
+      window.renderAbc = savedAbc;
+      window.renderEnhancedAbc = savedEnhAbc;
+      window.renderExpFolderStats = savedExpStats;
+    }
+  };
+
+  // Мгновенный отклик кнопок левого меню
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target && ev.target.closest('.sidebar .nav-btn');
+    if (!btn || !btn.id || !btn.id.startsWith('nav-')) return;
+    const id = btn.id.slice(4);
+    if (window.db) db.tab = id;
+
+    document.querySelectorAll('main.content > section').forEach(sec => {
+      const show = sec.id === 'tab-' + id;
+      sec.classList.toggle('hidden', !show);
+      sec.style.display = show ? 'block' : 'none';
+    });
+    document.querySelectorAll('.sidebar .nav-btn').forEach(b => {
+      b.classList.toggle('active', b === btn);
+    });
+  }, true);
 })();
