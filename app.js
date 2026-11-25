@@ -1914,7 +1914,7 @@
       alert('❌ Ошибка чтения выписки: ' + err.message);
     }
   };
-  /* === Фикс-блок: Загрузка выписок всех банков, Шаблон ШК, JSON и авто-Облако === */
+ /* === Чистый рабочий фикс-блок (без спецсимволов) === */
 function getPickedFile(ev) {
 const fl = ev && ev.target && ev.target.files;
 if (!fl || !fl.length) return null;
@@ -1936,7 +1936,7 @@ window.ensureStore();
 window.flushLocalSave();
 window.onPerChange();
 window.showToastProgress('✅ Бэкап загружен!', 2000);
-alert('✅ Бэкап успешно загружен! Товаров (ШК): ' + (window.db.skus || []).length + ' шт.');
+alert('✅ Бэкап загружен! Товаров (ШК): ' + (window.db.skus || []).length);
 } catch (err) {
 alert('❌ Ошибка файла: ' + err.message);
 }
@@ -1952,7 +1952,7 @@ try {
 const buf = await f.arrayBuffer();
 let txt = new TextDecoder('utf-8').decode(buf);
 if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
-const lines = txt.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
+const lines = txt.replace(/^\uFEFF/, '').split('\n').map(l => l.replace(/\r$/, '')).filter(l => l.trim());
 if (lines.length < 2) return alert('Файл пустой!');
 const firstLine = lines.shift();
 const sep = (firstLine.split(';').length >= firstLine.split(',').length) ? ';' : ',';
@@ -1966,7 +1966,7 @@ const art = window.normStr(c.at(0)) || 'Без артикула';
 const bc = window.normStr(c.length >= 3 ? c.at(1) : c.at(0));
 const name = window.normStr(c.length >= 3 ? c.at(2) : art) || art;
 const usd = window.num(c.at(-1));
-if (!bc || /e+/i.test(bc)) continue;
+if (!bc || bc.toLowerCase().includes('e+')) continue;
 if (name && name !== art) window.setFolderName(art, name);
 const ex = skuMap.get(bc);
 if (ex) {
@@ -1997,7 +1997,7 @@ const buf = await f.arrayBuffer();
 let txt = new TextDecoder('utf-8').decode(buf);
 if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
 txt = txt.replace(/^\uFEFF/, '');
-const hdrLine = txt.split(/\r?\n/).find(l => l.toLowerCase().match(/дата|списание|зачисление|sum_rur|сумма|дебет|кредит/)) || '';
+const hdrLine = txt.split('\n').find(l => l.toLowerCase().match(/дата|списание|зачисление|sum_rur|сумма|дебет|кредит/)) || '';
 const sep = hdrLine.includes('\t') ? '\t' : ((hdrLine.split(';').length >= hdrLine.split(',').length) ? ';' : ',');
 const rows = parseFullCsvMatrix(txt, sep);
 const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/дата операции|дата документа|списание|зачисление|sum_rur|d_c|сумма|дебет|кредит/));
@@ -2016,9 +2016,11 @@ const c = rows.at(idx); if (!c || c.length < 3) continue;
 const lowFull = c.join(' ').toLowerCase();
 if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого')) continue;
 let rawDt = (iDt >= 0 && c.at(iDt)) ? c.at(iDt).trim() : '';
-if (!/^\d{2,4}[.-/]\d{2}[.-/]\d{2,4}/.test(rawDt)) rawDt = c.find(x => /^\d{2,4}[.\-/]\d{2}[.\-/]\d{2,4}/.test(String(x || '').trim())) || '';
+if (!rawDt || rawDt.length < 8 || rawDt.length > 10) {
+rawDt = c.find(x => { const s = String(x || '').trim(); return s.length >= 8 && s.length <= 10 && s.match(/\d{2}[.-/]\d{2}[.-/]\d{2,4}/); }) || '';
+}
 if (!rawDt) continue;
-const dt = /^\d{4}-\d{2}-\d{2}$/.test(rawDt) ? rawDt.split('-').reverse().join('.') : rawDt;
+const dt = rawDt.indexOf('-') === 4 ? rawDt.split('-').reverse().join('.') : rawDt;
 let amt = 0;
 if (iDc >= 0 && iSum >= 0) { const v = Math.abs(window.num(c.at(iSum))), dc = String(c.at(iDc) || '').toUpperCase(); amt = dc === 'D' ? -v : (dc === 'C' ? v : 0); }
 else if (iIn >= 0 || iOut >= 0) { const vIn = iIn >= 0 ? Math.abs(window.num(c.at(iIn))) : 0, vOut = iOut >= 0 ? Math.abs(window.num(c.at(iOut))) : 0; amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0); }
