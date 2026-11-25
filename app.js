@@ -1462,4 +1462,160 @@
       return '<details style="border:1px solid #cbd5e1;border-radius:10px;margin-bottom:8px;background:#fff"><summary style="cursor:pointer;padding:9px 12px;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div><span>📁</span> <b>' + window.esc(g.title) + '</b> <span class="badge badge-blue">' + g.items.length + ' опер.</span></div><div style="display:flex;gap:8px;font-size:12px"><span class="text-green bold">Приход: +' + window.fmtR(g.inc) + '</span><span class="text-red bold">Расход: −' + window.fmtR(g.exp) + '</span></div></summary><div style="padding:8px 12px;overflow-x:auto"><table><thead><tr><th>Дата</th><th>Кошелёк / Банк</th><th>Статья / Назначение</th><th class="num">Сумма</th><th class="num">В рублях</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></details>';
     }).join('') : '<div style="padding:16px;text-align:center;color:#94a3b8">Операций за выбранный период нет</div>';
   };
+    /* === Блок 1/3: Выписки ВТБ и Альфа-Банка (; и , + Дебет/Кредит RUR) === */
+  window.importBankCsv = async function (ev) {
+    if (window.__skosReadOnly) return;
+    const fl = ev && ev.target && ev.target.files;
+    const f = (fl && fl.length) ? Array.from(fl).shift() : null;
+    if (!f) return; ev.target.value = '';
+    const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
+    window.showToastProgress('⏳ Чтение выписки банка...');
+    try {
+      const buf = await f.arrayBuffer();
+      let txt = new TextDecoder('utf-8').decode(buf);
+      if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+      txt = txt.replace(/^\uFEFF/, '');
+
+      const hdrLine = txt.split('\n').find(l => { const low = l.toLowerCase(); return (low.includes('дебет') || low.includes('списание') || low.includes('sum_rur') || low.includes('сумма')) && (low.includes('дата') || low.includes('date_oper')); }) || '';
+      const sep = hdrLine.includes('\t') ? '\t' : ((hdrLine.split(';').length >= hdrLine.split(',').length) ? ';' : ',');
+      const rows = []; let row = [], cell = '', inQ = false;
+      for (let i = 0; i < txt.length; i++) {
+        const ch = txt.charAt(i), nx = txt.charAt(i + 1);
+        if (ch === '"') { if (inQ && nx === '"') { cell += '"'; i++; } else inQ = !inQ; }
+        else if (ch === sep && !inQ) { row.push(cell.split('\r').join('').split('\n').join(' ').trim()); cell = ''; }
+        else if ((ch === '\n' || ch === '\r') && !inQ) { if (ch === '\r' && nx === '\n') i++; row.push(cell.split('\r').join('').split('\n').join(' ').trim()); if (row.some(x => x !== '')) rows.push(row); row = []; cell = ''; }
+        else cell += ch;
+      }
+      if (cell || row.length) { row.push(cell.trim()); rows.push(row); }
+
+      const hdrIdx = rows.findIndex(c => { const low = c.join(' ').toLowerCase(); return (low.includes('дебет') || low.includes('списание') || low.includes('sum_rur') || low.includes('сумма')) && (low.includes('дата') || low.includes('date_oper')); });
+      const hdr = hdrIdx >= 0 ? rows.at(hdrIdx).map(x => x.toLowerCase().trim()) : [];
+      const iDc = hdr.indexOf('d_c'), iDt = hdr.findIndex(h => h === 'дата' || h === 'дата операции' || h === 'date_oper' || h.includes('дата провод'));
+      const iIn = hdr.findIndex(h => (h.includes('кредит') || h.includes('зачислен') || h.includes('приход') || h.includes('поступлен')) && !h.includes('ост') && !h.includes('обор'));
+      const iOut = hdr.findIndex(h => (h.includes('дебет') || h.includes('списан') || h.includes('расход')) && !h.includes('ост') && !h.includes('обор'));
+      const iSum = hdr.indexOf('sum_rur') >= 0 ? hdr.indexOf('sum_rur') : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц'));
+      const iCtr = hdr.findIndex(h => h.includes('контрагент') && !h.includes('инн') && !h.includes('бик') && !h.includes('счет') && !h.includes('счёт') && !h.includes('банк'));
+      const iText = hdr.findIndex(h => h.includes('назначен') || h === 'text70');
+      /* === Блок 2/3: Окончание парсера выписок ВТБ и Альфа-Банка === */
+      let added = 0, skip = 0, sumIn = 0, sumOut = 0, toCash = 0; const newOps = [];
+      for (let idx = (hdrIdx >= 0 ? hdrIdx + 1 : 0); idx < rows.length; idx++) {
+        const c = rows.at(idx); if (!c || c.length < 3) continue;
+        const lowFull = c.join(' ').toLowerCase();
+        if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.startsWith('итого')) continue;
+        let rawDt = (iDt >= 0 && c.at(iDt)) ? c.at(iDt).trim() : '';
+        if (!rawDt || rawDt.length < 8 || rawDt.length > 10) rawDt = c.find(x => { const s = String(x || '').trim(); return s.length >= 8 && s.length <= 10 && (s.includes('.') || s.includes('-')); }) || '';
+        if (!rawDt) continue;
+        const dt = rawDt.indexOf('-') === 4 ? rawDt.split('-').reverse().join('.') : rawDt;
+
+        let amt = 0;
+        if (iDc >= 0 && iSum >= 0) { const v = Math.abs(window.num(c.at(iSum))), dc = String(c.at(iDc) || '').toUpperCase(); amt = dc === 'D' ? -v : (dc === 'C' ? v : 0); }
+        else if (iIn >= 0 || iOut >= 0) { const vIn = iIn >= 0 ? Math.abs(window.num(c.at(iIn))) : 0, vOut = iOut >= 0 ? Math.abs(window.num(c.at(iOut))) : 0; amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0); }
+        else if (iSum >= 0) amt = window.num(c.at(iSum));
+        if (!amt || Math.abs(amt) > 500000000) continue;
+
+        const desc = ((iCtr >= 0 && c.at(iCtr)) ? c.at(iCtr) + ' — ' : '') + ((iText >= 0 && c.at(iText)) ? c.at(iText) : '');
+        const lowDesc = desc.toLowerCase(), hash = walId + '_' + dt + '_' + amt + '_' + lowDesc.slice(0, 40) + '_' + idx;
+        if (window.db.ddsHashes[hash]) { skip++; continue; }
+        window.db.ddsHashes[hash] = true;
+        if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
+
+        let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
+        if (lowFull.includes('вайлдберриз') || lowFull.includes('wildberries') || lowFull.includes('рвб')) cat = 'Поступление от ВБ';
+        else if (lowFull.includes('озон') || lowFull.includes('интернет решения')) { if (amt > 0) cat = 'Поступление от Озон'; }
+        else if (lowFull.includes('яндекс') || lowFull.includes('спичкин')) { if (amt > 0) cat = 'Поступление от ЯМ'; }
+        else if (lowDesc.includes('комисс') || lowDesc.includes('рко') || lowDesc.includes('пакета услуг') || lowDesc.includes('обслуживан') || lowDesc.includes('лицензионн') || lowDesc.includes('маркзнак')) cat = 'Комиссия РКО';
+        else if (lowDesc.includes('налог') || lowDesc.includes('уфнс') || lowDesc.includes('енс') || lowDesc.includes('енп')) cat = 'ЕНП';
+        else if (lowDesc.includes('выдача наличных') || lowDesc.includes('снятие') || lowDesc.includes('перевод собствен')) {
+          cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
+          if (amt < 0) { newOps.push({ id: 'd_' + Date.now() + '_' + idx + '_c', date: dt, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), note: 'Из банка: ' + desc.slice(0, 90), batchId }); toCash += Math.abs(amt); }
+        }
+        newOps.push({ id: 'd_' + Date.now() + '_' + idx, date: dt, wal: walId, cat, amt, note: desc.slice(0, 140), batchId });
+        added++;
+      }
+      if (newOps.length) window.db.dds.unshift(...newOps);
+      window.save(true); window.renderDdsTab(); window.showToastProgress('✅ Выписка загружена!', 2000);
+      alert('✅ Выписка загружена! Операций: ' + added + ' (дублей: ' + skip + ')\nПриход: +' + window.fmtR(sumIn) + ' | Расход: −' + window.fmtR(sumOut));
+    } catch (err) { alert('❌ Ошибка чтения выписки: ' + err.message); }
+  };
+  /* === Блок 3/3: Оба отчёта Яндекс Маркета + Тихое Облако без всплывающих окон === */
+  const _origOnRepFile = window.onRepFile;
+  window.onRepFile = async function (ev) {
+    if (window.__skosReadOnly) return;
+    const files = Array.from(ev?.target?.files || []);
+    if (!files.length) return;
+    const regularFiles = [];
+    const org = document.getElementById('up-org').value, yr = document.getElementById('up-yr').value, mo = document.getElementById('up-mo').value;
+    const rate = window.getRate(yr + '-' + mo), skuIdx = window.buildSkuIndex();
+    if (!mpBatch || mpBatch.org !== org || mpBatch.yr !== yr || mpBatch.mo !== mo) mpBatch = { org, yr, mo, files: [] };
+
+    for (const file of files) {
+      const buf = await file.arrayBuffer();
+      let txt = new TextDecoder('utf-8').decode(buf);
+      if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+      const lines = txt.replace(/^\uFEFF/, '').split('\n').map(l => l.split('\r').join('')).filter(l => l.trim());
+      const sample = lines.slice(0, 15).join('\n').toLowerCase();
+
+      if (sample.includes('ваш sku') && sample.includes('статус товара')) {
+        const hIdx = lines.findIndex(l => l.toLowerCase().includes('ваш sku'));
+        const sep = lines.at(hIdx).includes('\t') ? '\t' : ((lines.at(hIdx).split(';').length >= lines.at(hIdx).split(',').length) ? ';' : ',');
+        const hdr = splitCsvLine(lines.at(hIdx), sep).map(h => h.toLowerCase().trim());
+        const iSku = hdr.indexOf('ваш sku'), iName = hdr.indexOf('название товара'), iPrice = hdr.findIndex(h => h.startsWith('цена продажи'));
+        const iQty = hdr.indexOf('доставлено или возвращено'), iSt = hdr.indexOf('статус товара');
+        let grossRev = 0, ret = 0, cogs = 0, sQty = 0, rQty = 0; const items = [];
+        for (let r = hIdx + 1; r < lines.length; r++) {
+          const rw = splitCsvLine(lines.at(r), sep); if (rw.length <= iSt) continue;
+          const st = String(rw.at(iSt) || '').toLowerCase(), sku = String(rw.at(iSku) || '').trim(), nm = iName >= 0 ? String(rw.at(iName) || '').trim() : sku;
+          const pr = window.num(rw.at(iPrice)), q = Math.abs(window.num(rw.at(iQty))) || 1;
+          if (!sku || !pr) continue;
+          const m = window.resolveMetaFast(skuIdx, sku, sku, nm);
+          if (st.includes('доставлен')) {
+            grossRev += pr * q; sQty += q; if (m.usd > 0) cogs += m.usd * rate * q;
+            items.push({ bc: sku, art: m.art || sku, name: nm, sQty: q, rQty: 0, rev: pr * q, fee: 0 });
+          } else if (st.includes('возврат')) {
+            ret += pr * q; rQty += q; if (m.usd > 0) cogs -= m.usd * rate * q;
+            items.push({ bc: sku, art: m.art || sku, name: nm, sQty: 0, rQty: q, rev: -(pr * q), fee: 0 });
+          }
+        }
+        mpBatch.files.push({ fileName: file.name, mp: 'YM', rev: Math.max(0, grossRev - ret), ret, com: 0, log: 0, ads: 0, cogs: Math.max(0, cogs), sQty, rQty, items });
+      } else if (sample.includes('все услуги маркета за заказы')) {
+        const hIdx = lines.findIndex(l => l.toLowerCase().includes('все услуги маркета за заказы'));
+        const sep = lines.at(hIdx).includes('\t') ? '\t' : ((lines.at(hIdx).split(';').length >= lines.at(hIdx).split(',').length) ? ';' : ',');
+        const hdr = splitCsvLine(lines.at(hIdx), sep).map(h => h.toLowerCase().trim());
+        const iAll = hdr.findIndex(h => h.startsWith('все услуги маркета')), iBoost = hdr.findIndex(h => h.startsWith('буст продаж'));
+        const iDeliv = hdr.findIndex(h => h.startsWith('доставка покупателю'));
+        let com = 0, log = 0, ads = 0;
+        for (let r = hIdx + 1; r < lines.length; r++) {
+          const rw = splitCsvLine(lines.at(r), sep); if (rw.length <= iAll) continue;
+          const vAll = Math.abs(window.num(rw.at(iAll))), vBoost = iBoost >= 0 ? Math.abs(window.num(rw.at(iBoost))) : 0, vDel = iDeliv >= 0 ? Math.abs(window.num(rw.at(iDeliv))) : 0;
+          ads += vBoost; log += vDel; com += Math.max(0, vAll - vBoost - vDel);
+        }
+        mpBatch.files.push({ fileName: file.name, mp: 'YM', rev: 0, ret: 0, com, log, ads, cogs: 0, sQty: 0, rQty: 0, items: [] });
+      } else {
+        regularFiles.push(file);
+      }
+    }
+
+    if (regularFiles.length) {
+      const dt = new DataTransfer();
+      regularFiles.forEach(f => dt.items.add(f));
+      ev.target.files = dt.files;
+      return _origOnRepFile.call(this, ev);
+    } else {
+      ev.target.value = '';
+      window.renderMpDraft();
+    }
+  };
+
+  // Тихое автосохранение в Google Облако без всплывающих окон (алерт только при личном клике)
+  let _cloudClickAllowed = false;
+  document.addEventListener('click', function (ev) {
+    if (ev.target && ev.target.closest('button') && ev.target.closest('button').textContent.includes('Облако')) {
+      _cloudClickAllowed = true;
+      setTimeout(() => { _cloudClickAllowed = false; }, 1000);
+    }
+  }, true);
+
+  window.syncCloud = function (manual) {
+    return manual ? window.pushCloud(_cloudClickAllowed) : window.pullCloud(true);
+  };
 })();
