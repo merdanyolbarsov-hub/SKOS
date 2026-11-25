@@ -255,4 +255,57 @@
     render();
     alert('Отчёт ' + mp + ' загружен!' + (newSkus ? ' Новых ШК/SKU без себестоимости: ' + newSkus : ''));
   };
+    // === УСКОРИТЕЛЬ ИНТЕРФЕЙСА (ВСТАВИТЬ ПЕРЕД ПОСЛЕДНЕЙ СТРОКОЙ })();) ===
+
+  // 1. Отложенное сохранение в localStorage без фризов
+  let saveTimer = null;
+  const origSave = window.save;
+  window.save = function () {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      if (typeof origSave === 'function') origSave();
+      else localStorage.setItem(KEY, JSON.stringify(db));
+    }, 150);
+  };
+
+  // 2. Переключение вкладок без лишних пересчётов скрытых разделов
+  window.tab = function (id) {
+    db.tab = id;
+    ['dash', 'abc', 'rep', 'sku', 'stk', 'dds', 'exp', 'sup', 'set'].forEach(t => {
+      const sec = document.getElementById('tab-' + t);
+      const nav = document.getElementById('nav-' + t);
+      if (sec) sec.classList.toggle('hidden', t !== id);
+      if (nav) nav.classList.toggle('active', t === id);
+    });
+
+    // Обновляем только нужную вкладку
+    requestAnimationFrame(function () {
+      if (id === 'dash') {
+        render();
+      } else if (id === 'abc') {
+        if (typeof renderAbc === 'function') renderAbc();
+      } else {
+        if (typeof fillSelects === 'function') fillSelects();
+        if (typeof renderLists === 'function') renderLists();
+      }
+    });
+  };
+
+  // 3. Оптимизация render(): не считаем ABC, если вкладка ABC закрыта
+  const origRender = window.render;
+  window.render = function () {
+    const activeTab = db.tab || 'dash';
+    const origAbc = window.renderAbc;
+    const origLists = window.renderLists;
+
+    if (activeTab !== 'abc') window.renderAbc = function () {};
+    if (activeTab === 'dash' || activeTab === 'abc') window.renderLists = function () {};
+
+    try {
+      if (typeof origRender === 'function') origRender.apply(this, arguments);
+    } finally {
+      window.renderAbc = origAbc;
+      window.renderLists = origLists;
+    }
+  };
 })();
