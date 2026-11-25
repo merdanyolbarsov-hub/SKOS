@@ -1087,565 +1087,24 @@
     if (document.getElementById('sb-pin')) document.getElementById('sb-pin').value = window.db.cloud?.pin || P;
     showLoginGate(); window.onPerChange(); window.pullCloud(true);
   });
-    /* === Фикс-блок: Железный URL Облака + Кнопка «Очистить» + Защита ДДС === */
-  // 1. Принудительно исправляем старый обрезанный URL из бэкапов на правильный адрес проекта
-  window.fixCloudUrlNow = function () {
-    const REAL_URL = 'https://supabase.co';
-    const REAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
-    if (!window.db.cloud) window.db.cloud = {};
-    if (!window.db.cloud.url || window.db.cloud.url === 'https://supabase.co' || !window.db.cloud.url.includes('pkudvnzyqrxxalikcmag')) {
-      window.db.cloud.url = REAL_URL;
-    }
-    if (!window.db.cloud.key) window.db.cloud.key = REAL_KEY;
-    const uEl = document.getElementById('sb-url');
-    const kEl = document.getElementById('sb-key');
-    if (uEl) uEl.value = window.db.cloud.url;
-    if (kEl && !kEl.value) kEl.value = window.db.cloud.key;
-  };
-  window.fixCloudUrlNow();
+    /* === Финал (Часть 1/2): Google Облако, Бэкап и Шаблон ШК === */
+  const GOOGLE_CLOUD_URL = 'https://google.com';
 
-  const _origPush = window.pushCloud;
-  window.pushCloud = async function (manual) {
-    window.fixCloudUrlNow();
-    return await _origPush.call(this, manual);
-  };
-  const _origPull = window.pullCloud;
-  window.pullCloud = async function (silent) {
-    window.fixCloudUrlNow();
-    return await _origPull.call(this, silent);
-  };
-  const _origImportJson = window.importJson;
-  window.importJson = function (ev) {
-    _origImportJson.call(this, ev);
-    setTimeout(window.fixCloudUrlNow, 300);
-  };
-
-  // 2. Рабочая кнопка «🗑️ Очистить» для черновика отчётов
-  window.clearMpDraft = function () {
-    mpBatch = null;
-    window.renderMpDraft();
-  };
-  const _origRenderDraft = window.renderMpDraft;
-  window.renderMpDraft = function () {
-    _origRenderDraft.call(this);
-    const box = document.getElementById('map-box');
-    if (box) {
-      const clr = box.querySelector('.btn-danger');
-      if (clr) clr.onclick = window.clearMpDraft;
-    }
-  };
-
-  // 3. Потоковый импорт выписок ДДС без ошибки lines.split
-  window.importBankCsv = async function (ev) {
-    if (window.__skosReadOnly) return;
-    const f = ev?.target?.files?.[0]; if (!f) return; ev.target.value = '';
-    const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
-    window.showToastProgress('⏳ Загрузка банковской выписки...');
-    const buf = await f.arrayBuffer();
-    let txt = new TextDecoder('utf-8').decode(buf); if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
-    const lines = txt.split(/\r?\n/).filter(l => l.trim());
-    if (!lines.length) return;
-    const sep = lines[0].includes('\t') ? '\t' : ((lines[0].split(';').length >= lines[0].split(',').length) ? ';' : ',');
-    let added = 0, skip = 0;
-    for (let idx = 1; idx < lines.length; idx++) {
-      const c = splitCsvLine(lines[idx], sep); if (c.length < 3) continue;
-      const rawDt = c.find(x => /^(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})$/.test(x));
-      if (!rawDt) continue;
-      const dt = /^\d{4}-\d{2}-\d{2}$/.test(rawDt) ? rawDt.split('-').reverse().join('.') : rawDt;
-      const low = c.join(' ').toLowerCase();
-      if (low.includes('входящий остаток') || low.includes('исходящий остаток')) continue;
-      let amt = 0;
-      for (let i = 1; i < c.length; i++) { const n = window.num(c[i]); if (n !== 0 && !/^\d{2}\.\d{2}\.\d{4}$/.test(c[i])) { amt = n; break; } }
-      if (!amt) continue;
-      const hash = walId + '_' + dt + '_' + amt + '_' + low.slice(0, 30) + '_' + idx;
-      if (window.db.ddsHashes[hash]) { skip++; continue; }
-      window.db.ddsHashes[hash] = true;
-      let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
-      if (low.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
-      else if (low.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
-      else if (low.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
-      else if (low.match(/комисс|рко|обслуживан/)) cat = 'Комиссия РКО';
-      else if (low.match(/уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
-      else if (low.match(/снятие налич|выдача налич|перевод собствен/)) {
-        cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
-        if (amt < 0) window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), batchId });
-      }
-      window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: walId, cat, amt, note: c.join(' ').slice(0, 120), batchId });
-      added++;
-    }
-    window.save(true); window.renderDdsTab(); window.showToastProgress('✅ Выписка загружена!', 2000);
-    alert('✅ Загружено операций: ' + added + ' (дублей пропущено: ' + skip + ')');
-  };
-    /* === Фикс-блок 2: Точный парсер выписок Точка/ВТБ/Альфа, Кнопка Очистить, ЯМ и Облако === */
-  // 1. Очистка кривых записей ДДС (где вместо суммы попал 20-значный расчётный счёт)
-  if (window.db && Array.isArray(window.db.dds)) {
-    const beforeLen = window.db.dds.length;
-    window.db.dds = window.db.dds.filter(d => Math.abs(window.num(d.amt)) < 1000000000000);
-    if (window.db.dds.length !== beforeLen) {
-      window.db.ddsHashes = {};
-      window.save(true);
-    }
+  function getPickedFile(ev) {
+    const fl = ev && ev.target && ev.target.files;
+    return (fl && fl.length) ? Array.from(fl).shift() : null;
   }
-
-  // 2. Правильный парсер банковских выписок (Точка, ВТБ, Альфа) — игнорирует 20-значные счета
-  window.importBankCsv = async function (ev) {
-    if (window.__skosReadOnly) return;
-    const f = ev?.target?.files?.[0]; if (!f) return; ev.target.value = '';
-    const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
-    window.showToastProgress('⏳ Загрузка выписки...');
-    const buf = await f.arrayBuffer();
-    let txt = new TextDecoder('utf-8').decode(buf);
-    if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
-    const firstLine = txt.split(/\r?\n/).find(l => l.replace(/[,;\t]/g, '').trim()) || '';
-    const sep = firstLine.includes('\t') ? '\t' : (firstLine.includes(';') ? ';' : ',');
-
-    const rows = txt.split(/\r?\n/).filter(l => l.trim()).map(l => splitCsvLine(l, sep));
-    const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/sum_rur|d_c|списание|зачисление|дата операции|дебет.*кредит|сумма/));
-    const hdr = hdrIdx >= 0 ? rows[hdrIdx].map(x => x.toLowerCase()) : [];
-
-    const iDc = hdr.indexOf('d_c');
-    const iDt = hdr.indexOf('date_oper') >= 0 ? hdr.indexOf('date_oper') : (hdr.indexOf('дата операции') >= 0 ? hdr.indexOf('дата операции') : hdr.findIndex(h => h.includes('дата')));
-    const iIn = hdr.findIndex(h => h.match(/зачислен|приход|поступлен|кредит/) && !h.includes('ост') && !h.includes('обор'));
-    const iOut = hdr.findIndex(h => h.match(/списан|расход|дебет/) && !h.includes('ост') && !h.includes('обор'));
-    const iSum = hdr.indexOf('sum_rur') >= 0 ? hdr.indexOf('sum_rur') : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц') || h.includes('сумма док'));
-    const iText = hdr.indexOf('text70') >= 0 ? hdr.indexOf('text70') : hdr.findIndex(h => h.includes('назначен'));
-
-    let added = 0, skip = 0, sumIn = 0, sumOut = 0;
-    const startRow = hdrIdx >= 0 ? hdrIdx + 1 : 0;
-
-    for (let idx = startRow; idx < rows.length; idx++) {
-      const c = rows[idx];
-      const lowFull = c.join(' ').toLowerCase();
-      if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого')) continue;
-
-      const rawDt = (iDt >= 0 && /^(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})$/.test(c[iDt])) ? c[iDt] : c.find(x => /^(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})$/.test(x));
-      if (!rawDt) continue;
-      const dt = /^\d{4}-\d{2}-\d{2}$/.test(rawDt) ? rawDt.split('-').reverse().join('.') : rawDt;
-
-      let amt = 0;
-      if (iDc >= 0 && iSum >= 0) {
-        const v = Math.abs(window.num(c[iSum])), dc = String(c[iDc] || '').toUpperCase();
-        amt = dc === 'D' ? -v : (dc === 'C' ? v : 0);
-      } else if (iIn >= 0 || iOut >= 0) {
-        const vIn = iIn >= 0 ? Math.abs(window.num(c[iIn])) : 0, vOut = iOut >= 0 ? Math.abs(window.num(c[iOut])) : 0;
-        amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0);
-      } else if (iSum >= 0) {
-        amt = window.num(c[iSum]);
-      } else {
-        for (let i = 1; i < c.length; i++) {
-          const cleanCell = String(c[i] || '').replace(/\s+/g, '');
-          if (/^\d{13,}$/.test(cleanCell)) continue; // Пропускаем 20-значные номера счетов и ИНН
-          const n = window.num(c[i]);
-          if (n !== 0 && !/^\d{2}\.\d{2}\.\d{4}$/.test(c[i])) { amt = n; break; }
-        }
-      }
-      if (!amt || Math.abs(amt) > 1000000000) continue;
-
-      const desc = iText >= 0 ? (c[iText] || c.join(' ')) : c.join(' ');
-      const lowDesc = desc.toLowerCase();
-      const hash = walId + '_' + dt + '_' + amt + '_' + lowDesc.slice(0, 35) + '_' + idx;
-      if (window.db.ddsHashes[hash]) { skip++; continue; }
-      window.db.ddsHashes[hash] = true;
-      if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
-
-      let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
-      if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
-      else if (lowFull.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
-      else if (lowFull.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
-      else if (lowDesc.match(/комисс|рко|обслуживан/)) cat = 'Комиссия РКО';
-      else if (lowDesc.match(/уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
-      else if (lowDesc.match(/снятие налич|выдача налич|перевод собствен/)) {
-        cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
-        if (amt < 0) window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), batchId });
-      }
-      window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: walId, cat, amt, note: desc.slice(0, 140), batchId });
-      added++;
-    }
-    window.save(true); window.renderDdsTab(); window.showToastProgress('✅ Выписка загружена!', 2000);
-    alert(`✅ Загружено: ${added} (дублей: ${skip})\nПриход: +${window.fmtR(sumIn)} | Расход: −${window.fmtR(sumOut)}`);
-  };
-
-  // 3. Делегированный клик для кнопки «🗑️ Очистить» в черновике отчётов (работает всегда)
-  document.addEventListener('click', function (ev) {
-    const btn = ev.target.closest('#map-box .btn-danger');
-    if (btn) {
-      mpBatch = null;
-      window.renderMpDraft();
-    }
-  });
-
-  // 4. Жёсткая подстановка URL Supabase перед любым запросом к облаку
-  window.pushCloud = async function (manual) {
-    if (window.__skosReadOnly) return;
-    window.flushLocalSave();
-    const REAL_URL = 'https://supabase.co';
-    const REAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
-    const pin = ((window.db.cloud && window.db.cloud.pin) || 'Skos#9482!Tm').trim();
-    window.db.cloud = { url: REAL_URL, key: REAL_KEY, pin };
-    if (document.getElementById('sb-url')) document.getElementById('sb-url').value = REAL_URL;
-
-    window.showToastProgress('⏳ Сохранение в облако...');
-    try {
-      const skus = window.db.skus || [], sales = window.db.itemSales || [], sz = 4000;
-      const sc = Math.max(1, Math.ceil(skus.length / sz)), salc = Math.ceil(sales.length / sz);
-      const mainPayload = Object.assign({}, window.db, { skus: [], itemSales: [], ddsHashes: {}, skusChunks: sc, salesChunks: salc });
-      const hdrs = { apikey: REAL_KEY, Authorization: 'Bearer ' + REAL_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal,resolution=merge-duplicates', 'x-skos-pin': pin };
-      const sendRow = async (id, payload) => {
-        const r = await fetch(REAL_URL + '/rest/v1/skos_cloud?on_conflict=id', { method: 'POST', headers: hdrs, body: JSON.stringify([{ id, payload, updated_at: new Date().toISOString() }]) });
-        if (!r.ok) throw new Error(id + ' (' + r.status + ')');
-      };
-      await sendRow('main', mainPayload);
-      for (let c = 0; c < sc; c++) await sendRow('skus_' + c, skus.slice(c * sz, (c + 1) * sz).map(s => ({ n: s.name, a: s.art, c: s.col, z: s.siz, b: s.bc, u: s.usd })));
-      for (let s = 0; s < salc; s++) await sendRow('sales_' + s, sales.slice(s * sz, (s + 1) * sz));
-      window.showToastProgress('✅ Облако сохранено!', 2500);
-      if (manual) alert('✅ Сохранено в облако!\n• ШК: ' + skus.length + ' шт.\n• Отчётов: ' + (window.db.reports || []).length + '\n• ДДС: ' + (window.db.dds || []).length);
-    } catch (e) {
-      window.showToastProgress('❌ Ошибка облака', 3000);
-      if (manual) alert('❌ Ошибка облака: ' + e.message + '\n\nПроверьте, не включён ли VPN/блокировщик или не уснул ли проект в панели Supabase.');
-    }
-  };
-    /* === Фикс-блок 3: Облако без CORS-ошибки Failed to fetch + Себестоимость ЯМ + Очиститель базы === */
-  // 1. Убираем нестандартный заголовок x-skos-pin (он вызывал CORS-блокировку Failed to fetch!)
-  window.pushCloud = async function (manual) {
-    if (window.__skosReadOnly) return;
-    window.flushLocalSave();
-    const REAL_URL = 'https://supabase.co';
-    const REAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
-    window.db.cloud = { url: REAL_URL, key: REAL_KEY, pin: (window.db.cloud && window.db.cloud.pin) || 'Skos#9482!Tm' };
-
-    window.showToastProgress('⏳ Сохранение в облако...');
-    try {
-      const skus = window.db.skus || [], sales = window.db.itemSales || [], sz = 4000;
-      const sc = Math.max(1, Math.ceil(skus.length / sz)), salc = Math.ceil(sales.length / sz);
-      const mainPayload = Object.assign({}, window.db, { skus: [], itemSales: [], ddsHashes: {}, skusChunks: sc, salesChunks: salc });
-      const hdrs = {
-        apikey: REAL_KEY,
-        Authorization: 'Bearer ' + REAL_KEY,
-        'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates,return=minimal'
-      };
-      const sendRow = async (id, payload) => {
-        const r = await fetch(REAL_URL + '/rest/v1/skos_cloud?on_conflict=id', {
-          method: 'POST',
-          headers: hdrs,
-          body: JSON.stringify([{ id, payload, updated_at: new Date().toISOString() }])
-        });
-        if (!r.ok) {
-          const errTxt = await r.text().catch(() => '');
-          throw new Error(id + ' (код ' + r.status + ' ' + errTxt.slice(0, 60) + ')');
-        }
-      };
-      await sendRow('main', mainPayload);
-      for (let c = 0; c < sc; c++) {
-        window.showToastProgress(`⏳ Товары в облако: ${c + 1}/${sc}...`);
-        await sendRow('skus_' + c, skus.slice(c * sz, (c + 1) * sz).map(s => ({ n: s.name, a: s.art, c: s.col, z: s.siz, b: s.bc, u: s.usd })));
-      }
-      for (let s = 0; s < salc; s++) {
-        window.showToastProgress(`⏳ Продажи в облако: ${s + 1}/${salc}...`);
-        await sendRow('sales_' + s, sales.slice(s * sz, (s + 1) * sz));
-      }
-      window.showToastProgress('✅ Облако сохранено!', 2500);
-      if (manual) alert('✅ Всё успешно сохранено в облако Supabase!\n• ШК: ' + skus.length + ' шт.\n• Отчётов: ' + (window.db.reports || []).length + '\n• Операций ДДС: ' + (window.db.dds || []).length);
-    } catch (e) {
-      window.showToastProgress('❌ Ошибка облака', 3000);
-      if (manual) alert('❌ Ошибка облака: ' + e.message);
-    }
-  };
-
-  window.pullCloud = async function (silent) {
-    const REAL_URL = 'https://supabase.co';
-    const REAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
-    const hdrs = { apikey: REAL_KEY, Authorization: 'Bearer ' + REAL_KEY };
-    try {
-      const rMain = await fetch(REAL_URL + '/rest/v1/skos_cloud?id=eq.main&select=payload', { headers: hdrs });
-      if (!rMain.ok) return;
-      const rows = await rMain.json();
-      if (!Array.isArray(rows) || !rows.length || !rows[0].payload) return;
-      const data = rows[0].payload;
-      const sc = Number(data.skusChunks || 0);
-      if (sc > 0 && (!Array.isArray(data.skus) || !data.skus.length)) {
-        const allSkus = [];
-        for (let c = 0; c < sc; c++) {
-          const rSku = await fetch(REAL_URL + '/rest/v1/skos_cloud?id=eq.skus_' + c + '&select=payload', { headers: hdrs });
-          if (rSku.ok) {
-            const sRows = await rSku.json();
-            if (Array.isArray(sRows) && sRows[0] && Array.isArray(sRows[0].payload)) {
-              sRows[0].payload.forEach((it, i) => allSkus.push({
-                id: 's_' + c + '_' + i, name: it.n || it.name || it.a || 'Товар',
-                art: it.a || it.art || '', col: it.c || it.col || '—', siz: it.z || it.s || it.siz || '—',
-                bc: it.b || it.bc || it.barcode || '', usd: window.num(it.u !== undefined ? it.u : (it.usd || 0))
-              }));
-            }
-          }
-        }
-        if (allSkus.length) data.skus = allSkus;
-      }
-      const salc = Number(data.salesChunks || 0);
-      if (salc > 0 && (!Array.isArray(data.itemSales) || !data.itemSales.length)) {
-        const allSales = [];
-        for (let s = 0; s < salc; s++) {
-          const rSal = await fetch(REAL_URL + '/rest/v1/skos_cloud?id=eq.sales_' + s + '&select=payload', { headers: hdrs });
-          if (rSal.ok) {
-            const slRows = await rSal.json();
-            if (Array.isArray(slRows) && slRows[0] && Array.isArray(slRows[0].payload)) allSales.push(...slRows[0].payload);
-          }
-        }
-        if (allSales.length) data.itemSales = allSales;
-      }
-      Object.assign(window.db, data);
-      window.db.cloud = { url: REAL_URL, key: REAL_KEY, pin: (window.db.cloud && window.db.cloud.pin) || 'Skos#9482!Tm' };
-      window.ensureStore();
-      window.flushLocalSave();
-      window.onPerChange();
-      if (!silent) alert('✅ Данные восстановлены из облака!');
-    } catch (e) { if (!silent) alert('❌ Ошибка чтения из облака: ' + e.message); }
-  };
-
-  // 2. Усиленный поиск себестоимости для Яндекс Маркет (по ШК, префиксу SKOS-... и названию)
-  const _origResolve = window.resolveMetaFast;
-  window.resolveMetaFast = function (idx, bcRaw, artRaw, nameRaw) {
-    const res = _origResolve.call(this, idx, bcRaw, artRaw, nameRaw);
-    if (res && res.usd > 0) return res;
-    const combo = (String(bcRaw || '') + ' ' + String(artRaw || '') + ' ' + String(nameRaw || '')).toUpperCase();
-    const m = combo.match(/(SKOS-[A-ZА-Я0-9]+)/);
-    if (m && m[1]) {
-      const f = idx.byArt.get(window.normKey(m[1]));
-      if (f && window.num(f.usd) > 0) {
-        res.usd = window.num(f.usd);
-        res.art = window.normStr(f.art) || res.art;
-        res.modelTitle = idx.fNames[res.art] || f.name || res.modelTitle;
-      }
-    }
-    return res;
-  };
-
-  // 3. Очиститель всех тестовых данных (в Настройках + автоматическая очистка 20-значных счетов в ДДС)
-  if (window.db) {
-    if (Array.isArray(window.db.dds)) {
-      window.db.dds = window.db.dds.filter(d => Math.abs(window.num(d.amt)) < 500000000);
-    }
-    if (window.db.initBalances) {
-      Object.keys(window.db.initBalances).forEach(k => {
-        if (Math.abs(window.num(window.db.initBalances[k])) >= 500000000) window.db.initBalances[k] = 0;
-      });
-    }
-    window.save(true);
-  }
-
-  window.resetAllTestData = function () {
-    if (window.__skosReadOnly) return;
-    if (!confirm('Очистить ВСЕ тестовые операции (отчёты МП, ABC, ДДС, расходы, налоги, остатки склада) и начать с чистого листа?\n\nБаза товаров (32 папки ШК), юрлица и справочники СОХРАНЯТСЯ!')) return;
-    window.db.reports = [];
-    window.db.itemSales = [];
-    window.db.dds = [];
-    window.db.ddsHashes = {};
-    window.db.initBalances = {};
-    window.db.taxes = [];
-    window.db.expenses = [];
-    window.db.stockMoves = [];
-    window.db.supOps = [];
-    window.db.assets = [];
-    if (window.db.erp) {
-      ['matIn', 'orders', 'fgStocks', 'defects', 'contractorOps', 'payrollOps', 'taxDebts'].forEach(k => { window.db.erp[k] = []; });
-    }
-    window.save(true);
-    window.render();
-    alert('✅ Все тестовые данные очищены! База товаров (ШК) и справочники сохранены. Можете начинать чистовой учёт.');
-  };
-
-  const _origRenderSet = window.renderSetTab;
-  window.renderSetTab = function () {
-    if (typeof _origRenderSet === 'function') _origRenderSet.apply(this, arguments);
-    const sec = document.getElementById('tab-set');
-    if (sec && !document.getElementById('skos-reset-card')) {
-      const div = document.createElement('div');
-      div.id = 'skos-reset-card';
-      div.className = 'card';
-      div.style.cssText = 'border:1.5px solid #fecaca;background:#fef2f2';
-      div.innerHTML = `<div class="card-header"><div class="card-title" style="color:#991b1b">🧹 Очиститель тестовых данных</div>
-        <button type="button" class="btn btn-danger" style="padding:7px 14px;font-size:13px" onclick="resetAllTestData()">🧹 Очистить все тестовые операции</button></div>
-        <div style="font-size:12px;color:#7f1d1d">Удаляет тестовые отчёты МП, продажи ABC, банковские выписки ДДС, налоги, расходы и движения склада. Каталог из 32 папок товаров (ШК), юрлица и справочники остаются нетронутыми.</div>`;
-      sec.appendChild(div);
-    }
-  };
-    /* === Часть А: Парсер выписок Точка / ВТБ / Альфа (с многострочными кавычками) === */
-  function parseFullCsvMatrix(text, sep) {
-    const rows = []; let row = [], cell = '', inQ = false;
-    for (let i = 0; i < text.length; i++) {
-      const ch = text[i], nx = text[i + 1];
-      if (ch === '"') { if (inQ && nx === '"') { cell += '"'; i++; } else inQ = !inQ; }
-      else if (ch === sep && !inQ) { row.push(cell.replace(/\r?\n/g, ' ').trim()); cell = ''; }
-      else if ((ch === '\n' || ch === '\r') && !inQ) {
-        if (ch === '\r' && nx === '\n') i++;
-        row.push(cell.replace(/\r?\n/g, ' ').trim());
-        if (row.some(x => x !== '')) rows.push(row);
-        row = []; cell = '';
-      } else cell += ch;
-    }
-    if (cell || row.length) { row.push(cell.replace(/\r?\n/g, ' ').trim()); if (row.some(x => x !== '')) rows.push(row); }
-    return rows;
-  }
-
-  window.importBankCsv = async function (ev) {
-    if (window.__skosReadOnly) return;
-    const f = ev && ev.target && ev.target.files && ev.target.files;
-    if (!f) return; ev.target.value = '';
-    const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
-    window.showToastProgress('⏳ Чтение выписки банка...');
-    const buf = await f.arrayBuffer();
-    let txt = new TextDecoder('utf-8').decode(buf);
-    if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
-    txt = txt.replace(/^\uFEFF/, '');
-
-    const hdrLine = txt.split(/\r?\n/).find(l => l.toLowerCase().match(/дата|списание|зачисление|sum_rur|сумма/)) || '';
-    const sep = hdrLine.includes('\t') ? '\t' : ((hdrLine.split(';').length >= hdrLine.split(',').length) ? ';' : ',');
-    const rows = parseFullCsvMatrix(txt, sep);
-    const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/дата операции|дата документа|списание|зачисление|sum_rur|d_c|сумма/));
-    const hdr = hdrIdx >= 0 ? rows[hdrIdx].map(x => x.toLowerCase()) : [];
-
-    const iDc = hdr.indexOf('d_c'), iDt = hdr.indexOf('дата операции') >= 0 ? hdr.indexOf('дата операции') : (hdr.indexOf('date_oper') >= 0 ? hdr.indexOf('date_oper') : hdr.findIndex(h => h.includes('дата')));
-    const iIn = hdr.findIndex(h => h.match(/зачислен|приход|поступлен|кредит/) && !h.includes('ост') && !h.includes('обор'));
-    const iOut = hdr.findIndex(h => h.match(/списан|расход|дебет/) && !h.includes('ост') && !h.includes('обор'));
-    const iSum = hdr.indexOf('sum_rur') >= 0 ? hdr.indexOf('sum_rur') : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц'));
-    const iCtr = hdr.findIndex(h => h.includes('контрагент') && !h.includes('инн') && !h.includes('бик') && !h.includes('счёт') && !h.includes('банк'));
-    const iText = hdr.findIndex(h => h.includes('назначен') || h === 'text70');
-    /* === Часть Б: Завершение парсера выписок + Массовый Шаблон ШК === */
-    let added = 0, skip = 0, sumIn = 0, sumOut = 0, toCash = 0;
-    for (let idx = (hdrIdx >= 0 ? hdrIdx + 1 : 0); idx < rows.length; idx++) {
-      const c = rows[idx]; if (!c || c.length < 3) continue;
-      const lowFull = c.join(' ').toLowerCase();
-      if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого')) continue;
-      let rawDt = (iDt >= 0 && c[iDt]) ? c[iDt].trim() : '';
-      if (!/^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(rawDt)) rawDt = c.find(x => /^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(String(x || '').trim())) || '';
-      if (!rawDt) continue;
-      const dt = /^\d{4}-\d{2}-\d{2}$/.test(rawDt) ? rawDt.split('-').reverse().join('.') : rawDt;
-
-      let amt = 0;
-      if (iDc >= 0 && iSum >= 0) { const v = Math.abs(window.num(c[iSum])), dc = String(c[iDc] || '').toUpperCase(); amt = dc === 'D' ? -v : (dc === 'C' ? v : 0); }
-      else if (iIn >= 0 || iOut >= 0) { const vIn = iIn >= 0 ? Math.abs(window.num(c[iIn])) : 0, vOut = iOut >= 0 ? Math.abs(window.num(c[iOut])) : 0; amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0); }
-      else if (iSum >= 0) amt = window.num(c[iSum]);
-      if (!amt || Math.abs(amt) > 500000000) continue;
-
-      const desc = ((iCtr >= 0 && c[iCtr]) ? c[iCtr] + ' — ' : '') + ((iText >= 0 && c[iText]) ? c[iText] : '');
-      const lowDesc = desc.toLowerCase(), hash = walId + '_' + dt + '_' + amt + '_' + lowDesc.slice(0, 40) + '_' + idx;
-      if (window.db.ddsHashes[hash]) { skip++; continue; }
-      window.db.ddsHashes[hash] = true;
-      if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
-
-      let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
-      if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
-      else if (lowFull.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
-      else if (lowFull.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
-      else if (lowDesc.match(/лицензионн|подписк|комисс|рко|обслуживан|маркзнак|гс1 рус/)) cat = 'Комиссия РКО';
-      else if (lowDesc.match(/единый налоговый|уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
-      else if (lowDesc.match(/таможен/)) cat = 'Федеральная таможенная служба';
-      else if (lowDesc.match(/аренд/)) cat = 'Аренда склада';
-      else if (lowDesc.match(/azs|азс|gazprom|татнефть|нефть|avtodor|автодор|avtomo|автомой|parkov|парков/)) cat = 'Авто расходы компании';
-      else if (lowDesc.match(/aeroport|аэропорт|trip\.com/)) cat = 'Командировки RUB';
-      else if (lowDesc.match(/выдача наличных|снятие|перевод собственных|перевод по номеру телефона/)) {
-        cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
-        if (amt < 0) { window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), note: 'Из банка: ' + desc.slice(0, 90), batchId }); toCash += Math.abs(amt); }
-      }
-      window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: walId, cat, amt, note: desc.slice(0, 140), batchId });
-      added++;
-    }
-    window.save(true); window.renderDdsTab(); window.showToastProgress('✅ Выписка загружена!', 2000);
-    alert(`✅ Выписка загружена!\n• Операций: ${added} (дублей: ${skip})\n• Приход: +${window.fmtR(sumIn)}\n• Расход: −${window.fmtR(sumOut)}\n• В «Наличные RUB Главный»: +${window.fmtR(toCash)}`);
-  };
-  /* === Часть В: Массовый Шаблон ШК (Ctrl+V из Excel) + Google Облако === */
-  window.downloadSkuTemplateCsv = () => {
-    const csv = '\uFEFFAртикул продавца;ШК;Название;Себестоимость USD\r\nSKOS-B;2043192743629;Брюки мужские зауженные;6,60\r\nSKOS-FK;OZN861358069;Костюм флисовый;9,80';
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'Shablon_SKOS_SKU.csv'; a.click();
-  };
-
-  window.openMassSkuTemplate = () => {
-    if (window.__skosReadOnly) return;
-    const fKeys = [...new Set((window.db.skus || []).map(x => window.normStr(x.art)).filter(Boolean))].sort();
-    const rowHtml = (a = '', b = '', n = '', u = '') => `<tr><td><input class="input m-art" list="skos-mass-arts" value="${window.esc(a)}" placeholder="SKOS-B"></td><td><input class="input m-bc" value="${window.esc(b)}" placeholder="ШК / SKU" style="font-family:monospace"></td><td><input class="input m-nm" value="${window.esc(n)}" placeholder="Название"></td><td><input type="number" step="0.01" class="input m-usd" value="${u}" placeholder="6.60" style="text-align:right"></td><td><button type="button" class="btn btn-danger" onclick="this.closest('tr').remove()">✕</button></td></tr>`;
-    const modal = document.createElement('div'); modal.className = 'modal-bg';
-    modal.innerHTML = `<datalist id="skos-mass-arts">${fKeys.map(k => `<option value="${window.esc(k)}">`).join('')}</datalist><div class="modal-box" style="max-width:760px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="font-size:16px;font-weight:800">📄 Массовое добавление ШК / SKU (Шаблон)</h3><button type="button" class="btn" onclick="this.closest('.modal-bg').remove()">✕</button></div>
-      <p style="font-size:12px;color:#475569;margin-bottom:8px">Вставьте столбцы из Excel / Google Таблицы через <b>Ctrl+V</b> в любую ячейку:</p>
-      <div style="max-height:50vh;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px"><table><thead><tr><th>Артикул (Папка)</th><th>ШК / Баркод *</th><th>Название</th><th class="num">Себест. $</th><th></th></tr></thead><tbody id="mass-sku-tb">${rowHtml()}${rowHtml()}${rowHtml()}${rowHtml()}${rowHtml()}</tbody></table></div>
-      <div style="margin-top:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><div style="display:flex;gap:6px"><button type="button" class="btn" id="m-add-r">+ Строка</button><button type="button" class="btn" onclick="downloadSkuTemplateCsv()">⬇️ Скачать CSV</button></div><div style="display:flex;gap:8px"><button type="button" class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button><button type="button" class="btn btn-primary" id="m-save-all">✅ Сохранить в каталог</button></div></div></div>`;
-    document.body.appendChild(modal);
-    const tb = document.getElementById('mass-sku-tb');
-    tb.addEventListener('paste', e => {
-      const txt = (e.clipboardData || window.clipboardData).getData('text'); if (!txt || (!txt.includes('\t') && !txt.includes('\n'))) return; e.preventDefault();
-      txt.split(/\r?\n/).filter(l => l.trim()).forEach((line, i) => { const c = line.split('\t').map(x => x.trim()); const tr = document.createElement('tr'); tr.innerHTML = rowHtml(c || '', c || '', c || '', (c || '').replace(',', '.')).replace(/^<tr>|<\/tr>$/g, ''); if (i === 0 && e.target?.closest('tr')) e.target.closest('tr').replaceWith(tr); else tb.appendChild(tr); });
-    });
-    document.getElementById('m-add-r').onclick = () => { const tr = document.createElement('tr'); tr.innerHTML = rowHtml().replace(/^<tr>|<\/tr>$/g, ''); tb.appendChild(tr); };
-    document.getElementById('m-save-all').onclick = () => {
-      const skuMap = new Map(); (window.db.skus || []).forEach(s => skuMap.set(window.normStr(s.bc), s));
-      let added = 0, upd = 0;
-      tb.querySelectorAll('tr').forEach((tr, i) => {
-        const art = window.normStr(tr.querySelector('.m-art').value) || 'Без артикула', bc = window.normStr(tr.querySelector('.m-bc').value), nm = window.normStr(tr.querySelector('.m-nm').value) || art, usd = window.num(tr.querySelector('.m-usd').value);
-        if (!bc) return;
-        const ex = skuMap.get(bc);
-        if (ex) { ex.art = art; ex.name = nm; if (usd > 0) ex.usd = usd; ex.isNew = ex.usd === 0; upd++; }
-        else { const ns = { id: 's_' + Date.now() + '_' + i, art, bc, name: nm, col: '—', siz: '—', usd, src: 'Шаблон', isNew: usd === 0 }; window.db.skus.unshift(ns); skuMap.set(bc, ns); added++; }
-      });
-      modal.remove(); window.save(true); window.renderSkuTab(); alert(`✅ Добавлено: ${added}, обновлено: ${upd}`);
-    };
-  };
-
-  const _origRenderSku = window.renderSkuTab;
-  window.renderSkuTab = function () {
-    _origRenderSku.apply(this, arguments);
-    const bar = document.querySelector('#tab-sku .card:first-child .card-header div:last-child');
-    if (bar && !document.getElementById('skos-mass-tpl-btn') && !window.__skosReadOnly) {
-      const btn = document.createElement('button'); btn.id = 'skos-mass-tpl-btn'; btn.type = 'button'; btn.className = 'btn btn-primary'; btn.textContent = '📄 Шаблон (массово)'; btn.onclick = window.openMassSkuTemplate;
-      bar.insertBefore(btn, bar.children || null);
-    }
-  };
-
-  const _origPushSupa = window.pushCloud;
-  window.pushCloud = async function (manual) {
-    const u = ((window.db.cloud && window.db.cloud.url) || '').trim();
-    if (u.includes('://google.com')) {
-      window.flushLocalSave(); window.showToastProgress('⏳ Сохранение в Google Облако...');
-      try { await fetch(u, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(window.db) }); window.showToastProgress('✅ Сохранено в Google Облако!', 2500); if (manual) alert('✅ База отправлена в Google Облако!'); }
-      catch (e) { if (manual) alert('❌ Ошибка Google Облака: ' + e.message); }
-      return;
-    }
-    return _origPushSupa.apply(this, arguments);
-  };
-
-  const _origPullSupa = window.pullCloud;
-  window.pullCloud = async function (silent) {
-    const u = ((window.db.cloud && window.db.cloud.url) || '').trim();
-    if (u.includes('://google.com')) {
-      try { const res = await fetch(u); const data = await res.json(); if (data && typeof data === 'object' && (data.orgs || data.skus)) { Object.assign(window.db, data); window.db.cloud.url = u; window.ensureStore(); window.flushLocalSave(); window.onPerChange(); if (!silent) alert('✅ База загружена из Google Облака!'); } }
-      catch (e) { if (!silent) alert('❌ Ошибка чтения Google Облака: ' + e.message); }
-      return;
-    }
-    return _origPullSupa.apply(this, arguments);
-  };
-    /* === Фикс-блок 6: Вшиваем постоянное Google Облако (вместо заблокированного Supabase) === */
-  const GOOGLE_CLOUD_URL = 'https://script.google.com/macros/s/AKfycbykO61PvGEaWLWPPL4QkWwgWDedg1o_AzWbL0-tDQ5Q4pZN3iczmt0r8R5_9PfIBUwHng/exec';
-  window.db.cloud = { url: GOOGLE_CLOUD_URL, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
-  if (document.getElementById('sb-url')) document.getElementById('sb-url').value = GOOGLE_CLOUD_URL;
 
   window.pushCloud = async function (manual) {
     if (window.__skosReadOnly) return;
     window.flushLocalSave();
-    window.db.cloud.url = GOOGLE_CLOUD_URL;
+    window.db.cloud = { url: GOOGLE_CLOUD_URL, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
     window.showToastProgress('⏳ Сохранение в Google Облако...');
     try {
-      await fetch(GOOGLE_CLOUD_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(window.db)
-      });
+      await fetch(GOOGLE_CLOUD_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(window.db) });
       window.showToastProgress('✅ Сохранено в Google Облако!', 2500);
-      if (manual) {
-        alert('✅ Всё успешно сохранено в Google Облако!\n• Товаров (ШК): ' + (window.db.skus || []).length + ' шт.\n• Отчётов МП: ' + (window.db.reports || []).length + '\n• Операций ДДС: ' + (window.db.dds || []).length);
-      }
-    } catch (e) {
-      window.showToastProgress('❌ Ошибка Google Облака', 3000);
-      if (manual) alert('❌ Ошибка Google Облака: ' + e.message);
-    }
+      if (manual) alert('✅ Сохранено в Google Облако!\n• ШК: ' + (window.db.skus || []).length + '\n• Отчётов: ' + (window.db.reports || []).length + '\n• ДДС: ' + (window.db.dds || []).length);
+    } catch (e) { if (manual) alert('❌ Ошибка Google Облака: ' + e.message); }
   };
 
   window.pullCloud = async function (silent) {
@@ -1654,212 +1113,78 @@
       const data = await res.json();
       if (data && typeof data === 'object' && (Array.isArray(data.orgs) || Array.isArray(data.skus))) {
         Object.assign(window.db, data);
-        window.db.cloud.url = GOOGLE_CLOUD_URL;
-        if (document.getElementById('sb-url')) document.getElementById('sb-url').value = GOOGLE_CLOUD_URL;
-        window.ensureStore();
-        window.flushLocalSave();
-        window.onPerChange();
-        if (!silent) alert('✅ База успешно загружена из Google Облака!');
+        window.db.cloud = { url: GOOGLE_CLOUD_URL, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
+        window.ensureStore(); window.flushLocalSave(); window.onPerChange();
+        if (!silent) alert('✅ База загружена из Google Облака!');
       }
-    } catch (e) {
-      if (!silent) alert('❌ Ошибка чтения Google Облака: ' + e.message);
-    }
-  };
-    /* === Косметическое оформление карточки Облака в Настройках === */
-  const _origSetTab = window.renderSetTab;
-  window.renderSetTab = function () {
-    if (typeof _origSetTab === 'function') _origSetTab.apply(this, arguments);
-    const sbUrl = document.getElementById('sb-url');
-    if (sbUrl) {
-      sbUrl.value = 'https://google.com';
-      sbUrl.readOnly = true;
-      const card = sbUrl.closest('.card');
-      const title = card?.querySelector('.card-title');
-      if (title) title.textContent = '☁️ Облачная синхронизация для команды (Google Таблица)';
-      const keyBox = document.getElementById('sb-key')?.parentElement;
-      if (keyBox) keyBox.style.display = 'none';
-    }
-  };
-    /* === Кнопка «📄 Шаблон» с выгрузкой всех папок, артикулов и цен из базы === */
-  window.downloadFullSkuTemplate = function () {
-    const skus = (window.db && Array.isArray(window.db.skus)) ? window.db.skus : [];
-    const fNames = window.getFolderNames();
-    let csv = '\uFEFFAртикул продавца;ШК;Название;Себестоимость USD\r\n';
-    if (skus.length > 0) {
-      skus.forEach(s => {
-        const art = window.normStr(s.art) || 'Без артикула';
-        const bc = window.normStr(s.bc);
-        const nm = window.normStr(fNames[art] || s.name || art);
-        const usd = String(window.num(s.usd)).replace('.', ',');
-        csv += `"${art.replace(/"/g, '""')}";"${bc.replace(/"/g, '""')}";"${nm.replace(/"/g, '""')}";${usd}\r\n`;
-      });
-    } else {
-      csv += 'SKOS-B;2043192743629;Брюки мужские зауженные;6,60\r\n';
-      csv += 'SKOS-YR;5033400058;Рубашка на полу пуговицы;4,56\r\n';
-      csv += 'SKOS-FK;OZN951171816;Костюм флисовый с пугувицами;9,80\r\n';
-    }
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-    a.download = 'shablon_sebestoimost_SKOS_' + window.today() + '.csv';
-    a.click();
+    } catch (e) { if (!silent) alert('❌ Ошибка чтения Google Облака: ' + e.message); }
   };
 
-  // Исправляем импорт CSV (чтобы точно читал колонки: Артикул;ШК;Название;Себестоимость USD)
-  window.importCostCsv = async function (ev) {
-    const f = ev && ev.target && ev.target.files && ev.target.files;
-    if (!f) return;
-    ev.target.value = '';
-    window.showToastProgress('⏳ Импорт шаблона ШК...');
-    const buf = await f.arrayBuffer();
-    let txt = new TextDecoder('utf-8').decode(buf);
-    if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
-    const lines = txt.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
-    if (lines.length < 2) return alert('Файл пустой!');
-    const sep = (lines.split(';').length >= lines.split(',').length) ? ';' : ',';
-    const skuMap = new Map();
-    (window.db.skus || []).forEach(s => skuMap.set(window.normStr(s.bc), s));
-    let added = 0, upd = 0;
-    for (let i = 1; i < lines.length; i++) {
-      const c = splitCsvLine(lines[i], sep);
-      if (c.length < 2) continue;
-      const art = window.normStr(c) || 'Без артикула';
-      const bc = window.normStr(c.length >= 3 ? c : c);
-      const name = window.normStr(c.length >= 3 ? c : art) || art;
-      const usd = window.num(c[c.length - 1]);
-      if (!bc || /e\+/i.test(bc)) continue;
-      if (name && name !== art) window.setFolderName(art, name);
-      const ex = skuMap.get(bc);
-      if (ex) {
-        ex.art = art;
-        if (name) ex.name = name;
-        if (usd > 0) ex.usd = usd;
-        ex.isNew = ex.usd === 0;
-        upd++;
-      } else {
-        const ns = { id: 's_' + Date.now() + '_' + i, art, bc, name, col: '—', siz: '—', usd, src: f.name, isNew: usd === 0 };
-        window.db.skus.push(ns);
-        skuMap.set(bc, ns);
-        added++;
-      }
-    }
-    window.recalcReportsCogs();
-    window.save(true);
-    window.renderSkuTab();
-    window.showToastProgress('✅ Импорт завершён!', 2000);
-    alert(`✅ Шаблон загружен!\n• Добавлено новых ШК: ${added}\n• Обновлено существующих: ${upd}`);
-  };
-
-  // Добавляем кнопку «📄 Шаблон» прямо рядом с кнопкой «📥 Импорт "Свод себестоимости" (CSV)»
-  const _origSkuRender2 = window.renderSkuTab;
-  window.renderSkuTab = function () {
-    _origSkuRender2.apply(this, arguments);
-    const firstCardHeader = document.querySelector('#tab-sku .card:first-child .card-header');
-    if (firstCardHeader && !document.getElementById('skos-tpl-dl-btn')) {
-      const btnWrap = firstCardHeader.querySelector('div:last-child') || firstCardHeader;
-      const btn = document.createElement('button');
-      btn.id = 'skos-tpl-dl-btn';
-      btn.type = 'button';
-      btn.className = 'btn btn-primary';
-      btn.style.marginRight = '6px';
-      btn.textContent = '📄 Шаблон';
-      btn.title = 'Скачать CSV-шаблон со всеми папками, артикулами и ценами';
-      btn.onclick = window.downloadFullSkuTemplate;
-      btnWrap.insertBefore(btn, btnWrap.firstChild);
-    }
-  };
-  /* === Фикс-блок 7: Исправление ev.target.files (моментальная загрузка выписок, ШК и JSON) === */
   window.importJson = function (ev) {
-    const f = ev && ev.target && ev.target.files && ev.target.files;
-    if (!f) return;
-    ev.target.value = '';
-    window.showToastProgress('⏳ Загрузка бэкапа...');
+    const f = getPickedFile(ev); if (!f) return; ev.target.value = '';
     const r = new FileReader();
     r.onload = function (e) {
       try {
-        const parsed = JSON.parse(e.target.result);
-        const curCloud = window.db.cloud;
-        Object.assign(window.db, parsed);
-        if (curCloud && curCloud.url && curCloud.url.includes('://google.com')) {
-          window.db.cloud = curCloud;
-        }
-        window.ensureStore();
-        window.flushLocalSave();
-        window.onPerChange();
-        window.showToastProgress('✅ Бэкап загружен!', 2000);
-        alert('✅ Бэкап успешно загружен! Товаров (ШК): ' + (window.db.skus || []).length + ' шт.');
-      } catch (err) {
-        window.showToastProgress('❌ Ошибка файла', 2500);
-        alert('❌ Ошибка чтения файла: ' + err.message);
-      }
+        Object.assign(window.db, JSON.parse(e.target.result));
+        window.db.cloud = { url: GOOGLE_CLOUD_URL, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
+        window.ensureStore(); window.flushLocalSave(); window.onPerChange();
+        alert('✅ Бэкап загружен! Товаров (ШК): ' + (window.db.skus || []).length);
+      } catch (err) { alert('❌ Ошибка файла: ' + err.message); }
     };
     r.readAsText(f, 'UTF-8');
   };
 
-  window.importCostCsv = async function (ev) {
-    const f = ev && ev.target && ev.target.files && ev.target.files;
-    if (!f) return;
-    ev.target.value = '';
-    window.showToastProgress('⏳ Импорт шаблона ШК...');
-    try {
-      const buf = await f.arrayBuffer();
-      let txt = new TextDecoder('utf-8').decode(buf);
-      if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
-      const lines = txt.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
-      if (lines.length < 2) return alert('Файл пустой!');
-      const sep = (lines.split(';').length >= lines.split(',').length) ? ';' : ',';
-      const skuMap = new Map();
-      (window.db.skus || []).forEach(s => skuMap.set(window.normStr(s.bc), s));
-      let added = 0, upd = 0;
-      for (let i = 1; i < lines.length; i++) {
-        const c = splitCsvLine(lines[i], sep);
-        if (c.length < 2) continue;
-        const art = window.normStr(c) || 'Без артикула';
-        const bc = window.normStr(c.length >= 3 ? c : c);
-        const name = window.normStr(c.length >= 3 ? c : art) || art;
-        const usd = window.num(c[c.length - 1]);
-        if (!bc || /e\+/i.test(bc)) continue;
-        if (name && name !== art) window.setFolderName(art, name);
-        const ex = skuMap.get(bc);
-        if (ex) {
-          ex.art = art; if (name) ex.name = name; if (usd > 0) ex.usd = usd; ex.isNew = ex.usd === 0; upd++;
-        } else {
-          const ns = { id: 's_' + Date.now() + '_' + i, art, bc, name, col: '—', siz: '—', usd, src: f.name, isNew: usd === 0 };
-          window.db.skus.push(ns); skuMap.set(bc, ns); added++;
-        }
-      }
-      window.recalcReportsCogs();
-      window.save(true);
-      window.renderSkuTab();
-      window.showToastProgress('✅ Шаблон загружен!', 2000);
-      alert(`✅ Шаблон загружен!\n• Добавлено новых ШК: ${added}\n• Обновлено: ${upd}`);
-    } catch (err) {
-      window.showToastProgress('❌ Ошибка импорта', 2500);
-      alert('❌ Ошибка импорта: ' + err.message);
-    }
+  window.downloadFullSkuTemplate = function () {
+    const skus = window.db.skus || [], fNames = window.getFolderNames();
+    let csv = '\uFEFFAртикул продавца;ШК;Название;Себестоимость USD\r\n';
+    if (skus.length) {
+      skus.forEach(s => { const art = window.normStr(s.art) || 'Без артикула', bc = window.normStr(s.bc), nm = window.normStr(fNames[art] || s.name || art); csv += '"' + art.replace(/"/g, '""') + '";"' + bc.replace(/"/g, '""') + '";"' + nm.replace(/"/g, '""') + '";' + String(window.num(s.usd)).replace('.', ',') + '\r\n'; });
+    } else csv += 'SKOS-B;2043192743629;Брюки мужские зауженные;6,60\r\n';
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'shablon_sebestoimost_SKOS_' + window.today() + '.csv'; a.click();
   };
 
+  const _origSkuRenderEnd = window.renderSkuTab;
+  window.renderSkuTab = function () {
+    if (typeof _origSkuRenderEnd === 'function') _origSkuRenderEnd.apply(this, arguments);
+    const hdr = document.querySelector('#tab-sku .card:first-child .card-header');
+    if (hdr && !document.getElementById('skos-tpl-dl-btn')) {
+      const wrap = hdr.querySelector('div:last-child') || hdr, btn = document.createElement('button');
+      btn.id = 'skos-tpl-dl-btn'; btn.type = 'button'; btn.className = 'btn btn-primary'; btn.style.marginRight = '6px'; btn.textContent = '📄 Шаблон'; btn.onclick = window.downloadFullSkuTemplate;
+      wrap.insertBefore(btn, wrap.firstChild);
+    }
+  };
+  /* === Финал (Часть 2/2): Выписки всех банков ДДС, Остатки 01.01 и Защита курса === */
   window.importBankCsv = async function (ev) {
     if (window.__skosReadOnly) return;
-    const f = ev && ev.target && ev.target.files && ev.target.files;
-    if (!f) return;
-    ev.target.value = '';
+    const f = getPickedFile(ev); if (!f) return; ev.target.value = '';
     const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
-    window.showToastProgress('⏳ Чтение выписки банка...');
+    window.showToastProgress('⏳ Чтение выписки...');
     try {
       const buf = await f.arrayBuffer();
       let txt = new TextDecoder('utf-8').decode(buf);
       if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
       txt = txt.replace(/^\uFEFF/, '');
 
-      const hdrLine = txt.split(/\r?\n/).find(l => l.toLowerCase().match(/дата|списание|зачисление|sum_rur|сумма/)) || '';
-      const sep = hdrLine.includes('\t') ? '\t' : ((hdrLine.split(';').length >= hdrLine.split(',').length) ? ';' : ',');
-      const rows = parseFullCsvMatrix(txt, sep);
-      const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/дата операции|дата документа|списание|зачисление|sum_rur|d_c|сумма/));
-      const hdr = hdrIdx >= 0 ? rows[hdrIdx].map(x => x.toLowerCase()) : [];
+      const rows = []; let row = [], cell = '', inQ = false;
+      for (let i = 0; i < txt.length; i++) {
+        const ch = txt.charAt(i), nx = txt.charAt(i + 1);
+        if (ch === '"') { if (inQ && nx === '"') { cell += '"'; i++; } else inQ = !inQ; }
+        else if ((ch === ';' || ch === '\t') && !inQ) { row.push(cell.split('\r').join('').split('\n').join(' ').trim()); cell = ''; }
+        else if ((ch === '\n' || ch === '\r') && !inQ) {
+          if (ch === '\r' && nx === '\n') i++;
+          row.push(cell.split('\r').join('').split('\n').join(' ').trim());
+          if (row.some(x => x !== '')) rows.push(row);
+          row = []; cell = '';
+        } else cell += ch;
+      }
+      if (cell || row.length) { row.push(cell.trim()); rows.push(row); }
 
-      const iDc = hdr.indexOf('d_c'), iDt = hdr.indexOf('дата операции') >= 0 ? hdr.indexOf('дата операции') : (hdr.indexOf('date_oper') >= 0 ? hdr.indexOf('date_oper') : hdr.findIndex(h => h.includes('дата')));
-      const iIn = hdr.findIndex(h => h.match(/зачислен|приход|поступлен|кредит/) && !h.includes('ост') && !h.includes('обор'));
-      const iOut = hdr.findIndex(h => h.match(/списан|расход|дебет/) && !h.includes('ост') && !h.includes('обор'));
+      const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().includes('дата') || c.join(' ').toLowerCase().includes('сумма') || c.join(' ').toLowerCase().includes('списание'));
+      const hdr = hdrIdx >= 0 ? rows.at(hdrIdx).map(x => x.toLowerCase()) : [];
+      const iDc = hdr.indexOf('d_c');
+      const iDt = hdr.indexOf('дата операции') >= 0 ? hdr.indexOf('дата операции') : (hdr.indexOf('date_oper') >= 0 ? hdr.indexOf('date_oper') : hdr.findIndex(h => h.includes('дата')));
+      const iIn = hdr.findIndex(h => (h.includes('зачислен') || h.includes('приход') || h.includes('поступлен') || h.includes('кредит')) && !h.includes('ост') && !h.includes('обор'));
+      const iOut = hdr.findIndex(h => (h.includes('списан') || h.includes('расход') || h.includes('дебет')) && !h.includes('ост') && !h.includes('обор'));
       const iSum = hdr.indexOf('sum_rur') >= 0 ? hdr.indexOf('sum_rur') : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц'));
       const iCtr = hdr.findIndex(h => h.includes('контрагент') && !h.includes('инн') && !h.includes('бик') && !h.includes('счёт') && !h.includes('банк'));
       const iText = hdr.findIndex(h => h.includes('назначен') || h === 'text70');
@@ -1867,37 +1192,33 @@
       let added = 0, skip = 0, sumIn = 0, sumOut = 0, toCash = 0;
       const newOps = [];
       for (let idx = (hdrIdx >= 0 ? hdrIdx + 1 : 0); idx < rows.length; idx++) {
-        const c = rows[idx]; if (!c || c.length < 3) continue;
+        const c = rows.at(idx); if (!c || c.length < 3) continue;
         const lowFull = c.join(' ').toLowerCase();
         if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого')) continue;
-        let rawDt = (iDt >= 0 && c[iDt]) ? c[iDt].trim() : '';
-        if (!/^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(rawDt)) rawDt = c.find(x => /^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(String(x || '').trim())) || '';
+        let rawDt = (iDt >= 0 && c.at(iDt)) ? c.at(iDt).trim() : '';
+        if (!rawDt || rawDt.length < 8 || rawDt.length > 10) rawDt = c.find(x => { const s = String(x || '').trim(); return s.length >= 8 && s.length <= 10 && (s.includes('.') || s.includes('-')); }) || '';
         if (!rawDt) continue;
-        const dt = /^\d{4}-\d{2}-\d{2}$/.test(rawDt) ? rawDt.split('-').reverse().join('.') : rawDt;
+        const dt = rawDt.indexOf('-') === 4 ? rawDt.split('-').reverse().join('.') : rawDt;
 
         let amt = 0;
-        if (iDc >= 0 && iSum >= 0) { const v = Math.abs(window.num(c[iSum])), dc = String(c[iDc] || '').toUpperCase(); amt = dc === 'D' ? -v : (dc === 'C' ? v : 0); }
-        else if (iIn >= 0 || iOut >= 0) { const vIn = iIn >= 0 ? Math.abs(window.num(c[iIn])) : 0, vOut = iOut >= 0 ? Math.abs(window.num(c[iOut])) : 0; amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0); }
-        else if (iSum >= 0) amt = window.num(c[iSum]);
+        if (iDc >= 0 && iSum >= 0) { const v = Math.abs(window.num(c.at(iSum))), dc = String(c.at(iDc) || '').toUpperCase(); amt = dc === 'D' ? -v : (dc === 'C' ? v : 0); }
+        else if (iIn >= 0 || iOut >= 0) { const vIn = iIn >= 0 ? Math.abs(window.num(c.at(iIn))) : 0, vOut = iOut >= 0 ? Math.abs(window.num(c.at(iOut))) : 0; amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0); }
+        else if (iSum >= 0) amt = window.num(c.at(iSum));
         if (!amt || Math.abs(amt) > 500000000) continue;
 
-        const desc = ((iCtr >= 0 && c[iCtr]) ? c[iCtr] + ' — ' : '') + ((iText >= 0 && c[iText]) ? c[iText] : '');
+        const desc = ((iCtr >= 0 && c.at(iCtr)) ? c.at(iCtr) + ' — ' : '') + ((iText >= 0 && c.at(iText)) ? c.at(iText) : '');
         const lowDesc = desc.toLowerCase(), hash = walId + '_' + dt + '_' + amt + '_' + lowDesc.slice(0, 40) + '_' + idx;
         if (window.db.ddsHashes[hash]) { skip++; continue; }
         window.db.ddsHashes[hash] = true;
         if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
 
         let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
-        if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
-        else if (lowFull.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
-        else if (lowFull.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
-        else if (lowDesc.match(/лицензионн|подписк|комисс|рко|обслуживан|маркзнак|гс1 рус/)) cat = 'Комиссия РКО';
-        else if (lowDesc.match(/единый налоговый|уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
-        else if (lowDesc.match(/таможен/)) cat = 'Федеральная таможенная служба';
-        else if (lowDesc.match(/аренд/)) cat = 'Аренда склада';
-        else if (lowDesc.match(/azs|азс|gazprom|татнефть|нефть|avtodor|автодор|avtomo|автомой|parkov|парков/)) cat = 'Авто расходы компании';
-        else if (lowDesc.match(/aeroport|аэропорт|trip\.com/)) cat = 'Командировки RUB';
-        else if (lowDesc.match(/выдача наличных|снятие|перевод собственных|перевод по номеру телефона/)) {
+        if (lowFull.includes('вайлдберриз') || lowFull.includes('wildberries') || lowFull.includes('рвб')) cat = 'Поступление от ВБ';
+        else if (lowFull.includes('озон') || lowFull.includes('интернет решения')) { if (amt > 0) cat = 'Поступление от Озон'; }
+        else if (lowFull.includes('яндекс') || lowFull.includes('спичкин')) { if (amt > 0) cat = 'Поступление от ЯМ'; }
+        else if (lowDesc.includes('комисс') || lowDesc.includes('рко') || lowDesc.includes('обслуживан') || lowDesc.includes('лицензионн') || lowDesc.includes('маркзнак')) cat = 'Комиссия РКО';
+        else if (lowDesc.includes('налог') || lowDesc.includes('уфнс') || lowDesc.includes('енс') || lowDesc.includes('енп')) cat = 'ЕНП';
+        else if (lowDesc.includes('выдача наличных') || lowDesc.includes('снятие') || lowDesc.includes('перевод собственных')) {
           cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
           if (amt < 0) { newOps.push({ id: 'd_' + Date.now() + '_' + idx + '_c', date: dt, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), note: 'Из банка: ' + desc.slice(0, 90), batchId }); toCash += Math.abs(amt); }
         }
@@ -1908,164 +1229,20 @@
       window.save(true);
       window.renderDdsTab();
       window.showToastProgress('✅ Выписка загружена!', 2000);
-      alert(`✅ Выписка загружена за доли секунды!\n• Операций: ${added} (дублей: ${skip})\n• Приход: +${window.fmtR(sumIn)}\n• Расход: −${window.fmtR(sumOut)}\n• В «Наличные RUB Главный»: +${window.fmtR(toCash)}`);
-    } catch (err) {
-      window.showToastProgress('❌ Ошибка выписки', 2500);
-      alert('❌ Ошибка чтения выписки: ' + err.message);
-    }
+      alert('✅ Выписка загружена! Операций: ' + added + ' (дублей: ' + skip + ')\nПриход: +' + window.fmtR(sumIn) + ' | Расход: −' + window.fmtR(sumOut));
+    } catch (err) { alert('❌ Ошибка чтения выписки: ' + err.message); }
   };
- /* === Чистый рабочий фикс-блок (без спецсимволов) === */
-function getPickedFile(ev) {
-const fl = ev && ev.target && ev.target.files;
-if (!fl || !fl.length) return null;
-return Array.from(fl).shift();
-}
-window.importJson = function (ev) {
-const f = getPickedFile(ev);
-if (!f) return;
-ev.target.value = '';
-window.showToastProgress('⏳ Загрузка бэкапа...');
-const r = new FileReader();
-r.onload = function (e) {
-try {
-const parsed = JSON.parse(e.target.result);
-const gUrl = 'google.com';
-Object.assign(window.db, parsed);
-window.db.cloud = { url: gUrl, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
-window.ensureStore();
-window.flushLocalSave();
-window.onPerChange();
-window.showToastProgress('✅ Бэкап загружен!', 2000);
-alert('✅ Бэкап загружен! Товаров (ШК): ' + (window.db.skus || []).length);
-} catch (err) {
-alert('❌ Ошибка файла: ' + err.message);
-}
-};
-r.readAsText(f, 'UTF-8');
-};
-window.importCostCsv = async function (ev) {
-const f = getPickedFile(ev);
-if (!f) return;
-ev.target.value = '';
-window.showToastProgress('⏳ Импорт шаблона ШК...');
-try {
-const buf = await f.arrayBuffer();
-let txt = new TextDecoder('utf-8').decode(buf);
-if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
-const lines = txt.replace(/^\uFEFF/, '').split('\n').map(l => l.replace(/\r$/, '')).filter(l => l.trim());
-if (lines.length < 2) return alert('Файл пустой!');
-const firstLine = lines.shift();
-const sep = (firstLine.split(';').length >= firstLine.split(',').length) ? ';' : ',';
-const skuMap = new Map();
-(window.db.skus || []).forEach(s => skuMap.set(window.normStr(s.bc), s));
-let added = 0, upd = 0;
-for (let i = 0; i < lines.length; i++) {
-const c = splitCsvLine(lines.at(i), sep);
-if (c.length < 2) continue;
-const art = window.normStr(c.at(0)) || 'Без артикула';
-const bc = window.normStr(c.length >= 3 ? c.at(1) : c.at(0));
-const name = window.normStr(c.length >= 3 ? c.at(2) : art) || art;
-const usd = window.num(c.at(-1));
-if (!bc || bc.toLowerCase().includes('e+')) continue;
-if (name && name !== art) window.setFolderName(art, name);
-const ex = skuMap.get(bc);
-if (ex) {
-ex.art = art; if (name) ex.name = name; if (usd > 0) ex.usd = usd; ex.isNew = ex.usd === 0; upd++;
-} else {
-const ns = { id: 's_' + Date.now() + '_' + i, art, bc, name, col: '—', siz: '—', usd, src: f.name, isNew: usd === 0 };
-window.db.skus.push(ns); skuMap.set(bc, ns); added++;
-}
-}
-window.recalcReportsCogs();
-window.save(true);
-window.renderSkuTab();
-window.showToastProgress('✅ Шаблон загружен!', 2000);
-alert('✅ Шаблон загружен! Новых ШК: ' + added + ', обновлено: ' + upd);
-} catch (err) {
-alert('❌ Ошибка импорта: ' + err.message);
-}
-};
-window.importBankCsv = async function (ev) {
-if (window._skosReadOnly) return;
-const f = getPickedFile(ev);
-if (!f) return;
-ev.target.value = '';
-const walId = document.getElementById('dds-wal').value, batchId = 'b' + Date.now();
-window.showToastProgress('⏳ Чтение выписки банка...');
-try {
-const buf = await f.arrayBuffer();
-let txt = new TextDecoder('utf-8').decode(buf);
-if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
-txt = txt.replace(/^\uFEFF/, '');
-const hdrLine = txt.split('\n').find(l => l.toLowerCase().match(/дата|списание|зачисление|sum_rur|сумма|дебет|кредит/)) || '';
-const sep = hdrLine.includes('\t') ? '\t' : ((hdrLine.split(';').length >= hdrLine.split(',').length) ? ';' : ',');
-const rows = parseFullCsvMatrix(txt, sep);
-const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/дата операции|дата документа|списание|зачисление|sum_rur|d_c|сумма|дебет|кредит/));
-const hdr = hdrIdx >= 0 ? rows.at(hdrIdx).map(x => x.toLowerCase()) : [];
-const iDc = hdr.indexOf('d_c');
-const iDt = hdr.indexOf('дата операции') >= 0 ? hdr.indexOf('дата операции') : (hdr.indexOf('date_oper') >= 0 ? hdr.indexOf('date_oper') : hdr.findIndex(h => h.includes('дата')));
-const iIn = hdr.findIndex(h => h.match(/зачислен|приход|поступлен|кредит/) && !h.includes('ост') && !h.includes('обор'));
-const iOut = hdr.findIndex(h => h.match(/списан|расход|дебет/) && !h.includes('ост') && !h.includes('обор'));
-const iSum = hdr.indexOf('sum_rur') >= 0 ? hdr.indexOf('sum_rur') : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц'));
-const iCtr = hdr.findIndex(h => h.includes('контрагент') && !h.includes('инн') && !h.includes('бик') && !h.includes('счёт') && !h.includes('банк'));
-const iText = hdr.findIndex(h => h.includes('назначен') || h === 'text70');
-let added = 0, skip = 0, sumIn = 0, sumOut = 0, toCash = 0;
-const newOps = [];
-for (let idx = (hdrIdx >= 0 ? hdrIdx + 1 : 0); idx < rows.length; idx++) {
-const c = rows.at(idx); if (!c || c.length < 3) continue;
-const lowFull = c.join(' ').toLowerCase();
-if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого')) continue;
-let rawDt = (iDt >= 0 && c.at(iDt)) ? c.at(iDt).trim() : '';
-if (!rawDt || rawDt.length < 8 || rawDt.length > 10) {
-rawDt = c.find(x => { const s = String(x || '').trim(); return s.length >= 8 && s.length <= 10 && s.match(/\d{2}[.-/]\d{2}[.-/]\d{2,4}/); }) || '';
-}
-if (!rawDt) continue;
-const dt = rawDt.indexOf('-') === 4 ? rawDt.split('-').reverse().join('.') : rawDt;
-let amt = 0;
-if (iDc >= 0 && iSum >= 0) { const v = Math.abs(window.num(c.at(iSum))), dc = String(c.at(iDc) || '').toUpperCase(); amt = dc === 'D' ? -v : (dc === 'C' ? v : 0); }
-else if (iIn >= 0 || iOut >= 0) { const vIn = iIn >= 0 ? Math.abs(window.num(c.at(iIn))) : 0, vOut = iOut >= 0 ? Math.abs(window.num(c.at(iOut))) : 0; amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0); }
-else if (iSum >= 0) amt = window.num(c.at(iSum));
-if (!amt || Math.abs(amt) > 500000000) continue;
-const desc = ((iCtr >= 0 && c.at(iCtr)) ? c.at(iCtr) + ' — ' : '') + ((iText >= 0 && c.at(iText)) ? c.at(iText) : '');
-const lowDesc = desc.toLowerCase(), hash = walId + '' + dt + '' + amt + '' + lowDesc.slice(0, 40) + '' + idx;
-if (window.db.ddsHashes[hash]) { skip++; continue; }
-window.db.ddsHashes[hash] = true;
-if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
-let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
-if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
-else if (lowFull.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
-else if (lowFull.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
-else if (lowDesc.match(/лицензионн|подписк|комисс|рко|обслуживан|маркзнак|гс1 рус/)) cat = 'Комиссия РКО';
-else if (lowDesc.match(/единый налоговый|уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
-else if (lowDesc.match(/таможен/)) cat = 'Федеральная таможенная служба';
-else if (lowDesc.match(/аренд/)) cat = 'Аренда склада';
-else if (lowDesc.match(/azs|азс|gazprom|татнефть|нефть|avtodor|автодор|avtomo|автомой|parkov|парков/)) cat = 'Авто расходы компании';
-else if (lowDesc.match(/aeroport|аэропорт|trip.com)) cat = 'Командировки RUB';
-else if (lowDesc.match(/выдача наличных|снятие|перевод собственных|перевод по номеру телефона/)) {
-cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
-if (amt < 0) { newOps.push({ id: 'd_' + Date.now() + '' + idx + 'c', date: dt, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), note: 'Из банка: ' + desc.slice(0, 90), batchId }); toCash += Math.abs(amt); }
-}
-newOps.push({ id: 'd' + Date.now() + '' + idx, date: dt, wal: walId, cat, amt, note: desc.slice(0, 140), batchId });
-added++;
-}
-if (newOps.length) window.db.dds.unshift(...newOps);
-window.save(true);
-window.renderDdsTab();
-window.showToastProgress('✅ Выписка загружена!', 2000);
-alert('✅ Выписка загружена! Операций: ' + added + ' (дублей: ' + skip + ')\nПриход: +' + window.fmtR(sumIn) + ' | Расход: −' + window.fmtR(sumOut));
-} catch (err) {
-alert('❌ Ошибка чтения выписки: ' + err.message);
-}
-};
-window.saveInitBalances = function () {
-if (!window.db.initBalances) window.db.initBalances = {};
-document.querySelectorAll('.skos-init-inp').forEach(inp => {
-window.db.initBalances[inp.dataset.wal] = window.num(inp.value);
-});
-window.save(true);
-window.renderDdsTab();
-window.pushCloud(false);
-alert('✅ Начальные остатки на 01.01 сохранены и отправлены в Google Облако!');
-};
-})();
 
+  window.saveInitBalances = function () {
+    if (!window.db.initBalances) window.db.initBalances = {};
+    document.querySelectorAll('.skos-init-inp').forEach(inp => { window.db.initBalances[inp.dataset.wal] = window.num(inp.value); });
+    window.save(true); window.renderDdsTab(); window.pushCloud(false);
+    alert('✅ Начальные остатки на 01.01 сохранены и отправлены в Google Облако!');
+  };
+
+  if (window.db && window.db.rates) {
+    Object.keys(window.db.rates).forEach(k => { if (window.num(window.db.rates[k]) > 500) window.db.rates[k] = 80; });
+  }
+  if (window.num(localStorage.getItem('skos_manual_default_rate')) > 500) localStorage.setItem('skos_manual_default_rate', '80');
+  if (document.getElementById('usd-rate') && window.num(document.getElementById('usd-rate').value) > 500) document.getElementById('usd-rate').value = 80;
+})();
