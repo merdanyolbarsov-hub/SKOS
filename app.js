@@ -1914,5 +1914,156 @@
       alert('❌ Ошибка чтения выписки: ' + err.message);
     }
   };
+  /* === Фикс-блок: Загрузка выписок всех банков, Шаблон ШК, JSON и авто-Облако === */
+function getPickedFile(ev) {
+const fl = ev && ev.target && ev.target.files;
+if (!fl || !fl.length) return null;
+return Array.from(fl).shift();
+}
+window.importJson = function (ev) {
+const f = getPickedFile(ev);
+if (!f) return;
+ev.target.value = '';
+window.showToastProgress('⏳ Загрузка бэкапа...');
+const r = new FileReader();
+r.onload = function (e) {
+try {
+const parsed = JSON.parse(e.target.result);
+const gUrl = 'google.com';
+Object.assign(window.db, parsed);
+window.db.cloud = { url: gUrl, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
+window.ensureStore();
+window.flushLocalSave();
+window.onPerChange();
+window.showToastProgress('✅ Бэкап загружен!', 2000);
+alert('✅ Бэкап успешно загружен! Товаров (ШК): ' + (window.db.skus || []).length + ' шт.');
+} catch (err) {
+alert('❌ Ошибка файла: ' + err.message);
+}
+};
+r.readAsText(f, 'UTF-8');
+};
+window.importCostCsv = async function (ev) {
+const f = getPickedFile(ev);
+if (!f) return;
+ev.target.value = '';
+window.showToastProgress('⏳ Импорт шаблона ШК...');
+try {
+const buf = await f.arrayBuffer();
+let txt = new TextDecoder('utf-8').decode(buf);
+if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+const lines = txt.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
+if (lines.length < 2) return alert('Файл пустой!');
+const firstLine = lines.shift();
+const sep = (firstLine.split(';').length >= firstLine.split(',').length) ? ';' : ',';
+const skuMap = new Map();
+(window.db.skus || []).forEach(s => skuMap.set(window.normStr(s.bc), s));
+let added = 0, upd = 0;
+for (let i = 0; i < lines.length; i++) {
+const c = splitCsvLine(lines.at(i), sep);
+if (c.length < 2) continue;
+const art = window.normStr(c.at(0)) || 'Без артикула';
+const bc = window.normStr(c.length >= 3 ? c.at(1) : c.at(0));
+const name = window.normStr(c.length >= 3 ? c.at(2) : art) || art;
+const usd = window.num(c.at(-1));
+if (!bc || /e+/i.test(bc)) continue;
+if (name && name !== art) window.setFolderName(art, name);
+const ex = skuMap.get(bc);
+if (ex) {
+ex.art = art; if (name) ex.name = name; if (usd > 0) ex.usd = usd; ex.isNew = ex.usd === 0; upd++;
+} else {
+const ns = { id: 's_' + Date.now() + '_' + i, art, bc, name, col: '—', siz: '—', usd, src: f.name, isNew: usd === 0 };
+window.db.skus.push(ns); skuMap.set(bc, ns); added++;
+}
+}
+window.recalcReportsCogs();
+window.save(true);
+window.renderSkuTab();
+window.showToastProgress('✅ Шаблон загружен!', 2000);
+alert('✅ Шаблон загружен! Новых ШК: ' + added + ', обновлено: ' + upd);
+} catch (err) {
+alert('❌ Ошибка импорта: ' + err.message);
+}
+};
+window.importBankCsv = async function (ev) {
+if (window._skosReadOnly) return;
+const f = getPickedFile(ev);
+if (!f) return;
+ev.target.value = '';
+const walId = document.getElementById('dds-wal').value, batchId = 'b' + Date.now();
+window.showToastProgress('⏳ Чтение выписки банка...');
+try {
+const buf = await f.arrayBuffer();
+let txt = new TextDecoder('utf-8').decode(buf);
+if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+txt = txt.replace(/^\uFEFF/, '');
+const hdrLine = txt.split(/\r?\n/).find(l => l.toLowerCase().match(/дата|списание|зачисление|sum_rur|сумма|дебет|кредит/)) || '';
+const sep = hdrLine.includes('\t') ? '\t' : ((hdrLine.split(';').length >= hdrLine.split(',').length) ? ';' : ',');
+const rows = parseFullCsvMatrix(txt, sep);
+const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/дата операции|дата документа|списание|зачисление|sum_rur|d_c|сумма|дебет|кредит/));
+const hdr = hdrIdx >= 0 ? rows.at(hdrIdx).map(x => x.toLowerCase()) : [];
+const iDc = hdr.indexOf('d_c');
+const iDt = hdr.indexOf('дата операции') >= 0 ? hdr.indexOf('дата операции') : (hdr.indexOf('date_oper') >= 0 ? hdr.indexOf('date_oper') : hdr.findIndex(h => h.includes('дата')));
+const iIn = hdr.findIndex(h => h.match(/зачислен|приход|поступлен|кредит/) && !h.includes('ост') && !h.includes('обор'));
+const iOut = hdr.findIndex(h => h.match(/списан|расход|дебет/) && !h.includes('ост') && !h.includes('обор'));
+const iSum = hdr.indexOf('sum_rur') >= 0 ? hdr.indexOf('sum_rur') : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц'));
+const iCtr = hdr.findIndex(h => h.includes('контрагент') && !h.includes('инн') && !h.includes('бик') && !h.includes('счёт') && !h.includes('банк'));
+const iText = hdr.findIndex(h => h.includes('назначен') || h === 'text70');
+let added = 0, skip = 0, sumIn = 0, sumOut = 0, toCash = 0;
+const newOps = [];
+for (let idx = (hdrIdx >= 0 ? hdrIdx + 1 : 0); idx < rows.length; idx++) {
+const c = rows.at(idx); if (!c || c.length < 3) continue;
+const lowFull = c.join(' ').toLowerCase();
+if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого')) continue;
+let rawDt = (iDt >= 0 && c.at(iDt)) ? c.at(iDt).trim() : '';
+if (!/^\d{2,4}[.-/]\d{2}[.-/]\d{2,4}/.test(rawDt)) rawDt = c.find(x => /^\d{2,4}[.\-/]\d{2}[.\-/]\d{2,4}/.test(String(x || '').trim())) || '';
+if (!rawDt) continue;
+const dt = /^\d{4}-\d{2}-\d{2}$/.test(rawDt) ? rawDt.split('-').reverse().join('.') : rawDt;
+let amt = 0;
+if (iDc >= 0 && iSum >= 0) { const v = Math.abs(window.num(c.at(iSum))), dc = String(c.at(iDc) || '').toUpperCase(); amt = dc === 'D' ? -v : (dc === 'C' ? v : 0); }
+else if (iIn >= 0 || iOut >= 0) { const vIn = iIn >= 0 ? Math.abs(window.num(c.at(iIn))) : 0, vOut = iOut >= 0 ? Math.abs(window.num(c.at(iOut))) : 0; amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0); }
+else if (iSum >= 0) amt = window.num(c.at(iSum));
+if (!amt || Math.abs(amt) > 500000000) continue;
+const desc = ((iCtr >= 0 && c.at(iCtr)) ? c.at(iCtr) + ' — ' : '') + ((iText >= 0 && c.at(iText)) ? c.at(iText) : '');
+const lowDesc = desc.toLowerCase(), hash = walId + '' + dt + '' + amt + '' + lowDesc.slice(0, 40) + '' + idx;
+if (window.db.ddsHashes[hash]) { skip++; continue; }
+window.db.ddsHashes[hash] = true;
+if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
+let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
+if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
+else if (lowFull.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
+else if (lowFull.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
+else if (lowDesc.match(/лицензионн|подписк|комисс|рко|обслуживан|маркзнак|гс1 рус/)) cat = 'Комиссия РКО';
+else if (lowDesc.match(/единый налоговый|уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
+else if (lowDesc.match(/таможен/)) cat = 'Федеральная таможенная служба';
+else if (lowDesc.match(/аренд/)) cat = 'Аренда склада';
+else if (lowDesc.match(/azs|азс|gazprom|татнефть|нефть|avtodor|автодор|avtomo|автомой|parkov|парков/)) cat = 'Авто расходы компании';
+else if (lowDesc.match(/aeroport|аэропорт|trip.com)) cat = 'Командировки RUB';
+else if (lowDesc.match(/выдача наличных|снятие|перевод собственных|перевод по номеру телефона/)) {
+cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
+if (amt < 0) { newOps.push({ id: 'd_' + Date.now() + '' + idx + 'c', date: dt, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), note: 'Из банка: ' + desc.slice(0, 90), batchId }); toCash += Math.abs(amt); }
+}
+newOps.push({ id: 'd' + Date.now() + '' + idx, date: dt, wal: walId, cat, amt, note: desc.slice(0, 140), batchId });
+added++;
+}
+if (newOps.length) window.db.dds.unshift(...newOps);
+window.save(true);
+window.renderDdsTab();
+window.showToastProgress('✅ Выписка загружена!', 2000);
+alert('✅ Выписка загружена! Операций: ' + added + ' (дублей: ' + skip + ')\nПриход: +' + window.fmtR(sumIn) + ' | Расход: −' + window.fmtR(sumOut));
+} catch (err) {
+alert('❌ Ошибка чтения выписки: ' + err.message);
+}
+};
+window.saveInitBalances = function () {
+if (!window.db.initBalances) window.db.initBalances = {};
+document.querySelectorAll('.skos-init-inp').forEach(inp => {
+window.db.initBalances[inp.dataset.wal] = window.num(inp.value);
+});
+window.save(true);
+window.renderDdsTab();
+window.pushCloud(false);
+alert('✅ Начальные остатки на 01.01 сохранены и отправлены в Google Облако!');
+};
 })();
 
