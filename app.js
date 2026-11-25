@@ -1304,5 +1304,169 @@
       if (manual) alert('❌ Ошибка облака: ' + e.message + '\n\nПроверьте, не включён ли VPN/блокировщик или не уснул ли проект в панели Supabase.');
     }
   };
+    /* === Фикс-блок 3: Облако без CORS-ошибки Failed to fetch + Себестоимость ЯМ + Очиститель базы === */
+  // 1. Убираем нестандартный заголовок x-skos-pin (он вызывал CORS-блокировку Failed to fetch!)
+  window.pushCloud = async function (manual) {
+    if (window.__skosReadOnly) return;
+    window.flushLocalSave();
+    const REAL_URL = 'https://supabase.co';
+    const REAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
+    window.db.cloud = { url: REAL_URL, key: REAL_KEY, pin: (window.db.cloud && window.db.cloud.pin) || 'Skos#9482!Tm' };
+
+    window.showToastProgress('⏳ Сохранение в облако...');
+    try {
+      const skus = window.db.skus || [], sales = window.db.itemSales || [], sz = 4000;
+      const sc = Math.max(1, Math.ceil(skus.length / sz)), salc = Math.ceil(sales.length / sz);
+      const mainPayload = Object.assign({}, window.db, { skus: [], itemSales: [], ddsHashes: {}, skusChunks: sc, salesChunks: salc });
+      const hdrs = {
+        apikey: REAL_KEY,
+        Authorization: 'Bearer ' + REAL_KEY,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal'
+      };
+      const sendRow = async (id, payload) => {
+        const r = await fetch(REAL_URL + '/rest/v1/skos_cloud?on_conflict=id', {
+          method: 'POST',
+          headers: hdrs,
+          body: JSON.stringify([{ id, payload, updated_at: new Date().toISOString() }])
+        });
+        if (!r.ok) {
+          const errTxt = await r.text().catch(() => '');
+          throw new Error(id + ' (код ' + r.status + ' ' + errTxt.slice(0, 60) + ')');
+        }
+      };
+      await sendRow('main', mainPayload);
+      for (let c = 0; c < sc; c++) {
+        window.showToastProgress(`⏳ Товары в облако: ${c + 1}/${sc}...`);
+        await sendRow('skus_' + c, skus.slice(c * sz, (c + 1) * sz).map(s => ({ n: s.name, a: s.art, c: s.col, z: s.siz, b: s.bc, u: s.usd })));
+      }
+      for (let s = 0; s < salc; s++) {
+        window.showToastProgress(`⏳ Продажи в облако: ${s + 1}/${salc}...`);
+        await sendRow('sales_' + s, sales.slice(s * sz, (s + 1) * sz));
+      }
+      window.showToastProgress('✅ Облако сохранено!', 2500);
+      if (manual) alert('✅ Всё успешно сохранено в облако Supabase!\n• ШК: ' + skus.length + ' шт.\n• Отчётов: ' + (window.db.reports || []).length + '\n• Операций ДДС: ' + (window.db.dds || []).length);
+    } catch (e) {
+      window.showToastProgress('❌ Ошибка облака', 3000);
+      if (manual) alert('❌ Ошибка облака: ' + e.message);
+    }
+  };
+
+  window.pullCloud = async function (silent) {
+    const REAL_URL = 'https://supabase.co';
+    const REAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
+    const hdrs = { apikey: REAL_KEY, Authorization: 'Bearer ' + REAL_KEY };
+    try {
+      const rMain = await fetch(REAL_URL + '/rest/v1/skos_cloud?id=eq.main&select=payload', { headers: hdrs });
+      if (!rMain.ok) return;
+      const rows = await rMain.json();
+      if (!Array.isArray(rows) || !rows.length || !rows[0].payload) return;
+      const data = rows[0].payload;
+      const sc = Number(data.skusChunks || 0);
+      if (sc > 0 && (!Array.isArray(data.skus) || !data.skus.length)) {
+        const allSkus = [];
+        for (let c = 0; c < sc; c++) {
+          const rSku = await fetch(REAL_URL + '/rest/v1/skos_cloud?id=eq.skus_' + c + '&select=payload', { headers: hdrs });
+          if (rSku.ok) {
+            const sRows = await rSku.json();
+            if (Array.isArray(sRows) && sRows[0] && Array.isArray(sRows[0].payload)) {
+              sRows[0].payload.forEach((it, i) => allSkus.push({
+                id: 's_' + c + '_' + i, name: it.n || it.name || it.a || 'Товар',
+                art: it.a || it.art || '', col: it.c || it.col || '—', siz: it.z || it.s || it.siz || '—',
+                bc: it.b || it.bc || it.barcode || '', usd: window.num(it.u !== undefined ? it.u : (it.usd || 0))
+              }));
+            }
+          }
+        }
+        if (allSkus.length) data.skus = allSkus;
+      }
+      const salc = Number(data.salesChunks || 0);
+      if (salc > 0 && (!Array.isArray(data.itemSales) || !data.itemSales.length)) {
+        const allSales = [];
+        for (let s = 0; s < salc; s++) {
+          const rSal = await fetch(REAL_URL + '/rest/v1/skos_cloud?id=eq.sales_' + s + '&select=payload', { headers: hdrs });
+          if (rSal.ok) {
+            const slRows = await rSal.json();
+            if (Array.isArray(slRows) && slRows[0] && Array.isArray(slRows[0].payload)) allSales.push(...slRows[0].payload);
+          }
+        }
+        if (allSales.length) data.itemSales = allSales;
+      }
+      Object.assign(window.db, data);
+      window.db.cloud = { url: REAL_URL, key: REAL_KEY, pin: (window.db.cloud && window.db.cloud.pin) || 'Skos#9482!Tm' };
+      window.ensureStore();
+      window.flushLocalSave();
+      window.onPerChange();
+      if (!silent) alert('✅ Данные восстановлены из облака!');
+    } catch (e) { if (!silent) alert('❌ Ошибка чтения из облака: ' + e.message); }
+  };
+
+  // 2. Усиленный поиск себестоимости для Яндекс Маркет (по ШК, префиксу SKOS-... и названию)
+  const _origResolve = window.resolveMetaFast;
+  window.resolveMetaFast = function (idx, bcRaw, artRaw, nameRaw) {
+    const res = _origResolve.call(this, idx, bcRaw, artRaw, nameRaw);
+    if (res && res.usd > 0) return res;
+    const combo = (String(bcRaw || '') + ' ' + String(artRaw || '') + ' ' + String(nameRaw || '')).toUpperCase();
+    const m = combo.match(/(SKOS-[A-ZА-Я0-9]+)/);
+    if (m && m[1]) {
+      const f = idx.byArt.get(window.normKey(m[1]));
+      if (f && window.num(f.usd) > 0) {
+        res.usd = window.num(f.usd);
+        res.art = window.normStr(f.art) || res.art;
+        res.modelTitle = idx.fNames[res.art] || f.name || res.modelTitle;
+      }
+    }
+    return res;
+  };
+
+  // 3. Очиститель всех тестовых данных (в Настройках + автоматическая очистка 20-значных счетов в ДДС)
+  if (window.db) {
+    if (Array.isArray(window.db.dds)) {
+      window.db.dds = window.db.dds.filter(d => Math.abs(window.num(d.amt)) < 500000000);
+    }
+    if (window.db.initBalances) {
+      Object.keys(window.db.initBalances).forEach(k => {
+        if (Math.abs(window.num(window.db.initBalances[k])) >= 500000000) window.db.initBalances[k] = 0;
+      });
+    }
+    window.save(true);
+  }
+
+  window.resetAllTestData = function () {
+    if (window.__skosReadOnly) return;
+    if (!confirm('Очистить ВСЕ тестовые операции (отчёты МП, ABC, ДДС, расходы, налоги, остатки склада) и начать с чистого листа?\n\nБаза товаров (32 папки ШК), юрлица и справочники СОХРАНЯТСЯ!')) return;
+    window.db.reports = [];
+    window.db.itemSales = [];
+    window.db.dds = [];
+    window.db.ddsHashes = {};
+    window.db.initBalances = {};
+    window.db.taxes = [];
+    window.db.expenses = [];
+    window.db.stockMoves = [];
+    window.db.supOps = [];
+    window.db.assets = [];
+    if (window.db.erp) {
+      ['matIn', 'orders', 'fgStocks', 'defects', 'contractorOps', 'payrollOps', 'taxDebts'].forEach(k => { window.db.erp[k] = []; });
+    }
+    window.save(true);
+    window.render();
+    alert('✅ Все тестовые данные очищены! База товаров (ШК) и справочники сохранены. Можете начинать чистовой учёт.');
+  };
+
+  const _origRenderSet = window.renderSetTab;
+  window.renderSetTab = function () {
+    if (typeof _origRenderSet === 'function') _origRenderSet.apply(this, arguments);
+    const sec = document.getElementById('tab-set');
+    if (sec && !document.getElementById('skos-reset-card')) {
+      const div = document.createElement('div');
+      div.id = 'skos-reset-card';
+      div.className = 'card';
+      div.style.cssText = 'border:1.5px solid #fecaca;background:#fef2f2';
+      div.innerHTML = `<div class="card-header"><div class="card-title" style="color:#991b1b">🧹 Очиститель тестовых данных</div>
+        <button type="button" class="btn btn-danger" style="padding:7px 14px;font-size:13px" onclick="resetAllTestData()">🧹 Очистить все тестовые операции</button></div>
+        <div style="font-size:12px;color:#7f1d1d">Удаляет тестовые отчёты МП, продажи ABC, банковские выписки ДДС, налоги, расходы и движения склада. Каталог из 32 папок товаров (ШК), юрлица и справочники остаются нетронутыми.</div>`;
+      sec.appendChild(div);
+    }
+  };
 })();
 
