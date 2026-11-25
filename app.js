@@ -1626,4 +1626,34 @@
     link.type = 'image/svg+xml';
     link.href = 'data:image/svg+xml,' + encodeURIComponent(svg);
   })();
+    /* === Точечное разделение Комиссии и Логистики для Ozon === */
+  const _origStreamMp = streamParseMpFile;
+  streamParseMpFile = async function (file, rate, skuIdx) {
+    const res = await _origStreamMp.apply(this, arguments);
+    if (res && res.mp === 'OZON' && res.log > 0 && res.com === 0) {
+      // Пересчитываем точно: если в файле Ozon агентское вознаграждение попало в логистику
+      const buf = await file.arrayBuffer();
+      let txt = new TextDecoder('utf-8').decode(buf);
+      if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+      const lines = txt.replace(/^\uFEFF/, '').split('\n').map(l => l.split('\r').join('')).filter(l => l.trim());
+      const hIdx = lines.findIndex(l => l.toLowerCase().includes('группа услуг'));
+      if (hIdx >= 0) {
+        const sep = lines.at(hIdx).includes('\t') ? '\t' : ((lines.at(hIdx).split(';').length >= lines.at(hIdx).split(',').length) ? ';' : ',');
+        const hdr = splitCsvLine(lines.at(hIdx), sep).map(h => h.toLowerCase().trim());
+        const iGrp = hdr.indexOf('группа услуг'), iTyp = hdr.indexOf('тип начисления');
+        const iTot = hdr.findIndex(h => h.startsWith('сумма итого') || h.includes('итого'));
+        let nLog = 0, nCom = 0, nAds = 0;
+        for (let r = hIdx + 1; r < lines.length; r++) {
+          const rw = splitCsvLine(lines.at(r), sep); if (rw.length <= iTot) continue;
+          const grp = String(rw.at(iGrp) || '').toLowerCase(), typ = String(rw.at(iTyp) || '').toLowerCase(), tot = window.num(rw.at(iTot));
+          if (grp === 'продажи' || grp === 'возвраты') continue;
+          if (grp.includes('доставк') || typ.includes('логистик') || typ.includes('доставк')) nLog += (-tot);
+          else if (grp.includes('продвиж') || grp.includes('реклам')) nAds += (-tot);
+          else nCom += (-tot);
+        }
+        if (nCom > 0 || nLog > 0) { res.log = Math.max(0, nLog); res.com = Math.max(0, nCom); res.ads = Math.max(0, nAds); }
+      }
+    }
+    return res;
+  };
 })();
