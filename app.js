@@ -1618,4 +1618,12 @@
   window.syncCloud = function (manual) {
     return manual ? window.pushCloud(_cloudClickAllowed) : window.pullCloud(true);
   };
+    /* === Фирменный логотип-фавикон SKOS во вкладке браузера === */
+  (function setSkosFavicon() {
+    const svg = '<svg xmlns="http://w3.org" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#2563eb"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#ffffff" font-family="Arial,sans-serif" font-weight="900" font-size="38">S</text></svg>';
+    let link = document.querySelector("link[rel*='icon']");
+    if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+    link.type = 'image/svg+xml';
+    link.href = 'data:image/svg+xml,' + encodeURIComponent(svg);
+  })();
 })();
