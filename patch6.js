@@ -3,7 +3,7 @@
   if (window.__skosPatch6Loaded) return;
   window.__skosPatch6Loaded = true;
 
-  const SUPA_URL = 'https://supabase.co'; // <-- Проверьте ваш точный Project URL из Настроек!
+  const SUPA_URL = 'https://supabase.com/dashboard/project/pkudvnzyqrxxalikcmag/editor/17641?schema=public&method=github'; // <-- Проверьте ваш точный Project URL из Настроек!
   const KEY_PROD = 'skos_v3_prod';
 
   // 1. Останавливаем паразитные фоновые таймеры (setInterval), которые вешают вкладку
