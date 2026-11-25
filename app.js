@@ -1245,4 +1245,106 @@
   }
   if (window.num(localStorage.getItem('skos_manual_default_rate')) > 500) localStorage.setItem('skos_manual_default_rate', '80');
   if (document.getElementById('usd-rate') && window.num(document.getElementById('usd-rate').value) > 500) document.getElementById('usd-rate').value = 80;
+    /* === Папка «📏 Размерный ряд» в Справочниках + Фильтр размеров в ABC + Очиститель === */
+  const _origEnsureSizes = window.ensureStore;
+  window.ensureStore = function () {
+    const e = _origEnsureSizes.apply(this, arguments);
+    if (!Array.isArray(e.dictSizes) || !e.dictSizes.length) {
+      e.dictSizes = [
+        { name: 'XS', arch: false }, { name: 'S', arch: false }, { name: 'M', arch: false },
+        { name: 'L', arch: false }, { name: 'XL', arch: false }, { name: '2XL', arch: false },
+        { name: '3XL', arch: false }, { name: '4XL', arch: false },
+        { name: '44', arch: false }, { name: '46', arch: false }, { name: '48', arch: false },
+        { name: '50', arch: false }, { name: '52', arch: false }, { name: '54', arch: false }, { name: '56', arch: false }
+      ];
+    }
+    return e;
+  };
+
+  // Добавляем папку «📏 Размерный ряд» в раздел «📚 Справочники»
+  const _origRenderDictSizes = window.renderDictTab;
+  window.renderDictTab = function () {
+    const e = window.ensureStore();
+    if (e.dictSub === 'sizes') {
+      const sec = document.getElementById('tab-dict');
+      if (!sec) return;
+      const baseFolders = [
+        { id: 'opiu', key: 'dictOpiuArticles', title: '📊 Статьи ОПиУ' }, { id: 'ctrs', key: 'contractors', title: '🤝 Контрагенты' },
+        { id: 'staff', key: 'staffList', title: '👥 Сотрудники' }, { id: 'taxes', key: 'dictTaxTypes', title: '🏛️ Виды налогов' },
+        { id: 'cats', key: 'dictMatCats', title: '🧵 Категории сырья' }, { id: 'units', key: 'dictUnits', title: '📏 Ед. измерения' },
+        { id: 'sups', key: 'dictSuppliers', title: '🌍 Поставщики' }, { id: 'sizes', key: 'dictSizes', title: '📏 Размерный ряд' }
+      ].concat(e.customDictFolders || []);
+      const rows = (e.dictSizes || []).map((it, i) => '<tr style="' + (it.arch ? 'opacity:0.5' : '') + '"><td class="bold">' + window.esc(it.name) + '</td><td>Активен</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4DictEdit(\'dictSizes\',' + i + ')">✏️</button> <button class="btn btn-danger" onclick="p4DictDel(\'dictSizes\',' + i + ')">✕</button></td></tr>').join('');
+      sec.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">📚 Единые справочники SKOS</div><button class="btn btn-success" onclick="p4AddCustomDictFolder()">+ Новая папка</button></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' + baseFolders.map(f => '<button class="btn ' + (f.id === 'sizes' ? 'btn-primary' : '') + '" onclick="p4DictSub(\'' + f.id + '\')">' + f.title + ' (' + (e[f.key] || []).length + ')</button>').join('') + '</div><div class="form-grid" style="margin-bottom:10px"><div><label>Размер (например 48 или XL)</label><input id="d-nm" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4DictAdd(\'dictSizes\')">+ Добавить размер</button></div></div><table><thead><tr><th>Размер</th><th>Статус</th><th class="num">Действия</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+      return;
+    }
+    _origRenderDictSizes.apply(this, arguments);
+    const navBar = document.querySelector('#tab-dict .card > div:nth-child(2)');
+    if (navBar && !navBar.querySelector('[data-sz-btn]')) {
+      const b = document.createElement('button');
+      b.className = 'btn'; b.dataset.szBtn = '1';
+      b.textContent = '📏 Размерный ряд (' + (e.dictSizes || []).length + ')';
+      b.onclick = () => window.p4DictSub('sizes');
+      navBar.appendChild(b);
+    }
+  };
+
+  // Определение размера по справочнику и артикулу + наполнение списка «Размер» в ABC
+  const _origResolveSize = window.resolveMetaFast;
+  window.resolveMetaFast = function (idx, bcRaw, artRaw, nameRaw) {
+    const res = _origResolveSize.apply(this, arguments);
+    if (!res.siz || res.siz === '—') {
+      const src = (' ' + String(artRaw || '') + ' ' + String(nameRaw || '') + ' ' + String(bcRaw || '') + ' ').toUpperCase().replace(/Х/g, 'X');
+      const dictList = (window.ensureStore().dictSizes || []).filter(x => !x.arch).map(x => String(x.name || '').toUpperCase().replace(/Х/g, 'X')).filter(Boolean).sort((a, b) => b.length - a.length);
+      for (let i = 0; i < dictList.length; i++) {
+        const sz = dictList.at(i);
+        if (src.includes(' ' + sz + ' ') || src.includes('-' + sz + ' ') || src.includes('-' + sz + '-') || src.endsWith(sz + ' ')) {
+          res.siz = sz; break;
+        }
+      }
+      if (!res.siz || res.siz === '—') {
+        const m = src.match(/(?:[^A-Z0-9])(XXS|XS|S|M|L|XL|2XL|XXL|3XL|XXXL|4XL|5XL|\d{2}-\d{2}|\d{2})(?:[^A-Z0-9])/);
+        if (m && m.at(1)) res.siz = m.at(1);
+      }
+    }
+    return res;
+  };
+
+  const _origAbcRenderSizes = window.renderAbcTab;
+  window.renderAbcTab = function () {
+    _origAbcRenderSizes.apply(this, arguments);
+    const sizSel = document.getElementById('abc-f-siz');
+    if (sizSel) {
+      const cur = sizSel.value || 'ALL';
+      const dictSizes = (window.ensureStore().dictSizes || []).filter(x => !x.arch).map(x => x.name);
+      const existing = Array.from(sizSel.options).map(o => o.value).filter(v => v && v !== 'ALL');
+      const merged = Array.from(new Set([...dictSizes, ...existing]));
+      sizSel.innerHTML = '<option value="ALL">Все размеры</option>' + merged.map(v => '<option value="' + window.esc(v) + '">' + window.esc(v) + '</option>').join('');
+      if (merged.includes(cur)) sizSel.value = cur;
+    }
+  };
+
+  // Очиститель тестовых данных в Настройках
+  window.resetAllTestData = function () {
+    if (window.__skosReadOnly) return;
+    if (!confirm('Очистить ВСЕ тестовые операции (отчёты МП, ABC, ДДС, расходы, налоги, остатки склада) и начать с чистого листа?\n\nБаза товаров (32 папки ШК), юрлица и справочники СОХРАНЯТСЯ!')) return;
+    window.db.reports = []; window.db.itemSales = []; window.db.dds = []; window.db.ddsHashes = {};
+    window.db.initBalances = {}; window.db.taxes = []; window.db.expenses = [];
+    if (window.db.erp) ['matIn', 'orders', 'fgStocks', 'defects', 'contractorOps', 'payrollOps', 'taxDebts'].forEach(k => { window.db.erp[k] = []; });
+    window.save(true); window.render();
+    alert('✅ Все тестовые данные очищены! Каталог товаров (ШК) и справочники сохранены.');
+  };
+
+  const _origSetTabReset = window.renderSetTab;
+  window.renderSetTab = function () {
+    if (typeof _origSetTabReset === 'function') _origSetTabReset.apply(this, arguments);
+    const sec = document.getElementById('tab-set');
+    if (sec && !document.getElementById('skos-reset-card')) {
+      const div = document.createElement('div');
+      div.id = 'skos-reset-card'; div.className = 'card';
+      div.style.cssText = 'border:1.5px solid #fecaca;background:#fef2f2';
+      div.innerHTML = '<div class="card-header"><div class="card-title" style="color:#991b1b">🧹 Очиститель тестовых данных</div><button type="button" class="btn btn-danger" style="padding:7px 14px;font-size:13px" onclick="resetAllTestData()">🧹 Очистить все тестовые операции</button></div><div style="font-size:12px;color:#7f1d1d">Удаляет тестовые отчёты МП, продажи ABC, выписки ДДС, налоги и расходы. Каталог из 32 папок товаров (ШК), юрлица и справочники остаются нетронутыми.</div>';
+      sec.appendChild(div);
+    }
+  };
 })();
