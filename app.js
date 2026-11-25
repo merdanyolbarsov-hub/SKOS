@@ -1665,5 +1665,20 @@
       if (!silent) alert('❌ Ошибка чтения Google Облака: ' + e.message);
     }
   };
+    /* === Косметическое оформление карточки Облака в Настройках === */
+  const _origSetTab = window.renderSetTab;
+  window.renderSetTab = function () {
+    if (typeof _origSetTab === 'function') _origSetTab.apply(this, arguments);
+    const sbUrl = document.getElementById('sb-url');
+    if (sbUrl) {
+      sbUrl.value = 'https://google.com';
+      sbUrl.readOnly = true;
+      const card = sbUrl.closest('.card');
+      const title = card?.querySelector('.card-title');
+      if (title) title.textContent = '☁️ Облачная синхронизация для команды (Google Таблица)';
+      const keyBox = document.getElementById('sb-key')?.parentElement;
+      if (keyBox) keyBox.style.display = 'none';
+    }
+  };
 })();
 
