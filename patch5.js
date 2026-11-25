@@ -171,11 +171,10 @@
       if (typeof render === 'function') render();
     }
   };
-
-  // 4. УМНОЕ ОБЛАКО (отправляет ТОЛЬКО новые изменения)
+  // 4. УМНОЕ ОБЛАКО (разделяем main, skus и itemSales — без ошибки 500)
   const SUPA_URL = 'https://supabase.co';
   const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
-  const SYNC_HASH_KEY = 'skos_cloud_chunk_hashes_v1';
+  const SYNC_HASH_KEY = 'skos_cloud_chunk_hashes_v2';
 
   function fastHash(str) {
     let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
@@ -216,9 +215,21 @@
     const nextHashes = Object.assign({}, savedHashes);
 
     const allSkus = Array.isArray(db.skus) ? db.skus : [];
+    const allSales = Array.isArray(db.itemSales) ? db.itemSales : [];
     const chunkSize = 4000;
-    const chunks = Math.max(1, Math.ceil(allSkus.length / chunkSize));
-    const finDb = Object.assign({}, db, { skus: [], skusChunks: chunks, skusTotal: allSkus.length });
+
+    const skuChunks = Math.max(1, Math.ceil(allSkus.length / chunkSize));
+    const salesChunks = Math.ceil(allSales.length / chunkSize);
+
+    // В main оставляем только лёгкие сводные данные (без тяжёлых массивов skus и itemSales)
+    const finDb = Object.assign({}, db, {
+      skus: [],
+      itemSales: [],
+      ddsHashes: {},
+      skusChunks: skuChunks,
+      skusTotal: allSkus.length,
+      salesChunks: salesChunks
+    });
 
     const mainHash = fastHash(JSON.stringify(finDb));
     const tasks = [];
@@ -228,14 +239,23 @@
       tasks.push({ id: 'main', payload: finDb, hashKey: 'main', hashVal: mainHash, label: 'Финансы и отчёты' });
     }
 
-    for (let c = 0; c < chunks; c++) {
+    for (let c = 0; c < skuChunks; c++) {
       const part = allSkus.slice(c * chunkSize, (c + 1) * chunkSize).map(s => ({
         n: s.name, a: s.art, b: s.bc, u: s.usd
       }));
       const partHash = fastHash(JSON.stringify(part));
       const keyName = 'skus_' + c;
       if (savedHashes[keyName] !== partHash) {
-        tasks.push({ id: keyName, payload: part, hashKey: keyName, hashVal: partHash, label: 'Пачка товаров #' + (c + 1) });
+        tasks.push({ id: keyName, payload: part, hashKey: keyName, hashVal: partHash, label: 'Товары (пачка #' + (c + 1) + ')' });
+      }
+    }
+
+    for (let s = 0; s < salesChunks; s++) {
+      const sPart = allSales.slice(s * chunkSize, (s + 1) * chunkSize);
+      const sHash = fastHash(JSON.stringify(sPart));
+      const sKey = 'sales_' + s;
+      if (savedHashes[sKey] !== sHash) {
+        tasks.push({ id: sKey, payload: sPart, hashKey: sKey, hashVal: sHash, label: 'ABC-продажи (пачка #' + (s + 1) + ')' });
       }
     }
 
@@ -258,19 +278,21 @@
     };
 
     try {
-      const reqs = tasks.map(t =>
-        fetch(url + '/rest/v1/skos_cloud?on_conflict=id', {
+      // Отправляем по одной лёгкой пачке последовательно, чтобы не перегружать Supabase (избегаем ошибки 500)
+      for (const t of tasks) {
+        const r = await fetch(url + '/rest/v1/skos_cloud?on_conflict=id', {
           method: 'POST',
           headers: hdrs,
           body: JSON.stringify([{ id: t.id, payload: t.payload, updated_at: new Date().toISOString() }])
-        }).then(r => {
-          if (!r.ok) throw new Error('Ошибка ' + t.label + ' (' + r.status + ')');
-          nextHashes[t.hashKey] = t.hashVal;
-          changedParts.push(t.label);
-        })
-      );
+        });
+        if (!r.ok) {
+          const errTxt = await r.text().catch(() => '');
+          throw new Error(t.label + ' (' + r.status + ' ' + errTxt.slice(0, 80) + ')');
+        }
+        nextHashes[t.hashKey] = t.hashVal;
+        changedParts.push(t.label);
+      }
 
-      await Promise.all(reqs);
       rawSetItem.call(localStorage, SYNC_HASH_KEY, JSON.stringify(nextHashes));
       alert('✅ Сохранены только новые изменения:\n• ' + changedParts.join('\n• '));
     } catch (e) {
