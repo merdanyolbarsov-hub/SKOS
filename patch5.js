@@ -255,7 +255,9 @@
     render();
     alert('Отчёт ' + mp + ' загружен!' + (newSkus ? ' Новых ШК/SKU без себестоимости: ' + newSkus : ''));
   };
-      // === БЕЗОПАСНЫЙ УСКОРИТЕЛЬ ===
+    // === БЕЗОПАСНЫЙ УСКОРИТЕЛЬ ===
+
+  // 1. Фоновое сохранение без фризов
   let saveTimer = null;
   const origSave = window.save;
   window.save = function () {
@@ -263,13 +265,42 @@
     saveTimer = setTimeout(function () {
       if (typeof origSave === 'function') origSave();
       else localStorage.setItem(KEY, JSON.stringify(db));
-    }, 150);
+    }, 200);
   };
 
-  // При переключении вкладок не блокируем renderLists, а просто пропускаем тяжёлый ABC
+  // 2. Не считаем ABC-анализ, если открыта другая вкладка
   const origAbc = window.renderAbc;
   window.renderAbc = function () {
     if (db.tab !== 'abc') return;
     if (typeof origAbc === 'function') origAbc.apply(this, arguments);
   };
+
+  // 3. Не перестраиваем селекты юрлиц/касс при каждом клике, если они не менялись
+  let lastSelectHash = '';
+  const origFillSelects = window.fillSelects;
+  window.fillSelects = function () {
+    const hash = db.orgs.length + '_' + db.cashWallets.length;
+    const fOrg = document.getElementById('f-org');
+    if (hash === lastSelectHash && fOrg && fOrg.options.length > 0) return;
+    lastSelectHash = hash;
+    if (typeof origFillSelects === 'function') origFillSelects.apply(this, arguments);
+  };
+
+  // 4. Плавное переключение вкладок без «залипания» кнопки
+  const origTab = window.tab;
+  if (typeof origTab === 'function') {
+    window.tab = function (id) {
+      db.tab = id;
+      document.querySelectorAll('main.content > section').forEach(sec => {
+        sec.classList.toggle('hidden', sec.id !== 'tab-' + id);
+      });
+      document.querySelectorAll('.sidebar .nav-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.id === 'nav-' + id);
+      });
+      requestAnimationFrame(function () {
+        if (typeof render === 'function') render();
+      });
+    };
+  }
 })();
+
