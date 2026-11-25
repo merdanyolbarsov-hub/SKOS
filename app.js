@@ -1087,5 +1087,94 @@
     if (document.getElementById('sb-pin')) document.getElementById('sb-pin').value = window.db.cloud?.pin || P;
     showLoginGate(); window.onPerChange(); window.pullCloud(true);
   });
+    /* === Фикс-блок: Железный URL Облака + Кнопка «Очистить» + Защита ДДС === */
+  // 1. Принудительно исправляем старый обрезанный URL из бэкапов на правильный адрес проекта
+  window.fixCloudUrlNow = function () {
+    const REAL_URL = 'https://supabase.co';
+    const REAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
+    if (!window.db.cloud) window.db.cloud = {};
+    if (!window.db.cloud.url || window.db.cloud.url === 'https://supabase.co' || !window.db.cloud.url.includes('pkudvnzyqrxxalikcmag')) {
+      window.db.cloud.url = REAL_URL;
+    }
+    if (!window.db.cloud.key) window.db.cloud.key = REAL_KEY;
+    const uEl = document.getElementById('sb-url');
+    const kEl = document.getElementById('sb-key');
+    if (uEl) uEl.value = window.db.cloud.url;
+    if (kEl && !kEl.value) kEl.value = window.db.cloud.key;
+  };
+  window.fixCloudUrlNow();
+
+  const _origPush = window.pushCloud;
+  window.pushCloud = async function (manual) {
+    window.fixCloudUrlNow();
+    return await _origPush.call(this, manual);
+  };
+  const _origPull = window.pullCloud;
+  window.pullCloud = async function (silent) {
+    window.fixCloudUrlNow();
+    return await _origPull.call(this, silent);
+  };
+  const _origImportJson = window.importJson;
+  window.importJson = function (ev) {
+    _origImportJson.call(this, ev);
+    setTimeout(window.fixCloudUrlNow, 300);
+  };
+
+  // 2. Рабочая кнопка «🗑️ Очистить» для черновика отчётов
+  window.clearMpDraft = function () {
+    mpBatch = null;
+    window.renderMpDraft();
+  };
+  const _origRenderDraft = window.renderMpDraft;
+  window.renderMpDraft = function () {
+    _origRenderDraft.call(this);
+    const box = document.getElementById('map-box');
+    if (box) {
+      const clr = box.querySelector('.btn-danger');
+      if (clr) clr.onclick = window.clearMpDraft;
+    }
+  };
+
+  // 3. Потоковый импорт выписок ДДС без ошибки lines.split
+  window.importBankCsv = async function (ev) {
+    if (window.__skosReadOnly) return;
+    const f = ev?.target?.files?.[0]; if (!f) return; ev.target.value = '';
+    const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
+    window.showToastProgress('⏳ Загрузка банковской выписки...');
+    const buf = await f.arrayBuffer();
+    let txt = new TextDecoder('utf-8').decode(buf); if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+    const lines = txt.split(/\r?\n/).filter(l => l.trim());
+    if (!lines.length) return;
+    const sep = lines[0].includes('\t') ? '\t' : ((lines[0].split(';').length >= lines[0].split(',').length) ? ';' : ',');
+    let added = 0, skip = 0;
+    for (let idx = 1; idx < lines.length; idx++) {
+      const c = splitCsvLine(lines[idx], sep); if (c.length < 3) continue;
+      const rawDt = c.find(x => /^(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})$/.test(x));
+      if (!rawDt) continue;
+      const dt = /^\d{4}-\d{2}-\d{2}$/.test(rawDt) ? rawDt.split('-').reverse().join('.') : rawDt;
+      const low = c.join(' ').toLowerCase();
+      if (low.includes('входящий остаток') || low.includes('исходящий остаток')) continue;
+      let amt = 0;
+      for (let i = 1; i < c.length; i++) { const n = window.num(c[i]); if (n !== 0 && !/^\d{2}\.\d{2}\.\d{4}$/.test(c[i])) { amt = n; break; } }
+      if (!amt) continue;
+      const hash = walId + '_' + dt + '_' + amt + '_' + low.slice(0, 30) + '_' + idx;
+      if (window.db.ddsHashes[hash]) { skip++; continue; }
+      window.db.ddsHashes[hash] = true;
+      let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
+      if (low.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
+      else if (low.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
+      else if (low.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
+      else if (low.match(/комисс|рко|обслуживан/)) cat = 'Комиссия РКО';
+      else if (low.match(/уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
+      else if (low.match(/снятие налич|выдача налич|перевод собствен/)) {
+        cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
+        if (amt < 0) window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), batchId });
+      }
+      window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: walId, cat, amt, note: c.join(' ').slice(0, 120), batchId });
+      added++;
+    }
+    window.save(true); window.renderDdsTab(); window.showToastProgress('✅ Выписка загружена!', 2000);
+    alert('✅ Загружено операций: ' + added + ' (дублей пропущено: ' + skip + ')');
+  };
 })();
 
