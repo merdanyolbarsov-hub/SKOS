@@ -1347,4 +1347,119 @@
       sec.appendChild(div);
     }
   };
+    /* === Финальное улучшение: Папки ДДС по месяцам/годам + Кнопка Очистить + Быстрое Google Облако === */
+  // 1. Кнопка «🗑️ Очистить» в черновике отчётов
+  window.resetMpDraft = function () {
+    mpBatch = null;
+    const box = document.getElementById('map-box');
+    if (box) { box.classList.add('hidden'); box.innerHTML = ''; }
+  };
+  const _origRenderMpDraftFix = window.renderMpDraft;
+  window.renderMpDraft = function () {
+    if (typeof _origRenderMpDraftFix === 'function') _origRenderMpDraftFix.apply(this, arguments);
+    const box = document.getElementById('map-box');
+    if (box) {
+      const clr = box.querySelector('.btn-danger');
+      if (clr) { clr.removeAttribute('onclick'); clr.onclick = window.resetMpDraft; }
+    }
+  };
+
+  // 2. Быстрое Google Облако (сжатый пакет товаров)
+  window.pushCloud = async function (manual) {
+    if (window.__skosReadOnly) return;
+    window.flushLocalSave();
+    const gUrl = 'https://google.com';
+    window.db.cloud = { url: gUrl, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
+    window.showToastProgress('⏳ Сохранение в Google Облако...', 1800);
+    try {
+      const slimDb = Object.assign({}, window.db, {
+        ddsHashes: {},
+        skus: (window.db.skus || []).map(s => ({ n: s.name, a: s.art, b: s.bc, u: s.usd }))
+      });
+      await fetch(gUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(slimDb) });
+      window.showToastProgress('✅ Сохранено в Google Облако!', 1500);
+      if (manual) alert('✅ Сохранено в Google Облако!\n• ШК: ' + (window.db.skus || []).length + '\n• Отчётов: ' + (window.db.reports || []).length + '\n• ДДС: ' + (window.db.dds || []).length);
+    } catch (e) { if (manual) alert('❌ Ошибка Google Облака: ' + e.message); }
+  };
+
+  window.pullCloud = async function (silent) {
+    try {
+      const gUrl = 'https://google.com';
+      const res = await fetch(gUrl + '?t=' + Date.now());
+      const data = await res.json();
+      if (data && typeof data === 'object' && (Array.isArray(data.orgs) || Array.isArray(data.skus))) {
+        if (Array.isArray(data.skus)) {
+          data.skus = data.skus.map((s, i) => s.bc ? s : ({ id: 's_' + i, name: s.n || s.a || 'Товар', art: s.a || '', bc: s.b || '', col: '—', siz: '—', usd: window.num(s.u) }));
+        }
+        Object.assign(window.db, data);
+        window.db.cloud = { url: gUrl, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
+        window.ensureStore(); window.flushLocalSave(); window.onPerChange();
+        if (!silent) alert('✅ База загружена из Google Облака!');
+      }
+    } catch (e) { if (!silent) alert('❌ Ошибка чтения Google Облака: ' + e.message); }
+  };
+
+  // 3. Группировка журнала ДДС по сворачиваемым папкам (Год — Месяц) + фильтр
+  const _origRenderDdsGrouped = window.renderDdsTab;
+  window.renderDdsTab = function () {
+    _origRenderDdsGrouped.apply(this, arguments);
+    const tb = document.getElementById('tb-dds');
+    if (!tb) return;
+    const tbl = tb.closest('table');
+    if (!tbl) return;
+
+    const rate = window.getRate();
+    const allWals = (window.db.orgs || []).map(o => ({ id: o.id, name: o.name + ' (' + o.bank + ')', cur: 'RUB' })).concat(window.db.cashWallets || []);
+    const wMap = new Map(allWals.map(w => [w.id, w]));
+
+    if (!document.getElementById('skos-dds-tree-wrap')) {
+      const bar = document.createElement('div');
+      bar.id = 'skos-dds-filter-bar';
+      bar.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;';
+      bar.innerHTML = '<b style="font-size:12px">📁 Журнал ДДС по месяцам:</b>' +
+        '<select id="dds-f-yr" class="select" style="width:auto;padding:4px 8px" onchange="renderDdsTab()"><option value="ALL">Все годы</option></select>' +
+        '<select id="dds-f-mo" class="select" style="width:auto;padding:4px 8px" onchange="renderDdsTab()"><option value="ALL">Все месяцы</option><option value="01">Январь</option><option value="02">Февраль</option><option value="03">Март</option><option value="04">Апрель</option><option value="05">Май</option><option value="06">Июнь</option><option value="07">Июль</option><option value="08">Август</option><option value="09">Сентябрь</option><option value="10">Октябрь</option><option value="11">Ноябрь</option><option value="12">Декабрь</option></select>' +
+        '<select id="dds-f-wal" class="select" style="width:auto;padding:4px 8px" onchange="renderDdsTab()"><option value="ALL">Все счета и кассы</option></select>';
+      const wrap = document.createElement('div');
+      wrap.id = 'skos-dds-tree-wrap';
+      tbl.style.display = 'none';
+      tbl.insertAdjacentElement('beforebegin', bar);
+      tbl.insertAdjacentElement('afterend', wrap);
+    }
+
+    const fYrEl = document.getElementById('dds-f-yr'), fMoEl = document.getElementById('dds-f-mo'), fWalEl = document.getElementById('dds-f-wal');
+    const ops = window.db.dds || [];
+    const yrs = Array.from(new Set(ops.map(d => { const p = String(d.date || '').split('.'); return p.length === 3 ? p.at(2) : String(d.date || '').slice(0, 4); }).filter(y => y.length === 4))).sort().reverse();
+    if (fYrEl) { const c = fYrEl.value || 'ALL'; fYrEl.innerHTML = '<option value="ALL">Все годы</option>' + yrs.map(y => '<option value="' + y + '">' + y + '</option>').join(''); if (yrs.includes(c)) fYrEl.value = c; }
+    if (fWalEl) { const c = fWalEl.value || 'ALL'; fWalEl.innerHTML = '<option value="ALL">Все счета и кассы</option>' + allWals.map(w => '<option value="' + w.id + '">' + window.esc(w.name) + '</option>').join(''); fWalEl.value = c; }
+
+    const selYr = fYrEl ? fYrEl.value : 'ALL', selMo = fMoEl ? fMoEl.value : 'ALL', selWal = fWalEl ? fWalEl.value : 'ALL';
+    const moNames = { '01': 'Январь', '02': 'Февраль', '03': 'Март', '04': 'Апрель', '05': 'Май', '06': 'Июнь', '07': 'Июль', '08': 'Август', '09': 'Сентябрь', '10': 'Октябрь', '11': 'Ноябрь', '12': 'Декабрь' };
+    const groups = {};
+
+    ops.forEach(d => {
+      if (selWal !== 'ALL' && d.wal !== selWal) return;
+      const s = String(d.date || '');
+      let y = 'Без года', m = '00';
+      if (s.includes('.')) { const p = s.split('.'); m = (p.at(1) || '00').padStart(2, '0'); y = p.at(2) || 'Без года'; }
+      else if (s.includes('-')) { const p = s.split('-'); y = p.at(0) || 'Без года'; m = (p.at(1) || '00').padStart(2, '0'); }
+      if (selYr !== 'ALL' && y !== selYr) return;
+      if (selMo !== 'ALL' && m !== selMo) return;
+      const gk = y + '-' + m;
+      if (!groups[gk]) groups[gk] = { key: gk, title: y + ' — ' + (moNames[m] || m), items: [], inc: 0, exp: 0 };
+      const w = wMap.get(d.wal) || { name: d.wal, cur: 'RUB' };
+      const rub = w.cur === 'USD' ? window.num(d.amt) * rate : window.num(d.amt);
+      if (rub >= 0) groups[gk].inc += rub; else groups[gk].exp += Math.abs(rub);
+      groups[gk].items.push({ d, w, rub });
+    });
+
+    const gKeys = Object.keys(groups).sort().reverse();
+    const wrap = document.getElementById('skos-dds-tree-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = gKeys.length ? gKeys.map(k => {
+      const g = groups[k];
+      const rowsHtml = g.items.map(({ d, w, rub }) => '<tr><td>' + window.esc(d.date) + '</td><td class="bold">' + window.esc(w.name) + '</td><td><select class="select" style="padding:2px 6px;font-size:12px" onchange="const x=db.dds.find(i=>i.id===\'' + d.id + '\');if(x){x.cat=this.value;save(true);}">' + window.buildDdsCatOptions(d.cat) + '</select>' + (d.note ? '<div style="font-size:10.5px;color:#64748b;margin-top:2px">' + window.esc(d.note) + '</div>' : '') + '</td><td class="num bold ' + (d.amt >= 0 ? 'text-green' : 'text-red') + '">' + (w.cur === 'USD' ? window.fmtU(d.amt) : window.fmtR(d.amt)) + '</td><td class="num">' + window.fmtR(rub) + '</td><td style="white-space:nowrap"><button class="btn" style="padding:3px 7px" onclick="editDdsRow(\'' + d.id + '\')">✏️</button> <button class="btn btn-danger" onclick="db.dds=db.dds.filter(x=>x.id!==\'' + d.id + '\');save(true);renderDdsTab()">✕</button></td></tr>').join('');
+      return '<details style="border:1px solid #cbd5e1;border-radius:10px;margin-bottom:8px;background:#fff"><summary style="cursor:pointer;padding:9px 12px;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div><span>📁</span> <b>' + window.esc(g.title) + '</b> <span class="badge badge-blue">' + g.items.length + ' опер.</span></div><div style="display:flex;gap:8px;font-size:12px"><span class="text-green bold">Приход: +' + window.fmtR(g.inc) + '</span><span class="text-red bold">Расход: −' + window.fmtR(g.exp) + '</span></div></summary><div style="padding:8px 12px;overflow-x:auto"><table><thead><tr><th>Дата</th><th>Кошелёк / Банк</th><th>Статья / Назначение</th><th class="num">Сумма</th><th class="num">В рублях</th><th></th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div></details>';
+    }).join('') : '<div style="padding:16px;text-align:center;color:#94a3b8">Операций за выбранный период нет</div>';
+  };
 })();
