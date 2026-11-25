@@ -1,4 +1,117 @@
 (function () {
+  // ==========================================
+  // 1. КУРС ВАЛЮТ: НИКОГДА НЕ СБРАСЫВАЕТСЯ САМ
+  // ==========================================
+  function getSavedDefaultRate() {
+    const manual = parseFloat(localStorage.getItem('skos_manual_default_rate'));
+    if (manual > 0) return manual;
+    if (db && db.rates) {
+      const vals = Object.values(db.rates).filter(v => Number(v) > 0 && Number(v) !== 96.5);
+      if (vals.length) return Number(vals[vals.length - 1]);
+    }
+    return 80;
+  }
+
+  window.getRate = function (per) {
+    const p = per || (typeof curPer === 'function' ? curPer() : '');
+    if (p && db.rates && db.rates[p] && db.rates[p] !== 96.5) {
+      return db.rates[p];
+    }
+    return getSavedDefaultRate();
+  };
+
+  window.setRate = function (v) {
+    const p = typeof curPer === 'function' ? curPer() : '2026-01';
+    if (db.locked && db.locked[p]) return alert('Месяц закрыт!');
+    const n = parseFloat(String(v).replace(',', '.'));
+    if (n > 0) {
+      if (!db.rates) db.rates = {};
+      db.rates[p] = n;
+      localStorage.setItem('skos_manual_default_rate', String(n));
+      save();
+      render();
+    }
+  };
+
+  // ==========================================
+  // 2. ЗАЩИТА ДАННЫХ ОТ ПОТЕРИ ПРИ ОБНОВЛЕНИИ
+  // ==========================================
+  const SAFE_KEY = 'skos_v3_safe_mirror';
+
+  function hasRealData(obj) {
+    return obj && (
+      (Array.isArray(obj.reports) && obj.reports.length > 0) ||
+      (Array.isArray(obj.dds) && obj.dds.length > 0) ||
+      (Array.isArray(obj.skus) && obj.skus.length > 3)
+    );
+  }
+
+  // При старте: если основная база пустая, восстанавливаем из зеркала
+  setTimeout(function () {
+    if (!hasRealData(db)) {
+      try {
+        const mirror = JSON.parse(localStorage.getItem(SAFE_KEY) || 'null');
+        if (hasRealData(mirror)) {
+          Object.assign(db, mirror);
+          localStorage.setItem(KEY, JSON.stringify(db));
+          if (typeof onPerChange === 'function') onPerChange();
+          else if (typeof render === 'function') render();
+        }
+      } catch (e) {}
+    } else {
+      localStorage.setItem(SAFE_KEY, JSON.stringify(db));
+    }
+  }, 300);
+
+  // ==========================================
+  // 3. УСКОРЕНИЕ САЙТА И ФОНОВОЕ СОХРАНЕНИЕ
+  // ==========================================
+  let saveTimer = null;
+  const origSave = window.save;
+  window.save = function () {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      if (typeof origSave === 'function') origSave();
+      else localStorage.setItem(KEY, JSON.stringify(db));
+      if (hasRealData(db)) {
+        try { localStorage.setItem(SAFE_KEY, JSON.stringify(db)); } catch (e) {}
+      }
+    }, 200);
+  };
+
+  const origAbc = window.renderAbc;
+  window.renderAbc = function () {
+    if (db.tab !== 'abc') return;
+    if (typeof origAbc === 'function') origAbc.apply(this, arguments);
+  };
+
+  let lastSelectHash = '';
+  const origFillSelects = window.fillSelects;
+  window.fillSelects = function () {
+    const hash = (db.orgs ? db.orgs.length : 0) + '_' + (db.cashWallets ? db.cashWallets.length : 0);
+    const fOrg = document.getElementById('f-org');
+    if (hash === lastSelectHash && fOrg && fOrg.options.length > 0) return;
+    lastSelectHash = hash;
+    if (typeof origFillSelects === 'function') origFillSelects.apply(this, arguments);
+  };
+
+  if (typeof window.tab === 'function') {
+    window.tab = function (id) {
+      db.tab = id;
+      document.querySelectorAll('main.content > section').forEach(sec => {
+        sec.classList.toggle('hidden', sec.id !== 'tab-' + id);
+      });
+      document.querySelectorAll('.sidebar .nav-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.id === 'nav-' + id);
+      });
+      requestAnimationFrame(function () {
+        if (typeof render === 'function') render();
+      });
+    };
+  }
+  // ==========================================
+  // 4. ЗАГРУЗКА ОТЧЁТОВ ЯНДЕКС МАРКЕТА / WB / OZON
+  // ==========================================
   function readCsvSmart(file, callback) {
     const rUtf = new FileReader();
     rUtf.onload = function (e) {
@@ -35,31 +148,15 @@
 
   function detectMarketplace(headers) {
     const joined = headers.join(' | ').toLowerCase();
-    if (
-      joined.includes('ваш sku') ||
-      joined.includes('яндекс') ||
-      joined.includes('размещение товаров на витрине') ||
-      joined.includes('буст продаж') ||
-      joined.includes('полки')
-    ) return 'YM';
-    if (
-      joined.includes('ozon id') ||
-      joined.includes('начислено за') ||
-      joined.includes('тип начисления') ||
-      joined.includes('доставка покупателю')
-    ) return 'OZON';
-    if (
-      joined.includes('вайлдберриз') ||
-      joined.includes('обоснование для оплаты') ||
-      joined.includes('к перечислению продавцу')
-    ) return 'WB';
+    if (joined.includes('ваш sku') || joined.includes('яндекс') || joined.includes('размещение товаров на витрине') || joined.includes('буст продаж')) return 'YM';
+    if (joined.includes('ozon id') || joined.includes('начислено за') || joined.includes('тип начисления')) return 'OZON';
+    if (joined.includes('вайлдберриз') || joined.includes('обоснование для оплаты') || joined.includes('к перечислению продавцу')) return 'WB';
     return null;
   }
 
   function findMatchingSku(bc, art) {
     const cleanBc = String(bc || '').trim().toLowerCase();
     const cleanArt = String(art || '').trim().toLowerCase();
-
     if (cleanBc) {
       const byBc = db.skus.find(s => String(s.bc || '').trim().toLowerCase() === cleanBc);
       if (byBc) return byBc;
@@ -72,17 +169,9 @@
       const byBcAsArt = db.skus.find(s => String(s.art || '').trim().toLowerCase() === cleanBc);
       if (byBcAsArt) return byBcAsArt;
     }
-
-    const probe = cleanBc || cleanArt;
-    if (probe && probe.includes('-')) {
-      const basePrefix = probe.split('-').slice(0, 2).join('-');
-      const byPrefix = db.skus.find(
-        s => s.usd > 0 && String(s.art || '').trim().toLowerCase().startsWith(basePrefix)
-      );
-      if (byPrefix) return byPrefix;
-    }
     return null;
   }
+
   window.onRepFile = function (ev) {
     const f = ev.target.files && ev.target.files;
     if (!f) return;
@@ -107,10 +196,7 @@
       }
 
       csvHdr = parseCsvLine(lines[hdrIdx], sep);
-      csvRows = lines
-        .slice(hdrIdx + 1)
-        .map(l => parseCsvLine(l, sep))
-        .filter(r => r.some(cell => cell !== ''));
+      csvRows = lines.slice(hdrIdx + 1).map(l => parseCsvLine(l, sep)).filter(r => r.some(cell => cell !== ''));
 
       const detectedMp = detectMarketplace(csvHdr);
       const mpSel = document.getElementById('up-mp');
@@ -130,49 +216,34 @@
         { k: 'typ', l: 'Тип операции / Статус', h: /статус|тип документа|обоснование|тип начисления|операция/i }
       ];
 
-      document.getElementById('map-fields').innerHTML = flds
-        .map(fl => {
-          const sv = db.colMap[mp + '_' + fl.k];
-          const opts = ['<option value="">— Нет / Авто —</option>']
-            .concat(
-              csvHdr.map((h, i) => {
-                const sel = sv === h || (!sv && fl.h.test(h)) ? 'selected' : '';
-                return '<option value="' + i + '" ' + sel + '>' + h + '</option>';
-              })
-            )
-            .join('');
-          return '<div><label>' + fl.l + '</label><select id="mp-' + fl.k + '" class="select">' + opts + '</select></div>';
-        })
-        .join('');
+      document.getElementById('map-fields').innerHTML = flds.map(fl => {
+        const sv = db.colMap[mp + '_' + fl.k];
+        const opts = ['<option value="">— Нет / Авто —</option>'].concat(
+          csvHdr.map((h, i) => '<option value="' + i + '" ' + ((sv === h || (!sv && fl.h.test(h))) ? 'selected' : '') + '>' + h + '</option>')
+        ).join('');
+        return '<div><label>' + fl.l + '</label><select id="mp-' + fl.k + '" class="select">' + opts + '</select></div>';
+      }).join('');
 
       document.getElementById('map-box').classList.remove('hidden');
     });
   };
+
   window.runRepImport = function () {
     const org = document.getElementById('up-org').value;
     const mp = document.getElementById('up-mp').value;
     const yr = document.getElementById('up-yr').value;
     const mo = document.getElementById('up-mo').value;
     const per = yr + '-' + mo;
-
     if (db.locked[per]) return alert('Месяц закрыт!');
 
     const g = k => document.getElementById('mp-' + k).value;
-    const idx = {
-      bc: g('bc'), art: g('art'), col: g('col'), siz: g('siz'),
-      qty: g('qty'), rev: g('rev'), com: g('com'), log: g('log'),
-      ads: g('ads'), typ: g('typ')
-    };
-
-    Object.keys(idx).forEach(k => {
-      if (idx[k] !== '') db.colMap[mp + '_' + k] = csvHdr[idx[k]];
-    });
+    const idx = { bc: g('bc'), art: g('art'), col: g('col'), siz: g('siz'), qty: g('qty'), rev: g('rev'), com: g('com'), log: g('log'), ads: g('ads'), typ: g('typ') };
+    Object.keys(idx).forEach(k => { if (idx[k] !== '') db.colMap[mp + '_' + k] = csvHdr[idx[k]]; });
 
     const extraComCols = [], extraLogCols = [], extraAdsCols = [];
     if (mp === 'YM') {
       csvHdr.forEach((h, i) => {
-        const si = String(i);
-        if ([idx.com, idx.log, idx.ads, idx.rev, idx.qty].includes(si)) return;
+        if ([idx.com, idx.log, idx.ads, idx.rev, idx.qty].includes(String(i))) return;
         const low = h.toLowerCase();
         if (low.match(/размещение|обработка|перевод платежа|эквайринг|комиссия/) && low.match(/₽|руб|сумма|стоимость|итого/)) extraComCols.push(i);
         else if (low.match(/доставка|логистика|хранение|невыкуп|возврат товара/) && low.match(/₽|руб|сумма|стоимость|итого/)) extraLogCols.push(i);
@@ -192,7 +263,6 @@
       const art = idx.art !== '' ? String(r[idx.art] || '').trim() : bc;
       const col = idx.col !== '' ? String(r[idx.col] || '—').trim() : '—';
       const siz = idx.siz !== '' ? String(r[idx.siz] || '—').trim() : '—';
-
       const q = idx.qty !== '' ? Math.abs(num(r[idx.qty])) : 1;
       const vRev = idx.rev !== '' ? num(r[idx.rev]) : 0;
 
@@ -215,16 +285,9 @@
       const itemKey = bc || art;
 
       if (!sku && itemKey) {
-        const matchedTemplate = findMatchingSku('', itemKey);
-        const uP = matchedTemplate ? matchedTemplate.usd : 0;
-        const cleanArt = matchedTemplate ? matchedTemplate.art : (art || itemKey);
-        sku = {
-          id: 's_' + Date.now() + Math.random(),
-          name: art || itemKey, art: cleanArt, col, siz, bc: itemKey,
-          usd: uP, src: 'Авто из ' + mp, isNew: uP === 0
-        };
+        sku = { id: 's_' + Date.now() + Math.random(), name: art || itemKey, art: art || itemKey, col, siz, bc: itemKey, usd: 0, src: 'Авто из ' + mp, isNew: true };
         db.skus.unshift(sku);
-        if (uP === 0) newSkus++;
+        newSkus++;
       }
 
       const uRub = (sku ? sku.usd : 0) * rate;
@@ -232,75 +295,16 @@
       else { rev += Math.abs(vRev); sQty += q; cogs += uRub * q; }
 
       com += vCom; log += vLog; ads += vAds;
-
       if (itemKey && (vRev !== 0 || q > 0)) {
-        db.itemSales.push({
-          org, mp, yr, mo, bc: sku ? sku.bc : itemKey,
-          sQty: isRet ? 0 : q, rQty: isRet ? q : 0,
-          rev: isRet ? -Math.abs(vRev) : Math.abs(vRev),
-          fee: vCom + vLog + vAds
-        });
+        db.itemSales.push({ org, mp, yr, mo, bc: sku ? sku.bc : itemKey, sQty: isRet ? 0 : q, rQty: isRet ? q : 0, rev: isRet ? -Math.abs(vRev) : Math.abs(vRev), fee: vCom + vLog + vAds });
       }
     });
 
     const bo = (sQty + rQty) > 0 ? Math.round((sQty / (sQty + rQty)) * 100) : 89;
-    db.reports.unshift({
-      id: 'r_' + Date.now(), org, mp, yr, mo,
-      rev: Math.max(0, rev - ret), ret, ads, log, com,
-      cogs: Math.max(0, cogs), bo
-    });
-
+    db.reports.unshift({ id: 'r_' + Date.now(), org, mp, yr, mo, rev: Math.max(0, rev - ret), ret, ads, log, com, cogs: Math.max(0, cogs), bo });
     save();
     document.getElementById('map-box').classList.add('hidden');
     render();
     alert('Отчёт ' + mp + ' загружен!' + (newSkus ? ' Новых ШК/SKU без себестоимости: ' + newSkus : ''));
   };
-    // === БЕЗОПАСНЫЙ УСКОРИТЕЛЬ ===
-
-  // 1. Фоновое сохранение без фризов
-  let saveTimer = null;
-  const origSave = window.save;
-  window.save = function () {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(function () {
-      if (typeof origSave === 'function') origSave();
-      else localStorage.setItem(KEY, JSON.stringify(db));
-    }, 200);
-  };
-
-  // 2. Не считаем ABC-анализ, если открыта другая вкладка
-  const origAbc = window.renderAbc;
-  window.renderAbc = function () {
-    if (db.tab !== 'abc') return;
-    if (typeof origAbc === 'function') origAbc.apply(this, arguments);
-  };
-
-  // 3. Не перестраиваем селекты юрлиц/касс при каждом клике, если они не менялись
-  let lastSelectHash = '';
-  const origFillSelects = window.fillSelects;
-  window.fillSelects = function () {
-    const hash = db.orgs.length + '_' + db.cashWallets.length;
-    const fOrg = document.getElementById('f-org');
-    if (hash === lastSelectHash && fOrg && fOrg.options.length > 0) return;
-    lastSelectHash = hash;
-    if (typeof origFillSelects === 'function') origFillSelects.apply(this, arguments);
-  };
-
-  // 4. Плавное переключение вкладок без «залипания» кнопки
-  const origTab = window.tab;
-  if (typeof origTab === 'function') {
-    window.tab = function (id) {
-      db.tab = id;
-      document.querySelectorAll('main.content > section').forEach(sec => {
-        sec.classList.toggle('hidden', sec.id !== 'tab-' + id);
-      });
-      document.querySelectorAll('.sidebar .nav-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.id === 'nav-' + id);
-      });
-      requestAnimationFrame(function () {
-        if (typeof render === 'function') render();
-      });
-    };
-  }
 })();
-
