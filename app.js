@@ -1680,5 +1680,239 @@
       if (keyBox) keyBox.style.display = 'none';
     }
   };
+    /* === Кнопка «📄 Шаблон» с выгрузкой всех папок, артикулов и цен из базы === */
+  window.downloadFullSkuTemplate = function () {
+    const skus = (window.db && Array.isArray(window.db.skus)) ? window.db.skus : [];
+    const fNames = window.getFolderNames();
+    let csv = '\uFEFFAртикул продавца;ШК;Название;Себестоимость USD\r\n';
+    if (skus.length > 0) {
+      skus.forEach(s => {
+        const art = window.normStr(s.art) || 'Без артикула';
+        const bc = window.normStr(s.bc);
+        const nm = window.normStr(fNames[art] || s.name || art);
+        const usd = String(window.num(s.usd)).replace('.', ',');
+        csv += `"${art.replace(/"/g, '""')}";"${bc.replace(/"/g, '""')}";"${nm.replace(/"/g, '""')}";${usd}\r\n`;
+      });
+    } else {
+      csv += 'SKOS-B;2043192743629;Брюки мужские зауженные;6,60\r\n';
+      csv += 'SKOS-YR;5033400058;Рубашка на полу пуговицы;4,56\r\n';
+      csv += 'SKOS-FK;OZN951171816;Костюм флисовый с пугувицами;9,80\r\n';
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    a.download = 'shablon_sebestoimost_SKOS_' + window.today() + '.csv';
+    a.click();
+  };
+
+  // Исправляем импорт CSV (чтобы точно читал колонки: Артикул;ШК;Название;Себестоимость USD)
+  window.importCostCsv = async function (ev) {
+    const f = ev && ev.target && ev.target.files && ev.target.files;
+    if (!f) return;
+    ev.target.value = '';
+    window.showToastProgress('⏳ Импорт шаблона ШК...');
+    const buf = await f.arrayBuffer();
+    let txt = new TextDecoder('utf-8').decode(buf);
+    if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+    const lines = txt.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return alert('Файл пустой!');
+    const sep = (lines.split(';').length >= lines.split(',').length) ? ';' : ',';
+    const skuMap = new Map();
+    (window.db.skus || []).forEach(s => skuMap.set(window.normStr(s.bc), s));
+    let added = 0, upd = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const c = splitCsvLine(lines[i], sep);
+      if (c.length < 2) continue;
+      const art = window.normStr(c) || 'Без артикула';
+      const bc = window.normStr(c.length >= 3 ? c : c);
+      const name = window.normStr(c.length >= 3 ? c : art) || art;
+      const usd = window.num(c[c.length - 1]);
+      if (!bc || /e\+/i.test(bc)) continue;
+      if (name && name !== art) window.setFolderName(art, name);
+      const ex = skuMap.get(bc);
+      if (ex) {
+        ex.art = art;
+        if (name) ex.name = name;
+        if (usd > 0) ex.usd = usd;
+        ex.isNew = ex.usd === 0;
+        upd++;
+      } else {
+        const ns = { id: 's_' + Date.now() + '_' + i, art, bc, name, col: '—', siz: '—', usd, src: f.name, isNew: usd === 0 };
+        window.db.skus.push(ns);
+        skuMap.set(bc, ns);
+        added++;
+      }
+    }
+    window.recalcReportsCogs();
+    window.save(true);
+    window.renderSkuTab();
+    window.showToastProgress('✅ Импорт завершён!', 2000);
+    alert(`✅ Шаблон загружен!\n• Добавлено новых ШК: ${added}\n• Обновлено существующих: ${upd}`);
+  };
+
+  // Добавляем кнопку «📄 Шаблон» прямо рядом с кнопкой «📥 Импорт "Свод себестоимости" (CSV)»
+  const _origSkuRender2 = window.renderSkuTab;
+  window.renderSkuTab = function () {
+    _origSkuRender2.apply(this, arguments);
+    const firstCardHeader = document.querySelector('#tab-sku .card:first-child .card-header');
+    if (firstCardHeader && !document.getElementById('skos-tpl-dl-btn')) {
+      const btnWrap = firstCardHeader.querySelector('div:last-child') || firstCardHeader;
+      const btn = document.createElement('button');
+      btn.id = 'skos-tpl-dl-btn';
+      btn.type = 'button';
+      btn.className = 'btn btn-primary';
+      btn.style.marginRight = '6px';
+      btn.textContent = '📄 Шаблон';
+      btn.title = 'Скачать CSV-шаблон со всеми папками, артикулами и ценами';
+      btn.onclick = window.downloadFullSkuTemplate;
+      btnWrap.insertBefore(btn, btnWrap.firstChild);
+    }
+  };
+  /* === Фикс-блок 7: Исправление ev.target.files (моментальная загрузка выписок, ШК и JSON) === */
+  window.importJson = function (ev) {
+    const f = ev && ev.target && ev.target.files && ev.target.files;
+    if (!f) return;
+    ev.target.value = '';
+    window.showToastProgress('⏳ Загрузка бэкапа...');
+    const r = new FileReader();
+    r.onload = function (e) {
+      try {
+        const parsed = JSON.parse(e.target.result);
+        const curCloud = window.db.cloud;
+        Object.assign(window.db, parsed);
+        if (curCloud && curCloud.url && curCloud.url.includes('://google.com')) {
+          window.db.cloud = curCloud;
+        }
+        window.ensureStore();
+        window.flushLocalSave();
+        window.onPerChange();
+        window.showToastProgress('✅ Бэкап загружен!', 2000);
+        alert('✅ Бэкап успешно загружен! Товаров (ШК): ' + (window.db.skus || []).length + ' шт.');
+      } catch (err) {
+        window.showToastProgress('❌ Ошибка файла', 2500);
+        alert('❌ Ошибка чтения файла: ' + err.message);
+      }
+    };
+    r.readAsText(f, 'UTF-8');
+  };
+
+  window.importCostCsv = async function (ev) {
+    const f = ev && ev.target && ev.target.files && ev.target.files;
+    if (!f) return;
+    ev.target.value = '';
+    window.showToastProgress('⏳ Импорт шаблона ШК...');
+    try {
+      const buf = await f.arrayBuffer();
+      let txt = new TextDecoder('utf-8').decode(buf);
+      if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+      const lines = txt.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) return alert('Файл пустой!');
+      const sep = (lines.split(';').length >= lines.split(',').length) ? ';' : ',';
+      const skuMap = new Map();
+      (window.db.skus || []).forEach(s => skuMap.set(window.normStr(s.bc), s));
+      let added = 0, upd = 0;
+      for (let i = 1; i < lines.length; i++) {
+        const c = splitCsvLine(lines[i], sep);
+        if (c.length < 2) continue;
+        const art = window.normStr(c) || 'Без артикула';
+        const bc = window.normStr(c.length >= 3 ? c : c);
+        const name = window.normStr(c.length >= 3 ? c : art) || art;
+        const usd = window.num(c[c.length - 1]);
+        if (!bc || /e\+/i.test(bc)) continue;
+        if (name && name !== art) window.setFolderName(art, name);
+        const ex = skuMap.get(bc);
+        if (ex) {
+          ex.art = art; if (name) ex.name = name; if (usd > 0) ex.usd = usd; ex.isNew = ex.usd === 0; upd++;
+        } else {
+          const ns = { id: 's_' + Date.now() + '_' + i, art, bc, name, col: '—', siz: '—', usd, src: f.name, isNew: usd === 0 };
+          window.db.skus.push(ns); skuMap.set(bc, ns); added++;
+        }
+      }
+      window.recalcReportsCogs();
+      window.save(true);
+      window.renderSkuTab();
+      window.showToastProgress('✅ Шаблон загружен!', 2000);
+      alert(`✅ Шаблон загружен!\n• Добавлено новых ШК: ${added}\n• Обновлено: ${upd}`);
+    } catch (err) {
+      window.showToastProgress('❌ Ошибка импорта', 2500);
+      alert('❌ Ошибка импорта: ' + err.message);
+    }
+  };
+
+  window.importBankCsv = async function (ev) {
+    if (window.__skosReadOnly) return;
+    const f = ev && ev.target && ev.target.files && ev.target.files;
+    if (!f) return;
+    ev.target.value = '';
+    const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
+    window.showToastProgress('⏳ Чтение выписки банка...');
+    try {
+      const buf = await f.arrayBuffer();
+      let txt = new TextDecoder('utf-8').decode(buf);
+      if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+      txt = txt.replace(/^\uFEFF/, '');
+
+      const hdrLine = txt.split(/\r?\n/).find(l => l.toLowerCase().match(/дата|списание|зачисление|sum_rur|сумма/)) || '';
+      const sep = hdrLine.includes('\t') ? '\t' : ((hdrLine.split(';').length >= hdrLine.split(',').length) ? ';' : ',');
+      const rows = parseFullCsvMatrix(txt, sep);
+      const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/дата операции|дата документа|списание|зачисление|sum_rur|d_c|сумма/));
+      const hdr = hdrIdx >= 0 ? rows[hdrIdx].map(x => x.toLowerCase()) : [];
+
+      const iDc = hdr.indexOf('d_c'), iDt = hdr.indexOf('дата операции') >= 0 ? hdr.indexOf('дата операции') : (hdr.indexOf('date_oper') >= 0 ? hdr.indexOf('date_oper') : hdr.findIndex(h => h.includes('дата')));
+      const iIn = hdr.findIndex(h => h.match(/зачислен|приход|поступлен|кредит/) && !h.includes('ост') && !h.includes('обор'));
+      const iOut = hdr.findIndex(h => h.match(/списан|расход|дебет/) && !h.includes('ост') && !h.includes('обор'));
+      const iSum = hdr.indexOf('sum_rur') >= 0 ? hdr.indexOf('sum_rur') : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц'));
+      const iCtr = hdr.findIndex(h => h.includes('контрагент') && !h.includes('инн') && !h.includes('бик') && !h.includes('счёт') && !h.includes('банк'));
+      const iText = hdr.findIndex(h => h.includes('назначен') || h === 'text70');
+
+      let added = 0, skip = 0, sumIn = 0, sumOut = 0, toCash = 0;
+      const newOps = [];
+      for (let idx = (hdrIdx >= 0 ? hdrIdx + 1 : 0); idx < rows.length; idx++) {
+        const c = rows[idx]; if (!c || c.length < 3) continue;
+        const lowFull = c.join(' ').toLowerCase();
+        if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого')) continue;
+        let rawDt = (iDt >= 0 && c[iDt]) ? c[iDt].trim() : '';
+        if (!/^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(rawDt)) rawDt = c.find(x => /^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(String(x || '').trim())) || '';
+        if (!rawDt) continue;
+        const dt = /^\d{4}-\d{2}-\d{2}$/.test(rawDt) ? rawDt.split('-').reverse().join('.') : rawDt;
+
+        let amt = 0;
+        if (iDc >= 0 && iSum >= 0) { const v = Math.abs(window.num(c[iSum])), dc = String(c[iDc] || '').toUpperCase(); amt = dc === 'D' ? -v : (dc === 'C' ? v : 0); }
+        else if (iIn >= 0 || iOut >= 0) { const vIn = iIn >= 0 ? Math.abs(window.num(c[iIn])) : 0, vOut = iOut >= 0 ? Math.abs(window.num(c[iOut])) : 0; amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0); }
+        else if (iSum >= 0) amt = window.num(c[iSum]);
+        if (!amt || Math.abs(amt) > 500000000) continue;
+
+        const desc = ((iCtr >= 0 && c[iCtr]) ? c[iCtr] + ' — ' : '') + ((iText >= 0 && c[iText]) ? c[iText] : '');
+        const lowDesc = desc.toLowerCase(), hash = walId + '_' + dt + '_' + amt + '_' + lowDesc.slice(0, 40) + '_' + idx;
+        if (window.db.ddsHashes[hash]) { skip++; continue; }
+        window.db.ddsHashes[hash] = true;
+        if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
+
+        let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
+        if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
+        else if (lowFull.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
+        else if (lowFull.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
+        else if (lowDesc.match(/лицензионн|подписк|комисс|рко|обслуживан|маркзнак|гс1 рус/)) cat = 'Комиссия РКО';
+        else if (lowDesc.match(/единый налоговый|уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
+        else if (lowDesc.match(/таможен/)) cat = 'Федеральная таможенная служба';
+        else if (lowDesc.match(/аренд/)) cat = 'Аренда склада';
+        else if (lowDesc.match(/azs|азс|gazprom|татнефть|нефть|avtodor|автодор|avtomo|автомой|parkov|парков/)) cat = 'Авто расходы компании';
+        else if (lowDesc.match(/aeroport|аэропорт|trip\.com/)) cat = 'Командировки RUB';
+        else if (lowDesc.match(/выдача наличных|снятие|перевод собственных|перевод по номеру телефона/)) {
+          cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
+          if (amt < 0) { newOps.push({ id: 'd_' + Date.now() + '_' + idx + '_c', date: dt, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), note: 'Из банка: ' + desc.slice(0, 90), batchId }); toCash += Math.abs(amt); }
+        }
+        newOps.push({ id: 'd_' + Date.now() + '_' + idx, date: dt, wal: walId, cat, amt, note: desc.slice(0, 140), batchId });
+        added++;
+      }
+      if (newOps.length) window.db.dds.unshift(...newOps);
+      window.save(true);
+      window.renderDdsTab();
+      window.showToastProgress('✅ Выписка загружена!', 2000);
+      alert(`✅ Выписка загружена за доли секунды!\n• Операций: ${added} (дублей: ${skip})\n• Приход: +${window.fmtR(sumIn)}\n• Расход: −${window.fmtR(sumOut)}\n• В «Наличные RUB Главный»: +${window.fmtR(toCash)}`);
+    } catch (err) {
+      window.showToastProgress('❌ Ошибка выписки', 2500);
+      alert('❌ Ошибка чтения выписки: ' + err.message);
+    }
+  };
 })();
 
