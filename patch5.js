@@ -9,7 +9,7 @@
     return Number.isFinite(n) ? n : 0;
   }
 
-  // 1. ЖЁСТКИЙ ФИКС ПАМЯТИ БРАУЗЕРА (чтобы при F5 ничего никогда не пропадало)
+  // 1. НАДЁЖНОЕ СОХРАНЕНИЕ В БРАУЗЕР (при F5 ничего не пропадает)
   const rawSetItem = Storage.prototype.setItem;
   const rawGetItem = Storage.prototype.getItem;
 
@@ -23,7 +23,6 @@
     }
   };
 
-  // При загрузке JSON-бэкапа сохраняем мгновенно напрямую в localStorage
   window.importJson = function (ev) {
     const f = ev && ev.target && ev.target.files && ev.target.files[0];
     if (!f) return;
@@ -46,7 +45,7 @@
     ev.target.value = '';
   };
 
-  // 2. ОЧИСТКА И ЗАЩИТА ЦЕН В ТОВАРАХ И ПАПКАХ (лечит баг 1 221 526 198 $)
+  // 2. ОЧИСТКА И ЗАЩИТА ЦЕН В ТОВАРАХ И ПАПКАХ
   function cleanBrokenSkuPrices() {
     if (!window.db || !Array.isArray(db.skus)) return false;
     let changed = false;
@@ -74,7 +73,6 @@
     return changed;
   }
 
-  // Переопределяем модальное окно «✏️ Папка» (чиним items[0].usd и проверку цены)
   window.openEditFolderModal = function (encodedKey) {
     const fKey = decodeURIComponent(encodedKey);
     const items = (db.skus || []).filter(s => (normClean(s.art) || 'Без артикула') === fKey);
@@ -174,11 +172,24 @@
     }
   };
 
-  // 4. ПОЛНОЦЕННОЕ ОБЛАКО (сохраняет И финансы, И все ШК без затирания!)
+  // 4. УМНОЕ ОБЛАКО (отправляет ТОЛЬКО новые изменения)
   const SUPA_URL = 'https://supabase.co';
   const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
+  const SYNC_HASH_KEY = 'skos_cloud_chunk_hashes_v1';
 
-  window.p4ForceCloudSync = async function () {
+  function fastHash(str) {
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0, ch; i < str.length; i++) {
+      ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  }
+
+  window.p4ForceCloudSync = async function (forceFull) {
     const url = ((document.getElementById('sb-url') || {}).value || (db.cloud && db.cloud.url) || SUPA_URL).trim().replace(/\/$/, '');
     const key = ((document.getElementById('sb-key') || {}).value || (db.cloud && db.cloud.key) || SUPA_KEY).trim();
     const pin = ((document.getElementById('sb-pin') || {}).value || (db.cloud && db.cloud.pin) || 'Skos#9482!Tm').trim();
@@ -192,11 +203,51 @@
     if (btn) {
       if (btn.dataset.busy === '1') return;
       btn.dataset.busy = '1';
-      btn.textContent = '⏳ Сохраняю всё...';
+      btn.textContent = '⏳ Проверка...';
     }
 
     cleanBrokenSkuPrices();
     window.save();
+
+    let savedHashes = {};
+    if (forceFull !== true) {
+      try { savedHashes = JSON.parse(rawGetItem.call(localStorage, SYNC_HASH_KEY) || '{}'); } catch (e) {}
+    }
+    const nextHashes = Object.assign({}, savedHashes);
+
+    const allSkus = Array.isArray(db.skus) ? db.skus : [];
+    const chunkSize = 4000;
+    const chunks = Math.max(1, Math.ceil(allSkus.length / chunkSize));
+    const finDb = Object.assign({}, db, { skus: [], skusChunks: chunks, skusTotal: allSkus.length });
+
+    const mainHash = fastHash(JSON.stringify(finDb));
+    const tasks = [];
+    const changedParts = [];
+
+    if (savedHashes.main !== mainHash) {
+      tasks.push({ id: 'main', payload: finDb, hashKey: 'main', hashVal: mainHash, label: 'Финансы и отчёты' });
+    }
+
+    for (let c = 0; c < chunks; c++) {
+      const part = allSkus.slice(c * chunkSize, (c + 1) * chunkSize).map(s => ({
+        n: s.name, a: s.art, b: s.bc, u: s.usd
+      }));
+      const partHash = fastHash(JSON.stringify(part));
+      const keyName = 'skus_' + c;
+      if (savedHashes[keyName] !== partHash) {
+        tasks.push({ id: keyName, payload: part, hashKey: keyName, hashVal: partHash, label: 'Пачка товаров #' + (c + 1) });
+      }
+    }
+
+    if (!tasks.length) {
+      if (btn) {
+        btn.dataset.busy = '0';
+        btn.textContent = oldTxt;
+      }
+      return alert('✅ Новых изменений нет — в облаке уже сохранена самая свежая версия!');
+    }
+
+    if (btn) btn.textContent = '⏳ Отправка (' + tasks.length + ')...';
 
     const hdrs = {
       'apikey': key,
@@ -206,29 +257,22 @@
       'x-skos-pin': pin
     };
 
-    const allSkus = Array.isArray(db.skus) ? db.skus : [];
-    const chunkSize = 8000;
-    const chunks = Math.max(1, Math.ceil(allSkus.length / chunkSize));
-    const finDb = Object.assign({}, db, { skus: [], skusChunks: chunks, skusTotal: allSkus.length });
-
     try {
-      const rMain = await fetch(url + '/rest/v1/skos_cloud?on_conflict=id', {
-        method: 'POST', headers: hdrs,
-        body: JSON.stringify([{ id: 'main', payload: finDb, updated_at: new Date().toISOString() }])
-      });
-      if (!rMain.ok) throw new Error('Код ответа ' + rMain.status);
+      const reqs = tasks.map(t =>
+        fetch(url + '/rest/v1/skos_cloud?on_conflict=id', {
+          method: 'POST',
+          headers: hdrs,
+          body: JSON.stringify([{ id: t.id, payload: t.payload, updated_at: new Date().toISOString() }])
+        }).then(r => {
+          if (!r.ok) throw new Error('Ошибка ' + t.label + ' (' + r.status + ')');
+          nextHashes[t.hashKey] = t.hashVal;
+          changedParts.push(t.label);
+        })
+      );
 
-      for (let c = 0; c < chunks; c++) {
-        const part = allSkus.slice(c * chunkSize, (c + 1) * chunkSize).map(s => ({
-          n: s.name, a: s.art, b: s.bc, u: s.usd
-        }));
-        const rSku = await fetch(url + '/rest/v1/skos_cloud?on_conflict=id', {
-          method: 'POST', headers: hdrs,
-          body: JSON.stringify([{ id: 'skus_' + c, payload: part, updated_at: new Date().toISOString() }])
-        });
-        if (!rSku.ok) throw new Error('Ошибка ШК пачки #' + c);
-      }
-      alert('✅ Вся база (финансы + ' + allSkus.length + ' ШК) сохранена в облако!');
+      await Promise.all(reqs);
+      rawSetItem.call(localStorage, SYNC_HASH_KEY, JSON.stringify(nextHashes));
+      alert('✅ Сохранены только новые изменения:\n• ' + changedParts.join('\n• '));
     } catch (e) {
       alert('❌ Ошибка облака: ' + e.message);
     } finally {
@@ -240,16 +284,16 @@
   };
 
   window.syncCloud = function (manual) {
-    if (manual) return window.p4ForceCloudSync();
+    if (manual) return window.p4ForceCloudSync(false);
   };
 
-  // 5. ЗАПУСК ПРИ СТАРТЕ: чистим сломанные цены и ускоряем вкладки
+  // 5. ЗАПУСК ПРИ СТАРТЕ
   setTimeout(function () {
     if (cleanBrokenSkuPrices()) {
       window.save();
     }
     const topCloudBtn = Array.from(document.querySelectorAll('.topbar button')).find(b => (b.textContent || '').includes('Облако'));
-    if (topCloudBtn) topCloudBtn.onclick = function () { window.p4ForceCloudSync(); };
+    if (topCloudBtn) topCloudBtn.onclick = function () { window.p4ForceCloudSync(false); };
     if (typeof render === 'function') render();
   }, 450);
 })();
