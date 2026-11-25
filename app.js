@@ -1176,5 +1176,133 @@
     window.save(true); window.renderDdsTab(); window.showToastProgress('✅ Выписка загружена!', 2000);
     alert('✅ Загружено операций: ' + added + ' (дублей пропущено: ' + skip + ')');
   };
+    /* === Фикс-блок 2: Точный парсер выписок Точка/ВТБ/Альфа, Кнопка Очистить, ЯМ и Облако === */
+  // 1. Очистка кривых записей ДДС (где вместо суммы попал 20-значный расчётный счёт)
+  if (window.db && Array.isArray(window.db.dds)) {
+    const beforeLen = window.db.dds.length;
+    window.db.dds = window.db.dds.filter(d => Math.abs(window.num(d.amt)) < 1000000000000);
+    if (window.db.dds.length !== beforeLen) {
+      window.db.ddsHashes = {};
+      window.save(true);
+    }
+  }
+
+  // 2. Правильный парсер банковских выписок (Точка, ВТБ, Альфа) — игнорирует 20-значные счета
+  window.importBankCsv = async function (ev) {
+    if (window.__skosReadOnly) return;
+    const f = ev?.target?.files?.[0]; if (!f) return; ev.target.value = '';
+    const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
+    window.showToastProgress('⏳ Загрузка выписки...');
+    const buf = await f.arrayBuffer();
+    let txt = new TextDecoder('utf-8').decode(buf);
+    if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+    const firstLine = txt.split(/\r?\n/).find(l => l.replace(/[,;\t]/g, '').trim()) || '';
+    const sep = firstLine.includes('\t') ? '\t' : (firstLine.includes(';') ? ';' : ',');
+
+    const rows = txt.split(/\r?\n/).filter(l => l.trim()).map(l => splitCsvLine(l, sep));
+    const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/sum_rur|d_c|списание|зачисление|дата операции|дебет.*кредит|сумма/));
+    const hdr = hdrIdx >= 0 ? rows[hdrIdx].map(x => x.toLowerCase()) : [];
+
+    const iDc = hdr.indexOf('d_c');
+    const iDt = hdr.indexOf('date_oper') >= 0 ? hdr.indexOf('date_oper') : (hdr.indexOf('дата операции') >= 0 ? hdr.indexOf('дата операции') : hdr.findIndex(h => h.includes('дата')));
+    const iIn = hdr.findIndex(h => h.match(/зачислен|приход|поступлен|кредит/) && !h.includes('ост') && !h.includes('обор'));
+    const iOut = hdr.findIndex(h => h.match(/списан|расход|дебет/) && !h.includes('ост') && !h.includes('обор'));
+    const iSum = hdr.indexOf('sum_rur') >= 0 ? hdr.indexOf('sum_rur') : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц') || h.includes('сумма док'));
+    const iText = hdr.indexOf('text70') >= 0 ? hdr.indexOf('text70') : hdr.findIndex(h => h.includes('назначен'));
+
+    let added = 0, skip = 0, sumIn = 0, sumOut = 0;
+    const startRow = hdrIdx >= 0 ? hdrIdx + 1 : 0;
+
+    for (let idx = startRow; idx < rows.length; idx++) {
+      const c = rows[idx];
+      const lowFull = c.join(' ').toLowerCase();
+      if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого')) continue;
+
+      const rawDt = (iDt >= 0 && /^(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})$/.test(c[iDt])) ? c[iDt] : c.find(x => /^(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})$/.test(x));
+      if (!rawDt) continue;
+      const dt = /^\d{4}-\d{2}-\d{2}$/.test(rawDt) ? rawDt.split('-').reverse().join('.') : rawDt;
+
+      let amt = 0;
+      if (iDc >= 0 && iSum >= 0) {
+        const v = Math.abs(window.num(c[iSum])), dc = String(c[iDc] || '').toUpperCase();
+        amt = dc === 'D' ? -v : (dc === 'C' ? v : 0);
+      } else if (iIn >= 0 || iOut >= 0) {
+        const vIn = iIn >= 0 ? Math.abs(window.num(c[iIn])) : 0, vOut = iOut >= 0 ? Math.abs(window.num(c[iOut])) : 0;
+        amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0);
+      } else if (iSum >= 0) {
+        amt = window.num(c[iSum]);
+      } else {
+        for (let i = 1; i < c.length; i++) {
+          const cleanCell = String(c[i] || '').replace(/\s+/g, '');
+          if (/^\d{13,}$/.test(cleanCell)) continue; // Пропускаем 20-значные номера счетов и ИНН
+          const n = window.num(c[i]);
+          if (n !== 0 && !/^\d{2}\.\d{2}\.\d{4}$/.test(c[i])) { amt = n; break; }
+        }
+      }
+      if (!amt || Math.abs(amt) > 1000000000) continue;
+
+      const desc = iText >= 0 ? (c[iText] || c.join(' ')) : c.join(' ');
+      const lowDesc = desc.toLowerCase();
+      const hash = walId + '_' + dt + '_' + amt + '_' + lowDesc.slice(0, 35) + '_' + idx;
+      if (window.db.ddsHashes[hash]) { skip++; continue; }
+      window.db.ddsHashes[hash] = true;
+      if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
+
+      let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
+      if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
+      else if (lowFull.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
+      else if (lowFull.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
+      else if (lowDesc.match(/комисс|рко|обслуживан/)) cat = 'Комиссия РКО';
+      else if (lowDesc.match(/уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
+      else if (lowDesc.match(/снятие налич|выдача налич|перевод собствен/)) {
+        cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
+        if (amt < 0) window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), batchId });
+      }
+      window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: walId, cat, amt, note: desc.slice(0, 140), batchId });
+      added++;
+    }
+    window.save(true); window.renderDdsTab(); window.showToastProgress('✅ Выписка загружена!', 2000);
+    alert(`✅ Загружено: ${added} (дублей: ${skip})\nПриход: +${window.fmtR(sumIn)} | Расход: −${window.fmtR(sumOut)}`);
+  };
+
+  // 3. Делегированный клик для кнопки «🗑️ Очистить» в черновике отчётов (работает всегда)
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('#map-box .btn-danger');
+    if (btn) {
+      mpBatch = null;
+      window.renderMpDraft();
+    }
+  });
+
+  // 4. Жёсткая подстановка URL Supabase перед любым запросом к облаку
+  window.pushCloud = async function (manual) {
+    if (window.__skosReadOnly) return;
+    window.flushLocalSave();
+    const REAL_URL = 'https://supabase.co';
+    const REAL_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE';
+    const pin = ((window.db.cloud && window.db.cloud.pin) || 'Skos#9482!Tm').trim();
+    window.db.cloud = { url: REAL_URL, key: REAL_KEY, pin };
+    if (document.getElementById('sb-url')) document.getElementById('sb-url').value = REAL_URL;
+
+    window.showToastProgress('⏳ Сохранение в облако...');
+    try {
+      const skus = window.db.skus || [], sales = window.db.itemSales || [], sz = 4000;
+      const sc = Math.max(1, Math.ceil(skus.length / sz)), salc = Math.ceil(sales.length / sz);
+      const mainPayload = Object.assign({}, window.db, { skus: [], itemSales: [], ddsHashes: {}, skusChunks: sc, salesChunks: salc });
+      const hdrs = { apikey: REAL_KEY, Authorization: 'Bearer ' + REAL_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal,resolution=merge-duplicates', 'x-skos-pin': pin };
+      const sendRow = async (id, payload) => {
+        const r = await fetch(REAL_URL + '/rest/v1/skos_cloud?on_conflict=id', { method: 'POST', headers: hdrs, body: JSON.stringify([{ id, payload, updated_at: new Date().toISOString() }]) });
+        if (!r.ok) throw new Error(id + ' (' + r.status + ')');
+      };
+      await sendRow('main', mainPayload);
+      for (let c = 0; c < sc; c++) await sendRow('skus_' + c, skus.slice(c * sz, (c + 1) * sz).map(s => ({ n: s.name, a: s.art, c: s.col, z: s.siz, b: s.bc, u: s.usd })));
+      for (let s = 0; s < salc; s++) await sendRow('sales_' + s, sales.slice(s * sz, (s + 1) * sz));
+      window.showToastProgress('✅ Облако сохранено!', 2500);
+      if (manual) alert('✅ Сохранено в облако!\n• ШК: ' + skus.length + ' шт.\n• Отчётов: ' + (window.db.reports || []).length + '\n• ДДС: ' + (window.db.dds || []).length);
+    } catch (e) {
+      window.showToastProgress('❌ Ошибка облака', 3000);
+      if (manual) alert('❌ Ошибка облака: ' + e.message + '\n\nПроверьте, не включён ли VPN/блокировщик или не уснул ли проект в панели Supabase.');
+    }
+  };
 })();
 
