@@ -1468,5 +1468,158 @@
       sec.appendChild(div);
     }
   };
+    /* === Часть А: Парсер выписок Точка / ВТБ / Альфа (с многострочными кавычками) === */
+  function parseFullCsvMatrix(text, sep) {
+    const rows = []; let row = [], cell = '', inQ = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i], nx = text[i + 1];
+      if (ch === '"') { if (inQ && nx === '"') { cell += '"'; i++; } else inQ = !inQ; }
+      else if (ch === sep && !inQ) { row.push(cell.replace(/\r?\n/g, ' ').trim()); cell = ''; }
+      else if ((ch === '\n' || ch === '\r') && !inQ) {
+        if (ch === '\r' && nx === '\n') i++;
+        row.push(cell.replace(/\r?\n/g, ' ').trim());
+        if (row.some(x => x !== '')) rows.push(row);
+        row = []; cell = '';
+      } else cell += ch;
+    }
+    if (cell || row.length) { row.push(cell.replace(/\r?\n/g, ' ').trim()); if (row.some(x => x !== '')) rows.push(row); }
+    return rows;
+  }
+
+  window.importBankCsv = async function (ev) {
+    if (window.__skosReadOnly) return;
+    const f = ev && ev.target && ev.target.files && ev.target.files;
+    if (!f) return; ev.target.value = '';
+    const walId = document.getElementById('dds-wal').value, batchId = 'b_' + Date.now();
+    window.showToastProgress('⏳ Чтение выписки банка...');
+    const buf = await f.arrayBuffer();
+    let txt = new TextDecoder('utf-8').decode(buf);
+    if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
+    txt = txt.replace(/^\uFEFF/, '');
+
+    const hdrLine = txt.split(/\r?\n/).find(l => l.toLowerCase().match(/дата|списание|зачисление|sum_rur|сумма/)) || '';
+    const sep = hdrLine.includes('\t') ? '\t' : ((hdrLine.split(';').length >= hdrLine.split(',').length) ? ';' : ',');
+    const rows = parseFullCsvMatrix(txt, sep);
+    const hdrIdx = rows.findIndex(c => c.join(' ').toLowerCase().match(/дата операции|дата документа|списание|зачисление|sum_rur|d_c|сумма/));
+    const hdr = hdrIdx >= 0 ? rows[hdrIdx].map(x => x.toLowerCase()) : [];
+
+    const iDc = hdr.indexOf('d_c'), iDt = hdr.indexOf('дата операции') >= 0 ? hdr.indexOf('дата операции') : (hdr.indexOf('date_oper') >= 0 ? hdr.indexOf('date_oper') : hdr.findIndex(h => h.includes('дата')));
+    const iIn = hdr.findIndex(h => h.match(/зачислен|приход|поступлен|кредит/) && !h.includes('ост') && !h.includes('обор'));
+    const iOut = hdr.findIndex(h => h.match(/списан|расход|дебет/) && !h.includes('ост') && !h.includes('обор'));
+    const iSum = hdr.indexOf('sum_rur') >= 0 ? hdr.indexOf('sum_rur') : hdr.findIndex(h => h === 'сумма' || h.includes('сумма операц'));
+    const iCtr = hdr.findIndex(h => h.includes('контрагент') && !h.includes('инн') && !h.includes('бик') && !h.includes('счёт') && !h.includes('банк'));
+    const iText = hdr.findIndex(h => h.includes('назначен') || h === 'text70');
+    /* === Часть Б: Завершение парсера выписок + Массовый Шаблон ШК === */
+    let added = 0, skip = 0, sumIn = 0, sumOut = 0, toCash = 0;
+    for (let idx = (hdrIdx >= 0 ? hdrIdx + 1 : 0); idx < rows.length; idx++) {
+      const c = rows[idx]; if (!c || c.length < 3) continue;
+      const lowFull = c.join(' ').toLowerCase();
+      if (lowFull.includes('входящий остаток') || lowFull.includes('исходящий остаток') || lowFull.includes('итого')) continue;
+      let rawDt = (iDt >= 0 && c[iDt]) ? c[iDt].trim() : '';
+      if (!/^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(rawDt)) rawDt = c.find(x => /^\d{2}[.\-/]\d{2}[.\-/]\d{2,4}$/.test(String(x || '').trim())) || '';
+      if (!rawDt) continue;
+      const dt = /^\d{4}-\d{2}-\d{2}$/.test(rawDt) ? rawDt.split('-').reverse().join('.') : rawDt;
+
+      let amt = 0;
+      if (iDc >= 0 && iSum >= 0) { const v = Math.abs(window.num(c[iSum])), dc = String(c[iDc] || '').toUpperCase(); amt = dc === 'D' ? -v : (dc === 'C' ? v : 0); }
+      else if (iIn >= 0 || iOut >= 0) { const vIn = iIn >= 0 ? Math.abs(window.num(c[iIn])) : 0, vOut = iOut >= 0 ? Math.abs(window.num(c[iOut])) : 0; amt = vIn > 0 ? vIn : (vOut > 0 ? -vOut : 0); }
+      else if (iSum >= 0) amt = window.num(c[iSum]);
+      if (!amt || Math.abs(amt) > 500000000) continue;
+
+      const desc = ((iCtr >= 0 && c[iCtr]) ? c[iCtr] + ' — ' : '') + ((iText >= 0 && c[iText]) ? c[iText] : '');
+      const lowDesc = desc.toLowerCase(), hash = walId + '_' + dt + '_' + amt + '_' + lowDesc.slice(0, 40) + '_' + idx;
+      if (window.db.ddsHashes[hash]) { skip++; continue; }
+      window.db.ddsHashes[hash] = true;
+      if (amt > 0) sumIn += amt; else sumOut += Math.abs(amt);
+
+      let cat = amt >= 0 ? 'Прочие поступления' : 'Прочие расходы';
+      if (lowFull.match(/вайлдберриз|wildberries|рвб/)) cat = 'Поступление от ВБ';
+      else if (lowFull.match(/озон|интернет решения/) && amt > 0) cat = 'Поступление от Озон';
+      else if (lowFull.match(/яндекс|спичкин/) && amt > 0) cat = 'Поступление от ЯМ';
+      else if (lowDesc.match(/лицензионн|подписк|комисс|рко|обслуживан|маркзнак|гс1 рус/)) cat = 'Комиссия РКО';
+      else if (lowDesc.match(/единый налоговый|уфнс|енс|енп|налог|взнос/)) cat = 'ЕНП';
+      else if (lowDesc.match(/таможен/)) cat = 'Федеральная таможенная служба';
+      else if (lowDesc.match(/аренд/)) cat = 'Аренда склада';
+      else if (lowDesc.match(/azs|азс|gazprom|татнефть|нефть|avtodor|автодор|avtomo|автомой|parkov|парков/)) cat = 'Авто расходы компании';
+      else if (lowDesc.match(/aeroport|аэропорт|trip\.com/)) cat = 'Командировки RUB';
+      else if (lowDesc.match(/выдача наличных|снятие|перевод собственных|перевод по номеру телефона/)) {
+        cat = amt >= 0 ? 'Поступление — Перевод между счетами' : 'Выбытие — Перевод между счетами';
+        if (amt < 0) { window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: 'c1', cat: 'Поступление — Перевод между счетами', amt: Math.abs(amt), note: 'Из банка: ' + desc.slice(0, 90), batchId }); toCash += Math.abs(amt); }
+      }
+      window.db.dds.unshift({ id: 'd_' + Date.now() + Math.random(), date: dt, wal: walId, cat, amt, note: desc.slice(0, 140), batchId });
+      added++;
+    }
+    window.save(true); window.renderDdsTab(); window.showToastProgress('✅ Выписка загружена!', 2000);
+    alert(`✅ Выписка загружена!\n• Операций: ${added} (дублей: ${skip})\n• Приход: +${window.fmtR(sumIn)}\n• Расход: −${window.fmtR(sumOut)}\n• В «Наличные RUB Главный»: +${window.fmtR(toCash)}`);
+  };
+  /* === Часть В: Массовый Шаблон ШК (Ctrl+V из Excel) + Google Облако === */
+  window.downloadSkuTemplateCsv = () => {
+    const csv = '\uFEFFAртикул продавца;ШК;Название;Себестоимость USD\r\nSKOS-B;2043192743629;Брюки мужские зауженные;6,60\r\nSKOS-FK;OZN861358069;Костюм флисовый;9,80';
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); a.download = 'Shablon_SKOS_SKU.csv'; a.click();
+  };
+
+  window.openMassSkuTemplate = () => {
+    if (window.__skosReadOnly) return;
+    const fKeys = [...new Set((window.db.skus || []).map(x => window.normStr(x.art)).filter(Boolean))].sort();
+    const rowHtml = (a = '', b = '', n = '', u = '') => `<tr><td><input class="input m-art" list="skos-mass-arts" value="${window.esc(a)}" placeholder="SKOS-B"></td><td><input class="input m-bc" value="${window.esc(b)}" placeholder="ШК / SKU" style="font-family:monospace"></td><td><input class="input m-nm" value="${window.esc(n)}" placeholder="Название"></td><td><input type="number" step="0.01" class="input m-usd" value="${u}" placeholder="6.60" style="text-align:right"></td><td><button type="button" class="btn btn-danger" onclick="this.closest('tr').remove()">✕</button></td></tr>`;
+    const modal = document.createElement('div'); modal.className = 'modal-bg';
+    modal.innerHTML = `<datalist id="skos-mass-arts">${fKeys.map(k => `<option value="${window.esc(k)}">`).join('')}</datalist><div class="modal-box" style="max-width:760px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="font-size:16px;font-weight:800">📄 Массовое добавление ШК / SKU (Шаблон)</h3><button type="button" class="btn" onclick="this.closest('.modal-bg').remove()">✕</button></div>
+      <p style="font-size:12px;color:#475569;margin-bottom:8px">Вставьте столбцы из Excel / Google Таблицы через <b>Ctrl+V</b> в любую ячейку:</p>
+      <div style="max-height:50vh;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px"><table><thead><tr><th>Артикул (Папка)</th><th>ШК / Баркод *</th><th>Название</th><th class="num">Себест. $</th><th></th></tr></thead><tbody id="mass-sku-tb">${rowHtml()}${rowHtml()}${rowHtml()}${rowHtml()}${rowHtml()}</tbody></table></div>
+      <div style="margin-top:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><div style="display:flex;gap:6px"><button type="button" class="btn" id="m-add-r">+ Строка</button><button type="button" class="btn" onclick="downloadSkuTemplateCsv()">⬇️ Скачать CSV</button></div><div style="display:flex;gap:8px"><button type="button" class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button><button type="button" class="btn btn-primary" id="m-save-all">✅ Сохранить в каталог</button></div></div></div>`;
+    document.body.appendChild(modal);
+    const tb = document.getElementById('mass-sku-tb');
+    tb.addEventListener('paste', e => {
+      const txt = (e.clipboardData || window.clipboardData).getData('text'); if (!txt || (!txt.includes('\t') && !txt.includes('\n'))) return; e.preventDefault();
+      txt.split(/\r?\n/).filter(l => l.trim()).forEach((line, i) => { const c = line.split('\t').map(x => x.trim()); const tr = document.createElement('tr'); tr.innerHTML = rowHtml(c || '', c || '', c || '', (c || '').replace(',', '.')).replace(/^<tr>|<\/tr>$/g, ''); if (i === 0 && e.target?.closest('tr')) e.target.closest('tr').replaceWith(tr); else tb.appendChild(tr); });
+    });
+    document.getElementById('m-add-r').onclick = () => { const tr = document.createElement('tr'); tr.innerHTML = rowHtml().replace(/^<tr>|<\/tr>$/g, ''); tb.appendChild(tr); };
+    document.getElementById('m-save-all').onclick = () => {
+      const skuMap = new Map(); (window.db.skus || []).forEach(s => skuMap.set(window.normStr(s.bc), s));
+      let added = 0, upd = 0;
+      tb.querySelectorAll('tr').forEach((tr, i) => {
+        const art = window.normStr(tr.querySelector('.m-art').value) || 'Без артикула', bc = window.normStr(tr.querySelector('.m-bc').value), nm = window.normStr(tr.querySelector('.m-nm').value) || art, usd = window.num(tr.querySelector('.m-usd').value);
+        if (!bc) return;
+        const ex = skuMap.get(bc);
+        if (ex) { ex.art = art; ex.name = nm; if (usd > 0) ex.usd = usd; ex.isNew = ex.usd === 0; upd++; }
+        else { const ns = { id: 's_' + Date.now() + '_' + i, art, bc, name: nm, col: '—', siz: '—', usd, src: 'Шаблон', isNew: usd === 0 }; window.db.skus.unshift(ns); skuMap.set(bc, ns); added++; }
+      });
+      modal.remove(); window.save(true); window.renderSkuTab(); alert(`✅ Добавлено: ${added}, обновлено: ${upd}`);
+    };
+  };
+
+  const _origRenderSku = window.renderSkuTab;
+  window.renderSkuTab = function () {
+    _origRenderSku.apply(this, arguments);
+    const bar = document.querySelector('#tab-sku .card:first-child .card-header div:last-child');
+    if (bar && !document.getElementById('skos-mass-tpl-btn') && !window.__skosReadOnly) {
+      const btn = document.createElement('button'); btn.id = 'skos-mass-tpl-btn'; btn.type = 'button'; btn.className = 'btn btn-primary'; btn.textContent = '📄 Шаблон (массово)'; btn.onclick = window.openMassSkuTemplate;
+      bar.insertBefore(btn, bar.children || null);
+    }
+  };
+
+  const _origPushSupa = window.pushCloud;
+  window.pushCloud = async function (manual) {
+    const u = ((window.db.cloud && window.db.cloud.url) || '').trim();
+    if (u.includes('://google.com')) {
+      window.flushLocalSave(); window.showToastProgress('⏳ Сохранение в Google Облако...');
+      try { await fetch(u, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(window.db) }); window.showToastProgress('✅ Сохранено в Google Облако!', 2500); if (manual) alert('✅ База отправлена в Google Облако!'); }
+      catch (e) { if (manual) alert('❌ Ошибка Google Облака: ' + e.message); }
+      return;
+    }
+    return _origPushSupa.apply(this, arguments);
+  };
+
+  const _origPullSupa = window.pullCloud;
+  window.pullCloud = async function (silent) {
+    const u = ((window.db.cloud && window.db.cloud.url) || '').trim();
+    if (u.includes('://google.com')) {
+      try { const res = await fetch(u); const data = await res.json(); if (data && typeof data === 'object' && (data.orgs || data.skus)) { Object.assign(window.db, data); window.db.cloud.url = u; window.ensureStore(); window.flushLocalSave(); window.onPerChange(); if (!silent) alert('✅ База загружена из Google Облака!'); } }
+      catch (e) { if (!silent) alert('❌ Ошибка чтения Google Облака: ' + e.message); }
+      return;
+    }
+    return _origPullSupa.apply(this, arguments);
+  };
 })();
 
