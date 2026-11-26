@@ -554,14 +554,18 @@
     if (orgSel) { const c = orgSel.value || 'ALL'; orgSel.innerHTML = '<option value="ALL">Все юрлица</option>' + [...new Set((window.db.orgs || []).map(o => o.name))].map(n => `<option value="${window.esc(n)}">${window.esc(n)}</option>`).join(''); orgSel.value = c; }
 
     const fYr = document.getElementById('abc-f-yr')?.value || 'ALL', fMo = document.getElementById('abc-f-mo')?.value || 'ALL', fOrg = document.getElementById('abc-f-org')?.value || 'ALL', fMp = document.getElementById('abc-f-mp')?.value || 'ALL';
-    const fArt = document.getElementById('abc-f-art')?.value || 'ALL', fCol = document.getElementById('abc-f-col')?.value || 'ALL', fSiz = document.getElementById('abc-f-siz')?.value || 'ALL', mode = document.getElementById('abc-mode')?.value || 'MODEL';
+    const fArt = document.getElementById('abc-f-art')?.value || 'ALL', fCol = document.getElementById('abc-f-col')?.value || 'ALL', fSiz = (document.getElementById('abc-f-siz')?.value || 'ALL').trim().toUpperCase().replace(/[ХМ]/g, c => c === 'Х' ? 'X' : 'M'), mode = document.getElementById('abc-mode')?.value || 'MODEL';
 
     const skuIdx = window.buildSkuIndex();
-    const groups = {}, artsSet = new Set(), colsSet = new Set(), sizsSet = new Set();
+    const groups = Object.create(null), artsSet = new Set(), colsSet = new Set(), sizsSet = new Set();
     let tS = 0, tR = 0, tRev = 0, tCog = 0, tFee = 0, tPr = 0;
 
     (window.db.itemSales || []).forEach(it => {
       const meta = window.resolveMetaFast(skuIdx, it.bc, it.art, it.name);
+      const color = meta.col && meta.col !== '—' && meta.col !== 'Базовый' ? meta.col : it.color || it.col || meta.col;
+      const size = meta.siz && meta.siz !== '—' ? meta.siz : it.size || it.siz || meta.siz;
+      meta.col = String(color || '—').trim() || '—';
+      meta.siz = String(size || '—').trim().toUpperCase().replace(/[ХМ]/g, c => c === 'Х' ? 'X' : 'M') || '—';
       if (meta.art) artsSet.add(meta.art);
       if (meta.col && meta.col !== '—') colsSet.add(meta.col);
       if (meta.siz && meta.siz !== '—') sizsSet.add(meta.siz);
@@ -585,7 +589,15 @@
       else if (mode === 'SKU') { gk = meta.bc; gTit = `${meta.modelTitle} (${meta.bc})`; gSub = `${meta.art} • ${meta.col} • ${meta.siz}`; }
 
       if (!groups[gk]) groups[gk] = { tit: gTit, sub: gSub, sq: 0, rq: 0, rev: 0, cog: 0, pr: 0 };
-      const g = groups[gk]; g.sq += sq; g.rq += rq; g.rev += rev; g.cog += cog; g.pr += pr;
+      const g = groups[gk];
+      g.sq += sq; g.rq += rq; g.rev += rev; g.cog += cog; g.pr += pr;
+      if (mode === 'MODEL') {
+        g.variants ||= new Map();
+        const key = JSON.stringify([meta.col, meta.siz]);
+        const variant = g.variants.get(key) || {color: meta.col, size: meta.siz, sq: 0, rq: 0, rev: 0, cog: 0, pr: 0};
+        variant.sq += sq; variant.rq += rq; variant.rev += rev; variant.cog += cog; variant.pr += pr;
+        g.variants.set(key, variant);
+      }
     });
 
     const fillSel = (id, all, set) => { const el = document.getElementById(id); if (!el) return; const p = el.value || 'ALL'; el.innerHTML = `<option value="ALL">${all}</option>` + Array.from(set).sort().map(v => `<option value="${window.esc(v)}">${window.esc(v)}</option>`).join(''); if (set.has(p)) el.value = p; };
@@ -602,13 +614,57 @@
     const hdrRow = tbl?.querySelector('thead tr');
     if (hdrRow && !hdrRow.dataset.unitCols) { hdrRow.dataset.unitCols = '1'; hdrRow.innerHTML += '<th class="num">Цена/шт</th><th class="num">Прибыль/шт</th>'; }
     const tbody = tbl?.querySelector('tbody');
-    if (tbody) tbody.innerHTML = list.length ? list.map(x => {
+    if (tbody) tbody.innerHTML = list.length ? list.map((x, index) => {
       cP += Math.max(0, x.pr);
       const cls = (x.pr <= 0 || posP <= 0) ? 'C' : ((cP / posP) * 100 <= 80 ? 'A' : ((cP / posP) * 100 <= 95 ? 'B' : 'C'));
       const sh = posP > 0 ? ((Math.max(0, x.pr) / posP) * 100).toFixed(1) : '0.0';
       const nq = Math.max(1, x.sq - x.rq);
-      return `<tr><td><span class="badge ${cls === 'A' ? 'badge-green' : (cls === 'B' ? 'badge-amber' : 'badge-red')}">${cls}</span></td><td class="bold">${window.esc(x.tit)}</td><td>${window.esc(x.sub)}</td><td class="num bold">${x.sq}</td><td class="num text-red">${x.rq}</td><td class="num">${window.fmtR(x.rev)}</td><td class="num">${window.fmtR(x.cog)}</td><td class="num bold ${x.pr >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(x.pr)}</td><td class="num">${sh}%</td><td class="num">${x.sq > 0 ? window.fmtR(x.rev / nq) : '0 ₽'}</td><td class="num bold ${x.pr >= 0 ? 'text-green' : 'text-red'}">${x.sq > 0 ? window.fmtR(x.pr / nq) : '0 ₽'}</td></tr>`;
+      return `<tr><td><span class="badge ${cls === 'A' ? 'badge-green' : (cls === 'B' ? 'badge-amber' : 'badge-red')}">${cls}</span></td><td class="bold">${x.variants ? `<button type="button" class="btn" data-abc-variant="${index}" aria-expanded="false" aria-controls="abc-variants-${index}" style="max-width:100%;text-align:left">▸ ${window.esc(x.tit)}</button>` : window.esc(x.tit)}</td><td>${window.esc(x.sub)}</td><td class="num bold">${x.sq}</td><td class="num text-red">${x.rq}</td><td class="num">${window.fmtR(x.rev)}</td><td class="num">${window.fmtR(x.cog)}</td><td class="num bold ${x.pr >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(x.pr)}</td><td class="num">${sh}%</td><td class="num">${x.sq > 0 ? window.fmtR(x.rev / nq) : '0 ₽'}</td><td class="num bold ${x.pr >= 0 ? 'text-green' : 'text-red'}">${x.sq > 0 ? window.fmtR(x.pr / nq) : '0 ₽'}</td></tr>`;
     }).join('') : '<tr><td colspan="11" style="text-align:center;padding:16px;color:#94a3b8">Нет данных за выбранный фильтр</td></tr>';
+    for (const button of tbody?.querySelectorAll('[data-abc-variant]') || []) {
+      button.onclick = () => {
+        const index = Number(button.dataset.abcVariant);
+        const rowId = 'abc-variants-' + index;
+        const existing = document.getElementById(rowId);
+        if (existing) {
+          existing.remove();
+          button.setAttribute('aria-expanded', 'false');
+          button.textContent = '▸ ' + list[index].tit;
+          return;
+        }
+        const variants = [...list[index].variants.values()].sort((a, b) =>
+          a.color.localeCompare(b.color, 'ru') || a.size.localeCompare(b.size, 'ru', {numeric: true}));
+        const row = document.createElement('tr');
+        row.id = rowId;
+        const cell = row.insertCell();
+        cell.colSpan = hdrRow?.cells.length || 11;
+        cell.style.cssText = 'padding:10px 16px;background:#f8fafc;overflow:auto';
+        const details = document.createElement('table');
+        details.setAttribute('aria-label', 'Показатели по цветам и размерам');
+        const headings = ['Цвет', 'Размер', 'Чист. шт.', 'Возвраты', 'Выручка', 'Себестоимость', 'Прибыль'];
+        const heading = details.createTHead().insertRow();
+        for (const label of headings) {
+          const th = document.createElement('th');
+          th.textContent = label;
+          heading.appendChild(th);
+        }
+        const body = details.createTBody();
+        for (const variant of variants) {
+          const line = body.insertRow();
+          const cells = [
+            variant.color === '—' ? 'Цвет не определён' : variant.color,
+            variant.size === '—' ? 'Размер не определён' : variant.size,
+            variant.sq - variant.rq, variant.rq, window.fmtR(variant.rev),
+            window.fmtR(variant.cog), window.fmtR(variant.pr)
+          ];
+          for (const value of cells) line.insertCell().textContent = value;
+        }
+        cell.appendChild(details);
+        button.closest('tr').after(row);
+        button.setAttribute('aria-expanded', 'true');
+        button.textContent = '▾ ' + list[index].tit;
+      };
+    }
   };
   /* === Часть 8А: Потоковый ускоритель отчётов WB / Ozon / Яндекс Маркет === */
   window.recalcReportsCogs = function () {
