@@ -580,7 +580,7 @@
 
       const rate = window.getRate(it.yr + '-' + it.mo);
       const sq = window.num(it.sQty), rq = window.num(it.rQty), rev = window.num(it.rev), fee = window.num(it.fee);
-      const cog = Math.max(0, meta.usd * rate * (sq - rq)), pr = rev - fee - cog;
+      const cog = it.source === 'sheets-2026' ? window.num(it.cogs) : Math.max(0, meta.usd * rate * (sq - rq)), pr = rev - fee - cog;
       tS += sq; tR += rq; tRev += rev; tCog += cog; tFee += fee; tPr += pr;
 
       let gk = meta.art, gTit = `${meta.art} — ${meta.modelTitle}`, gSub = `Папка: ${meta.art}`;
@@ -1969,7 +1969,7 @@
         const title = meta?.modelTitle || (identified || unassigned);
         const usd = window.num(meta?.usd || s.usd);
         const historical = window.num(s.cogs ?? s.cost);
-        const cost = usd > 0 ? net * usd * window.getRate(per) : historical;
+        const cost = s.source === 'sheets-2026' ? historical : usd > 0 ? net * usd * window.getRate(per) : historical;
         const row = getRow(name, per, title);
         row.qS += sold; row.qR += returned; row.netQty += net;
         row.missingCost ||= net !== 0 && !(usd > 0 || s.hasCost || s.cost != null);
@@ -2049,4 +2049,96 @@
   }
 
   document.addEventListener('DOMContentLoaded', installUnitReportView);
+})();
+
+;(function installInitialSheetsImport() {
+  const render = window.renderRepTab;
+  const format = 'skos-sheets-initial-2026-v1';
+  const metricNames = ['rev','ret','ads','log','com','cogs'];
+  const periodOf = row => row.per || (row.yr && row.mo ? `${row.yr}-${String(row.mo).padStart(2,'0')}` : '');
+  const keyOf = row => JSON.stringify([row.org, row.mp, periodOf(row)]);
+  const clean = value => typeof value === 'string' ? value.trim() : '';
+  const norm = value => clean(value).toLocaleLowerCase('ru');
+
+  function plan(data, payload) {
+    if (payload?.format !== format || !Array.isArray(payload.groups) || !Array.isArray(payload.skus)) {
+      throw new Error('Выберите стартовый пакет SKOS из Google Таблиц.');
+    }
+    const reports = data.reports || [], itemSales = data.itemSales || [], skus = data.skus || [];
+    const organizations = new Set((data.orgs || []).map(org => org.name));
+    const occupied = new Set([...reports, ...itemSales].map(keyOf));
+    const existingSku = new Map(skus.map(s => [clean(s.bc), s]));
+    const knownArticles = new Map(skus.filter(s => clean(s.name) && clean(s.art)).map(s => [norm(s.name), clean(s.art)]));
+    const addedReports = [], addedSales = [], addedSkus = [];
+    let skipped = 0, unknownOrg = 0;
+    for (const group of payload.groups) {
+      if (!group || !['WB','OZON','YM'].includes(group.mp) || !/^2026-(0[1-9]|1[0-2])$/.test(group.per) ||
+          !metricNames.every(name => Number.isFinite(group[name])) || !Array.isArray(group.items)) {
+        throw new Error('Пакет содержит некорректный отчёт.');
+      }
+      const key = keyOf(group);
+      if (!organizations.has(group.org)) { unknownOrg++; continue; }
+      if (occupied.has(key) || data.locked?.[group.per]) { skipped++; continue; }
+      occupied.add(key);
+      const id = 'sheets-2026-' + encodeURIComponent(key);
+      const [yr, mo] = group.per.split('-');
+      const tags = {org:group.org,mp:group.mp,yr,mo,per:group.per,source:'sheets-2026'};
+      addedReports.push({id,...tags,...Object.fromEntries(metricNames.map(name=>[name,group[name]]))});
+      for (const item of group.items) {
+        if (!clean(item?.name) || !['sQty','rQty','rev','cogs','log','com'].every(name => Number.isFinite(item[name]))) {
+          throw new Error('Пакет содержит некорректную строку по модели.');
+        }
+        const art = knownArticles.get(norm(item.name)) || item.name;
+        addedSales.push({...item,...tags,repId:id,art,bc:'',fee:item.log+item.com,hasCost:true});
+      }
+    }
+    for (const item of payload.skus) {
+      if (!clean(item?.bc) || !clean(item?.name) || !Number.isFinite(item.usd) || item.usd <= 0) {
+        throw new Error('Пакет содержит некорректный товар.');
+      }
+      if (existingSku.has(item.bc)) continue;
+      existingSku.set(item.bc,item);
+      addedSkus.push({bc:item.bc,name:item.name,art:knownArticles.get(norm(item.name)) || item.name,usd:item.usd});
+    }
+    return {next:{...data,reports:[...reports,...addedReports],itemSales:[...itemSales,...addedSales],skus:[...skus,...addedSkus]},
+      reports:addedReports.length,items:addedSales.length,skus:addedSkus.length,skipped,unknownOrg};
+  }
+
+  window.renderRepTab = function () {
+    render.apply(this, arguments);
+    const anchor = document.getElementById('skos-report-upload');
+    if (!anchor || document.getElementById('skos-sheets-import') || window.__skosReadOnly) return;
+    const area = document.createElement('div');
+    area.id = 'skos-sheets-import';
+    area.style.marginBottom = '10px';
+    area.innerHTML = '<button class="btn" type="button">Загрузить стартовые данные Google Таблиц</button><input type="file" accept=".json,application/json" hidden><p role="status"></p>';
+    const input = area.querySelector('input');
+    const button = area.querySelector('button');
+    const status = area.querySelector('p');
+    button.onclick = () => input.click();
+    input.onchange = async () => {
+      const file = input.files[0];
+      input.value = '';
+      if (!file) return;
+      button.disabled = true;
+      try {
+        const payload = JSON.parse(await file.text());
+        const result = plan(window.db, payload);
+        const message = `Новые отчёты: ${result.reports}. Строки по моделям: ${result.items}. Новые баркоды: ${result.skus}. Пропущено групп с данными или закрытым месяцем: ${result.skipped}. Не найдено юрлиц для групп: ${result.unknownOrg}.`;
+        status.textContent = message;
+        if (!(result.reports || result.skus) || !confirm(message + '\n\nДобавить эти данные в локальную базу SKOS?')) return;
+        localStorage.setItem(window._CFG.KEY, JSON.stringify(result.next));
+        Object.assign(window.db,result.next);
+        status.textContent = 'Стартовые данные сохранены. ' + message;
+        window.render();
+      } catch (error) {
+        status.textContent = error.name === 'QuotaExceededError'
+          ? 'В браузере не хватило места. Импорт не сохранён.'
+          : 'Импорт не сохранён. ' + (error instanceof SyntaxError ? 'Файл не удалось прочитать как JSON.' : error.message);
+      } finally {
+        button.disabled = false;
+      }
+    };
+    anchor.after(area);
+  };
 })();
