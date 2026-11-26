@@ -67,7 +67,7 @@
       }
     });
 
-    (window.db.skus || []).forEach(s => {
+    (window.db?.skus || []).forEach(s => {
       const art = String(s.art || '').trim().toLowerCase();
       const bc = String(s.bc || '').trim().toLowerCase();
       const raw = (s.folder || '') + ' ' + (s.art || '') + ' ' + (s.name || '');
@@ -106,24 +106,23 @@
     }
 
     const repMap = new Map(), repTotals = new Map();
-    (window.db.reports || []).forEach(r => {
+    (window.db?.reports || []).forEach(r => {
       repMap.set(String(r.id), r);
       const rMp = String(r.mp || '').toUpperCase();
       if (rMp !== mpCode) return;
       const rPer = String(r.per || r.period || r.month || '');
       const k = `${r.org || ''}|||${rPer}`;
-      const cur = repTotals.get(k) || { rev: 0, log: 0, comm: 0, retQty: 0, retSum: 0 };
+      const cur = repTotals.get(k) || { rev: 0, log: 0, comm: 0, retQty: 0 };
       cur.rev += window.num(r.rev || r.netRev || 0);
       cur.log += window.num(r.log || r.logistics || 0);
       cur.comm += window.num(r.comm || r.commission || 0) + window.num(r.acq || 0) + window.num(r.ads || 0);
-      cur.retQty += window.num(r.retQty || r.rq || r.returnsQty || 0);
-      cur.retSum += window.num(r.ret || r.returns || 0);
+      cur.retQty += window.num(r.retQty || r.rq || 0);
       repTotals.set(k, cur);
     });
 
     const map = new Map(), modelsSet = new Set(), rate = window.getRate();
 
-    (window.db.itemSales || []).forEach(s => {
+    (window.db?.itemSales || []).forEach(s => {
       const r = repMap.get(String(s.repId || s.rId || s.reportId || ''));
       const mp = String(r ? r.mp : (s.mp || '')).toUpperCase();
       if (mp !== mpCode) return;
@@ -189,41 +188,46 @@
   };
   window.importUnitCsvFiles = async function (files) {
     if (!files || !files.length) return;
-    const parseNum = v => parseFloat(String(v || '0').replace(/[^\d,.-]/g, '').replace(',', '.')) || 0;
+    const parseNum = v => parseFloat(String(v ?? '0').replace(/\s+/g, '').replace(',', '.')) || 0;
     const items = [];
-    let detectedMp = window.unitState.sub;
-    let repPer = '2026-01';
+    let detectedMp = window.unitState.sub, repPer = '2026-01';
     const ymOrderSku = new Map();
 
     for (const f of files) {
-      const text = await f.text();
-      const lines = text.split(/\r?\n/).filter(l => l.trim());
-      if (!lines.length) continue;
-      const sep = lines.includes(';') ? ';' : ',';
-      const rows = lines.map(l => l.split(sep).map(c => c.replace(/^"|"$/g, '').trim()));
-      const hIdx = rows.findIndex(r => r.some(c => /Артикул|Предмет|ID бизнес-аккаунта/i.test(c)));
+      let rows = [];
+      if (/\.xlsx?$/i.test(f.name) && window.XLSX) {
+        const wb = window.XLSX.read(await f.arrayBuffer(), { type: 'array' });
+        rows = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames], { header: 1, defval: '' }).map(r => r.map(c => String(c ?? '').trim()));
+      } else {
+        const buf = await f.arrayBuffer();
+        let text = new TextDecoder('utf-8').decode(buf);
+        if (!/Артикул|Предмет|Номер заказа|Тип начисления/i.test(text)) text = new TextDecoder('windows-1251').decode(buf);
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (!lines.length) continue;
+        const first = lines.slice(0, 10).join('\n');
+        const sep = first.includes(';') ? ';' : (first.includes('\t') ? '\t' : ',');
+        rows = lines.map(l => l.split(sep).map(c => c.replace(/^"|"$/g, '').trim()));
+      }
+
+      const hIdx = rows.findIndex(r => r.some(c => /Артикул|Предмет|Номер заказа|Тип начисления/i.test(c)));
       if (hIdx < 0) continue;
       const hdr = rows[hIdx];
       const col = name => hdr.findIndex(h => h.toLowerCase().includes(name.toLowerCase()));
 
-      // 1. Ozon
-      if (hdr.includes('Тип начисления')) {
+      if (hdr.some(h => /Тип начисления/i.test(h))) {
         detectedMp = 'OZON';
         const cGrp = col('Группа услуг'), cType = col('Тип начисления'), cArt = col('Артикул'), cQty = col('Количество'), cPrice = col('Цена продавца'), cSum = col('Сумма итого'), cDate = col('Дата начисления');
         for (let i = hIdx + 1; i < rows.length; i++) {
           const r = rows[i]; if (!r[cType]) continue;
           const art = r[cArt] || 'ОБЩИЕ УСЛУГИ';
-          const dt = r[cDate] || '';
-          if (dt.length >= 10) repPer = dt.slice(6, 10) + '-' + dt.slice(3, 5);
+          const dt = r[cDate] || ''; if (dt.length >= 10) repPer = dt.slice(6, 10) + '-' + dt.slice(3, 5);
           const grp = r[cGrp] || '', typ = r[cType] || '', qty = parseNum(r[cQty]) || 1, sum = parseNum(r[cSum]);
           if (grp === 'Продажи' && typ === 'Выручка') items.push({ mp: 'OZON', per: repPer, art, sold: qty, rq: 0, rev: parseNum(r[cPrice]) || sum, log: 0, comm: 0 });
           else if (grp === 'Возвраты' && typ === 'Возврат выручки') items.push({ mp: 'OZON', per: repPer, art, sold: 0, rq: qty, rev: -Math.abs(parseNum(r[cPrice]) || sum), log: 0, comm: 0 });
-          else if (grp === 'Услуги доставки' || typ.includes('Доставка') || typ.includes('возврат')) items.push({ mp: 'OZON', per: repPer, art, sold: 0, rq: 0, rev: 0, log: Math.abs(sum), comm: 0 });
+          else if (grp === 'Услуги доставки' || /Доставка|возврат|Логистика/i.test(typ)) items.push({ mp: 'OZON', per: repPer, art, sold: 0, rq: 0, rev: 0, log: Math.abs(sum), comm: 0 });
           else if (sum !== 0) items.push({ mp: 'OZON', per: repPer, art, sold: 0, rq: 0, rev: 0, log: 0, comm: -sum });
         }
-      }
-      // 2. Wildberries
-      else if (hdr.includes('Обоснование для оплаты')) {
+      } else if (hdr.some(h => /Обоснование для оплаты/i.test(h))) {
         detectedMp = 'WB';
         const cArt = col('Артикул поставщика'), cBc = col('Баркод'), cOb = col('Обоснование для оплаты'), cQty = col('Кол-во'), cRev = col('Вайлдберриз реализовал'), cComm = col('Вознаграждение Вайлдберриз'), cNds = col('НДС с Вознаграждения'), cAcq = col('Компенсация платёжных'), cLog = col('Услуги по доставке'), cStor = col('Хранение'), cHold = col('Удержания'), cFine = col('штрафов'), cDate = col('Дата продажи');
         for (let i = hIdx + 1; i < rows.length; i++) {
@@ -236,9 +240,7 @@
           else if (ob === 'Возврат') items.push({ mp: 'WB', per: repPer, art, bc, sold: 0, rq: qty || 1, rev: -Math.abs(rev), log, comm });
           else if (log > 0 || comm !== 0) items.push({ mp: 'WB', per: repPer, art, bc, sold: 0, rq: 0, rev: 0, log, comm });
         }
-      }
-      // 3. Яндекс Маркет (заказы + услуги)
-      else if (hdr.includes('Номер заказа')) {
+      } else if (hdr.some(h => /Номер заказа/i.test(h))) {
         detectedMp = 'YM';
         const cOrd = col('Номер заказа'), cSku = col('Ваш SKU'), cStat = col('Статус товара'), cOrdStat = col('Статус заказа'), cPrice = col('Цена продажи'), cAllSrv = col('Все услуги Маркета'), cDeliv = col('Доставка покупателю'), cDate = col('Дата оформления');
         for (let i = hIdx + 1; i < rows.length; i++) {
@@ -247,16 +249,14 @@
           if (cSku >= 0 && r[cSku]) ymOrderSku.set(ord, r[cSku]);
           const sku = (cSku >= 0 && r[cSku]) ? r[cSku] : (ymOrderSku.get(ord) || 'ЯМ Заказ');
           const st = (cStat >= 0 ? r[cStat] : '') || (cOrdStat >= 0 ? r[cOrdStat] : '');
-          const price = parseNum(r[cPrice]);
-          const srv = cAllSrv >= 0 ? parseNum(r[cAllSrv]) : 0;
-          const log = cDeliv >= 0 ? parseNum(r[cDeliv]) : 0;
+          const price = parseNum(r[cPrice]), srv = cAllSrv >= 0 ? parseNum(r[cAllSrv]) : 0, log = cDeliv >= 0 ? parseNum(r[cDeliv]) : 0;
           const comm = Math.max(0, srv - log);
-          if (st.includes('Доставлен')) items.push({ mp: 'YM', per: repPer, art: sku, sold: 1, rq: 0, rev: cAllSrv >= 0 ? 0 : price, log, comm });
-          else if (st.includes('Возврат') || st.includes('Невыкуп')) items.push({ mp: 'YM', per: repPer, art: sku, sold: 0, rq: 1, rev: 0, log, comm });
+          if (/Доставлен/i.test(st)) items.push({ mp: 'YM', per: repPer, art: sku, sold: 1, rq: 0, rev: cAllSrv >= 0 ? 0 : price, log, comm });
+          else if (/Возврат|Невыкуп/i.test(st)) items.push({ mp: 'YM', per: repPer, art: sku, sold: 0, rq: 1, rev: 0, log, comm });
         }
       }
     }
-    if (!items.length) return alert('Не удалось распознать строки отчёта.');
+    if (!items.length) return alert('Файл не распознан. Проверьте, что выбран отчёт WB, Ozon или Яндекс Маркета.');
     const repId = 'unit_' + detectedMp + '_' + Date.now();
     window.db.reports = (window.db.reports || []).filter(r => !(r.mp === detectedMp && r.per === repPer));
     window.db.itemSales = (window.db.itemSales || []).filter(s => !(s.mp === detectedMp && s.per === repPer));
@@ -274,10 +274,10 @@
 
     const nav = [['WB', '🟣 UNIT ВБ (факт)'], ['OZON', '🔵 UNIT Ozon (факт)'], ['YM', '🟡 UNIT ЯМ (факт)'], ['CALC', '🧮 Калькулятор цены (план)']]
       .map(([k, t]) => `<button type="button" class="btn ${st.sub === k ? 'btn-primary' : ''}" style="display:inline-flex;align-items:center" onclick="unitState.sub='${k}';unitState.model='ALL';renderUnitTab()">${t}</button>`).join('') +
-      `<label class="btn" style="margin-left:auto;background:#ecfdf5;border-color:#10b981;color:#065f46;cursor:pointer">📥 Загрузить CSV отчёт (WB/Ozon/ЯМ)<input type="file" multiple accept=".csv" style="display:none" onchange="importUnitCsvFiles(this.files)"></label>`;
+      `<label class="btn" style="margin-left:auto;background:#ecfdf5;border-color:#10b981;color:#065f46;cursor:pointer">📥 Загрузить отчёт (CSV / Excel)<input type="file" multiple accept=".csv,.xlsx,.xls" style="display:none" onchange="importUnitCsvFiles(this.files)"></label>`;
 
     if (st.sub === 'CALC') {
-      const modelEntries = Array.from(codeToTitle.entries()).sort((a, b) => a.localeCompare(b));
+      const modelEntries = Array.from(codeToTitle.entries()).sort((a, b) => String(a).localeCompare(String(b)));
       const usd = codeToUsd.get(c.model) || 0;
       const costRub = usd * rate, bRate = Math.max(0.1, Math.min(1, window.num(c.buyout) / 100));
       const realLog = (window.num(c.logTo) + (1 - bRate) * window.num(c.logBack)) / bRate;
@@ -310,7 +310,7 @@
     }
 
     const { rows, models } = window.buildUnitRows(st.sub);
-    const orgNames = [...new Set((window.db.orgs || []).map(o => o.name))];
+    const orgNames = [...new Set((window.db?.orgs || []).map(o => o.name))];
     let yrOpts = '<option value="ALL">Все года</option>';
     for (let y = 2020; y <= 2050; y++) yrOpts += `<option value="${y}"${String(y) === st.yr ? ' selected' : ''}>${y}</option>`;
     const mos = [['ALL', 'Все месяцы'], ['01', 'Январь'], ['02', 'Февраль'], ['03', 'Март'], ['04', 'Апрель'], ['05', 'Май'], ['06', 'Июнь'], ['07', 'Июль'], ['08', 'Август'], ['09', 'Сентябрь'], ['10', 'Октябрь'], ['11', 'Ноябрь'], ['12', 'Декабрь']];
@@ -356,6 +356,7 @@
     window.mountUnitNav();
     if (window.db && (window.db.reports || []).length > 0) {
       _cloudTicks++;
+      if (document.getElementById('nav-unit')?.classList.contains('active')) window.renderUnitTab();
       const svodBtn = document.getElementById('nav-svod');
       if (svodBtn && svodBtn.classList.contains('active')) {
         if (typeof window.onPerChange === 'function') window.onPerChange();
