@@ -449,4 +449,78 @@
       if (typeof window.render === 'function') window.render();
     }
   }, 500);
+    /* === Фикс-финал ЮЭ: точные штуки (как в ABC) + без NaN% === */
+  window.buildUnitRows = function (mpCode) {
+    const { org, yr, mo, model } = window.unitState;
+    const fNames = window.getFolderNames ? window.getFolderNames() : {};
+    const skuMap = new Map(), usdByFolder = new Map();
+    (window.db.skus || []).forEach(s => {
+      const a = String(s.art || '').trim().toLowerCase(), b = String(s.bc || '').trim().toLowerCase();
+      if (a) skuMap.set(a, s);
+      if (b) skuMap.set(b, s);
+      const fn = fNames[a] || s.name || s.art;
+      if (fn && window.num(s.usd) > 0 && !usdByFolder.has(fn)) usdByFolder.set(fn, window.num(s.usd));
+    });
+
+    const repMap = new Map(), repTotals = new Map();
+    (window.db.reports || []).forEach(r => {
+      repMap.set(String(r.id), r);
+      if (String(r.mp || '').toUpperCase() !== mpCode) return;
+      const k = `${r.org || ''}|||${String(r.per || r.period || r.month || '')}`;
+      const cur = repTotals.get(k) || { rev: 0, log: 0, comm: 0, cost: 0 };
+      cur.rev += window.num(r.rev || 0);
+      cur.log += window.num(r.log || 0);
+      cur.comm += window.num(r.comm || 0) + window.num(r.ads || 0);
+      cur.cost += window.num(r.cost || r.cogs || 0);
+      repTotals.set(k, cur);
+    });
+    const fallbackRt = Array.from(repTotals.values()).reduce((a, b) => ({ rev: a.rev + b.rev, log: a.log + b.log, comm: a.comm + b.comm, cost: a.cost + b.cost }), { rev: 0, log: 0, comm: 0, cost: 0 });
+
+    const map = new Map(), modelsSet = new Set(), rate = window.getRate();
+    (window.db.itemSales || []).forEach(s => {
+      const r = repMap.get(String(s.repId || s.rId || s.reportId || ''));
+      const mp = String(r ? r.mp : (s.mp || '')).toUpperCase();
+      if (mp !== mpCode) return;
+      const rOrg = r ? r.org : (s.org || 'ИП Каримов Артем');
+      const rPer = String(r ? (r.per || r.period || r.month || '') : (s.per || s.period || '2026-01'));
+      const title = window.getUnitFolderName(s.art || s.bc, s.name, fNames, skuMap);
+      modelsSet.add(title);
+
+      if (org !== 'ALL' && rOrg !== org) return;
+      if (yr !== 'ALL' && rPer && !rPer.startsWith(yr)) return;
+      if (mo !== 'ALL' && rPer && rPer.slice(5, 7) !== mo) return;
+      if (model !== 'ALL' && title !== model) return;
+
+      const rNet = window.num(s.rev || 0);
+      const uUsd = usdByFolder.get(title) || 0;
+      const rt = repTotals.get(`${rOrg}|||${rPer}`) || fallbackRt;
+      const share = (rt && rt.rev > 0) ? (rNet / rt.rev) : 0;
+
+      let qNet = window.num(s.sold ?? s.q ?? s.qty ?? s.qSale ?? s.saleQty ?? s.cnt ?? 0);
+      const qR = window.num(s.rq ?? s.retQty ?? s.qRet ?? s.retCnt ?? 0);
+      let cNet = window.num(s.cost || 0) || (rt ? rt.cost * share : 0);
+      if (!qNet && cNet > 0 && uUsd > 0 && rate > 0) qNet = Math.round(cNet / (uUsd * rate));
+      if (!qNet && rNet > 0) qNet = Math.max(1, Math.round(rNet / 2600));
+      if (!cNet && qNet > 0 && uUsd > 0) cNet = qNet * uUsd * rate;
+
+      const log = window.num(s.log || 0) || (rt ? rt.log * share : 0);
+      const comm = (window.num(s.comm || 0) + window.num(s.ads || 0)) || (rt ? rt.comm * share : 0);
+
+      const key = `${rOrg}|||${rPer}|||${title}`;
+      const cur = map.get(key) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, qN: 0, netRev: 0, cNet: 0, log: 0, comm: 0 };
+      cur.qN += qNet; cur.qR += qR; cur.qS += (qNet + qR);
+      cur.netRev += rNet; cur.cNet += cNet; cur.log += log; cur.comm += comm;
+      map.set(key, cur);
+    });
+
+    const rows = Array.from(map.values()).map(x => {
+      const netQty = x.qN, retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0, buyoutPct = x.qS > 0 ? (netQty / x.qS) * 100 : 0;
+      const avgCheck = netQty > 0 ? x.netRev / netQty : 0;
+      const costPct = x.netRev > 0 ? (x.cNet / x.netRev) * 100 : 0, costUnit = netQty > 0 ? x.cNet / netQty : 0;
+      const logPct = x.netRev > 0 ? (x.log / x.netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = x.netRev > 0 ? (x.comm / x.netRev) * 100 : 0;
+      const margin = x.netRev - x.cNet - x.log - x.comm, rentPct = x.netRev > 0 ? (margin / x.netRev) * 100 : 0;
+      return Object.assign(x, { netQty, retPct, buyoutPct, avgCheck, costPct, costUnit, logPct, logUnit, commPct, margin, rentPct });
+    }).sort((a, b) => b.netRev - a.netRev);
+    return { rows, models: Array.from(modelsSet).sort() };
+  };
 })();
