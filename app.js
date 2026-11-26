@@ -2022,4 +2022,94 @@
 
   // Авто-освежение Сводки при старте, чтобы не замирала
   setTimeout(() => { if (typeof window.onPerChange === 'function') window.onPerChange(); }, 1800);
+    /* === Точный расчёт Юнит-экономики по 32 папкам (напрямую из папок SKOS и отчётов) === */
+  window.getUnitFolderByText = function (txt) {
+    const raw = String(txt || '').trim();
+    const low = raw.toLowerCase();
+    const fNames = window.getFolderNames ? window.getFolderNames() : {};
+    if (fNames[low]) return fNames[low];
+    const up = raw.toUpperCase();
+    const idx = up.indexOf('SKOS-');
+    if (idx !== -1) {
+      const rest = up.slice(idx + 5);
+      let code = 'skos-';
+      for (let i = 0; i < rest.length; i++) {
+        const ch = rest[i];
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'А' && ch <= 'Я')) code += ch.toLowerCase();
+        else break;
+      }
+      if (fNames[code]) return fNames[code];
+    }
+    const foundSku = (window.db.skus || []).find(s => String(s.bc || '').toLowerCase() === low || String(s.art || '').toLowerCase() === low);
+    if (foundSku) {
+      const k = String(foundSku.art || '').trim().toLowerCase();
+      return fNames[k] || foundSku.name || foundSku.art;
+    }
+    return raw || 'Без модели';
+  };
+
+  window.buildUnitFactRows = function (mpCode) {
+    const { org, yr, mo, model } = window.unitState;
+    const fNames = window.getFolderNames ? window.getFolderNames() : {};
+    const folderUsd = new Map();
+    (window.db.skus || []).forEach(s => {
+      const fn = fNames[String(s.art || '').trim().toLowerCase()] || s.name || s.art;
+      if (fn && window.num(s.usd) > 0 && !folderUsd.has(fn)) folderUsd.set(fn, window.num(s.usd));
+    });
+
+    const reps = (window.db.reports || []).filter(r => String(r.mp || '').toUpperCase() === mpCode);
+    const repById = new Map();
+    reps.forEach(r => repById.set(String(r.id), r));
+
+    const repItems = new Map();
+    (window.db.itemSales || []).forEach(s => {
+      const vals = Object.values(s).map(v => String(v));
+      const matchedRep = reps.find(r => vals.includes(String(r.id)));
+      if (!matchedRep) return;
+      const rid = String(matchedRep.id);
+      if (!repItems.has(rid)) repItems.set(rid, []);
+      repItems.get(rid).push(s);
+    });
+
+    const map = new Map(), allModels = new Set();
+    reps.forEach(r => {
+      const rOrg = r.org || 'Без юрлица';
+      const rPer = String(r.per || r.period || r.month || r.date || '');
+      const items = repItems.get(String(r.id)) || [];
+      const sumRev = items.reduce((a, x) => a + Math.max(0, window.num(x.rev || x.sale || 0)), 0);
+
+      items.forEach(s => {
+        const title = window.getUnitFolderByText((s.art || '') + ' ' + (s.bc || '') + ' ' + (s.name || ''));
+        allModels.add(title);
+        if (org !== 'ALL' && rOrg !== org) return;
+        if (yr !== 'ALL' && rPer && !rPer.startsWith(yr)) return;
+        if (mo !== 'ALL' && rPer && rPer.slice(5, 7) !== mo) return;
+        if (model !== 'ALL' && title !== model) return;
+
+        const rS = Math.max(0, window.num(s.rev || s.sale || 0));
+        const share = sumRev > 0 ? (rS / sumRev) : (items.length ? 1 / items.length : 0);
+        const rR = window.num(s.ret || s.retRev || 0) || window.num(r.ret || 0) * share;
+        const cNet = window.num(s.cost || 0) || window.num(r.cost || 0) * share;
+        const log = window.num(s.log || 0) || window.num(r.log || 0) * share;
+        const comm = (window.num(s.comm || 0) + window.num(s.ads || 0)) || (window.num(r.comm || 0) + window.num(r.ads || 0)) * share;
+        const unitUsd = folderUsd.get(title) || 0, rate = window.getRate();
+        const qNet = window.num(s.q || s.qty || 0) || (unitUsd > 0 && rate > 0 ? Math.round(cNet / (unitUsd * rate)) : 0);
+        const qR = window.num(s.rq || s.retQty || 0) || (rS > 0 && qNet > 0 ? Math.round(qNet * (rR / rS)) : 0);
+
+        const k = `${rOrg}|||${rPer}|||${title}`;
+        const c = map.get(k) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, rS: 0, rR: 0, cNet: 0, log: 0, comm: 0 };
+        c.qS += qNet + qR; c.qR += qR; c.rS += rS; c.rR += rR; c.cNet += cNet; c.log += log; c.comm += comm;
+        map.set(k, c);
+      });
+    });
+
+    const rows = Array.from(map.values()).map(x => {
+      const netQty = Math.max(0, x.qS - x.qR), retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0, netRev = x.rS - x.rR, avgCheck = netQty > 0 ? netRev / netQty : 0;
+      const costPct = netRev > 0 ? (x.cNet / netRev) * 100 : 0, costUnit = netQty > 0 ? x.cNet / netQty : 0;
+      const logPct = netRev > 0 ? (x.log / netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = netRev > 0 ? (x.comm / netRev) * 100 : 0;
+      const margin = netRev - x.cNet - x.log - x.comm, rentPct = netRev > 0 ? (margin / netRev) * 100 : 0;
+      return Object.assign(x, { netQty, retPct, netRev, avgCheck, costPct, costUnit, logPct, logUnit, commPct, margin, rentPct });
+    }).sort((a, b) => b.netRev - a.netRev);
+    return { rows, models: Array.from(allModels).sort() };
+  };
 })();
