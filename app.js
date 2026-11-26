@@ -226,7 +226,7 @@
         if (allSales.length) data.itemSales = allSales;
       }
 
-      Object.assign(window.db, data);
+      Object.assign(window.db, data, { tab: window.db.tab });
       window.db.cloud = { url, key, pin };
       window.ensureStore();
       window.flushLocalSave();
@@ -260,7 +260,7 @@
     const r = new FileReader();
     r.onload = e => {
       try {
-        Object.assign(window.db, JSON.parse(e.target.result));
+        Object.assign(window.db, JSON.parse(e.target.result), { tab: window.db.tab });
         window.db.cloud = { url: window._CFG.URL, key: window._CFG.KEY_API, pin: window._CFG.OWNER };
         window.ensureStore(); window.flushLocalSave(); window.onPerChange();
         window.showToastProgress('✅ Бэкап загружен!', 2500);
@@ -301,6 +301,24 @@
     if (c) c.textContent = (CRUMBS[id] || 'SKOS Finance 3.0') + (window.__skosReadOnly ? ' [👁️ ТОЛЬКО ПРОСМОТР]' : '');
     window.render();
   };
+
+  const summaryFilterIds = ['f-yr', 'f-mo', 'f-cmp', 'f-org'];
+  const summaryFilterKey = 'skos_summary_filters';
+  function restoreSummaryFilters() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(summaryFilterKey) || '{}') || {}; } catch {}
+    for (const id of summaryFilterIds) {
+      const select = document.getElementById(id);
+      const value = saved[id] ?? (id === 'f-mo' ? 'ALL' : select?.value);
+      if (select && Array.from(select.options).some(option => option.value === value)) select.value = value;
+      select?.addEventListener('change', () => {
+        try {
+          const filters = Object.fromEntries(summaryFilterIds.map(field => [field, document.getElementById(field)?.value]));
+          localStorage.setItem(summaryFilterKey, JSON.stringify(filters));
+        } catch {}
+      });
+    }
+  }
 
   let rafQueued = false;
   window.render = () => {
@@ -1150,7 +1168,12 @@
     if (document.getElementById('sb-url')) document.getElementById('sb-url').value = window.db.cloud?.url || U;
     if (document.getElementById('sb-key')) document.getElementById('sb-key').value = window.db.cloud?.key || K;
     if (document.getElementById('sb-pin')) document.getElementById('sb-pin').value = window.db.cloud?.pin || P;
-    showLoginGate(); window.onPerChange(); window.pullCloud(true);
+    window.fillAllSelects();
+    restoreSummaryFilters();
+    showLoginGate();
+    window.tab('dash');
+    window.onPerChange();
+    window.pullCloud(true);
   });
     /* === Финал (Часть 1/2): Google Облако, Бэкап и Шаблон ШК === */
   const GOOGLE_CLOUD_URL = 'https://google.com';
@@ -1177,7 +1200,7 @@
       const res = await fetch(GOOGLE_CLOUD_URL + '?t=' + Date.now());
       const data = await res.json();
       if (data && typeof data === 'object' && (Array.isArray(data.orgs) || Array.isArray(data.skus))) {
-        Object.assign(window.db, data);
+        Object.assign(window.db, data, { tab: window.db.tab });
         window.db.cloud = { url: GOOGLE_CLOUD_URL, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
         window.ensureStore(); window.flushLocalSave(); window.onPerChange();
         if (!silent) alert('✅ База загружена из Google Облака!');
@@ -1190,7 +1213,7 @@
     const r = new FileReader();
     r.onload = function (e) {
       try {
-        Object.assign(window.db, JSON.parse(e.target.result));
+        Object.assign(window.db, JSON.parse(e.target.result), { tab: window.db.tab });
         window.db.cloud = { url: GOOGLE_CLOUD_URL, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
         window.ensureStore(); window.flushLocalSave(); window.onPerChange();
         alert('✅ Бэкап загружен! Товаров (ШК): ' + (window.db.skus || []).length);
@@ -1456,7 +1479,7 @@
         if (Array.isArray(data.skus)) {
           data.skus = data.skus.map((s, i) => s.bc ? s : ({ id: 's_' + i, name: s.n || s.a || 'Товар', art: s.a || '', bc: s.b || '', col: '—', siz: '—', usd: window.num(s.u) }));
         }
-        Object.assign(window.db, data);
+        Object.assign(window.db, data, { tab: window.db.tab });
         window.db.cloud = { url: gUrl, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
         window.ensureStore(); window.flushLocalSave(); window.onPerChange();
         if (!silent) alert('✅ База загружена из Google Облака!');
@@ -1839,17 +1862,7 @@
     }
     return res;
   };
-    /* === Точечный фикс: Авто-отрисовка Сводки после загрузки Google Облака + фильтр Весь год === */
-  const _origPullCloudRefresh = window.pullCloud;
-  window.pullCloud = async function (silent) {
-    await _origPullCloudRefresh.apply(this, arguments);
-    const moSel = document.getElementById('f-mo');
-    if (moSel && moSel.value === '11' && (window.db.reports || []).length > 0 && !(window.db.reports || []).some(r => String(r.mo) === '11')) {
-      moSel.value = 'ALL';
-    }
-    if (typeof window.onPerChange === 'function') window.onPerChange();
-    if (typeof window.render === 'function') window.render();
-  };
+
 })();
 
 ;(function () {
