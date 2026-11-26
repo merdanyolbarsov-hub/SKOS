@@ -1,4 +1,4 @@
-/* === SKOS Finance 3.0 — Чистый модуль Юнит-экономики (WB / Ozon / ЯМ) === */
+/* === SKOS Finance 3.0 — Точная Юнит-экономика (1-в-1 как в таблице SKOS) === */
 (function () {
   window.unitState = { sub: 'WB', org: 'ALL', yr: '2026', mo: 'ALL', model: 'ALL' };
   window.unitCalcState = { mp: 'WB', model: '', price: 4500, buyout: 30, commPct: 29, acqPct: 1.5, logTo: 120, logBack: 50, pack: 65, taxPct: 8, drrPct: 5, targetMargin: 25 };
@@ -121,9 +121,13 @@
       if (!qR && rt && rt.retQty > 0) qR = Math.round(rt.retQty * share);
       if (!qR && rt && rt.ret > 0 && rNet > 0) qR = Math.round((rt.ret * share) / (rNet / Math.max(1, qNet)));
 
+      // Реальная себестоимость каждой модели (Штуки × Цена папки в $ × Курс)
       const cNet = (qNet > 0 && uUsd > 0) ? (qNet * uUsd * rate) : window.num(s.cost || 0);
-      const log = window.num(s.log || 0) || (rt ? rt.log * share : 0);
-      const comm = (window.num(s.comm || 0) + window.num(s.ads || 0)) || (rt ? rt.comm * share : 0);
+      // Реальная логистика и комиссия из строки продажи (если есть), иначе из отчёта
+      const sLog = window.num(s.log || 0);
+      const sComm = window.num(s.comm || 0) + window.num(s.ads || 0);
+      const log = sLog > 0 ? sLog : (rt ? rt.log * share : 0);
+      const comm = sComm > 0 ? sComm : (rt ? rt.comm * share : 0);
 
       const key = `${rOrg}|||${rPer}|||${title}`;
       const cur = map.get(key) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, qN: 0, netRev: 0, cNet: 0, log: 0, comm: 0 };
@@ -224,15 +228,17 @@
       </table></div></div>`;
   };
 
-  let _svodAutoPainted = false;
-  setInterval(() => {
+  let _cloudTicks = 0;
+  const _cloudWatch = setInterval(() => {
     window.mountUnitNav();
-    if (!_svodAutoPainted && window.db && (window.db.reports || []).length > 0) {
-      _svodAutoPainted = true;
-      const yrSel = document.querySelector('#tab-svod select, #page-svod select, select');
-      if (yrSel) yrSel.dispatchEvent(new Event('change', { bubbles: true }));
-      if (typeof window.onPerChange === 'function') window.onPerChange();
-      if (typeof window.render === 'function') window.render();
+    if (window.db && (window.db.reports || []).length > 0) {
+      _cloudTicks++;
+      const svodBtn = document.getElementById('nav-svod');
+      if (svodBtn && svodBtn.classList.contains('active')) {
+        if (typeof window.onPerChange === 'function') window.onPerChange();
+        if (typeof window.render === 'function') window.render();
+      }
+      if (_cloudTicks >= 4) clearInterval(_cloudWatch);
     }
   }, 500);
   window.mountUnitNav();
