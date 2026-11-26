@@ -618,6 +618,7 @@
   }
 
   let mpBatch = null;
+  let readingMpFiles = false;
   async function streamParseMpFile(file, rate, skuIdx) {
     const buf = await file.arrayBuffer();
     let txt = new TextDecoder('utf-8').decode(buf);
@@ -687,20 +688,6 @@
     return { fileName: file.name, mp: det.startsWith('YM') ? 'YM' : det, rev: Math.max(0, grossRev - ret), ret, com: Math.max(0, com), log: Math.max(0, log), ads: Math.max(0, ads), cogs: Math.max(0, cogs), sQty, rQty, items };
   }
   /* === Часть 8Б: Черновик отчётов, реестр (✏️/✕) и Каталог по 32 папкам === */
-  window.onRepFile = async function (ev) {
-    if (window.__skosReadOnly) return;
-    const files = Array.from(ev?.target?.files || []);
-    if (!files.length) return;
-    ev.target.value = '';
-    const org = document.getElementById('up-org').value, yr = document.getElementById('up-yr').value, mo = document.getElementById('up-mo').value;
-    const rate = window.getRate(yr + '-' + mo), skuIdx = window.buildSkuIndex();
-    if (!mpBatch || mpBatch.org !== org || mpBatch.yr !== yr || mpBatch.mo !== mo) mpBatch = { org, yr, mo, files: [] };
-    for (const f of files) { const p = await streamParseMpFile(f, rate, skuIdx); if (p) mpBatch.files.push(p); }
-    window.showToastProgress('✅ Файлы обработаны!', 1500);
-    if (!mpBatch.files.length) { mpBatch = null; return alert('Не удалось распознать строки в файле.'); }
-    window.renderMpDraft();
-  };
-
   window.renderMpDraft = function () {
     const box = document.getElementById('map-box'); if (!box) return;
     if (!mpBatch || !mpBatch.files.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
@@ -714,23 +701,32 @@
       }
     }
     mpBatch.files.forEach(f => {
-      if (!grp[f.mp]) grp[f.mp] = { mp: f.mp, cnt: 0, rev: 0, ret: 0, com: 0, log: 0, ads: 0, cogs: 0, sQty: 0, rQty: 0, items: [] };
-      const g = grp[f.mp]; g.cnt++; g.rev += f.rev; g.ret += f.ret; g.com += f.com; g.log += f.log; g.ads += f.ads; g.cogs += f.cogs; g.sQty += f.sQty; g.rQty += f.rQty; for (const item of f.items) {
+      if (!grp[f.mp]) grp[f.mp] = { mp: f.mp, cnt: 0, rev: 0, ret: 0, com: 0, log: 0, ads: 0, cogs: 0, sQty: 0, rQty: 0, items: [], sources: [] };
+      const g = grp[f.mp];
+      g.sources.push(f.source); g.cnt++; g.rev += f.rev; g.ret += f.ret; g.com += f.com; g.log += f.log; g.ads += f.ads; g.cogs += f.cogs; g.sQty += f.sQty; g.rQty += f.rQty; for (const item of f.items) {
         const matches = f.unitType === 'services' ? orderItems.get(item.orderKey) : null;
         const linked = matches?.size === 1 ? matches.values().next().value : null;
         g.items.push(linked ? { ...item, art: linked.art, name: linked.name } : item);
       }
     });
+    const marketTypes = new Set(mpBatch.files.filter(f => f.mp === 'YM').map(f => f.unitType).filter(Boolean));
+    const missingMarketFile = marketTypes.size === 1;
     box.classList.remove('hidden');
     box.innerHTML = `<div style="font-weight:700;margin-bottom:8px">📝 Черновик (${mpBatch.files.length} ф.) • ${window.esc(mpBatch.org)} • ${mpBatch.mo}.${mpBatch.yr}</div>` +
       Object.values(grp).map(g => `<div style="padding:8px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:6px;font-size:12px"><b>${g.mp}</b> (${g.cnt} ф.): Выручка <b>${window.fmtR(g.rev)}</b> | Возвраты <b class="text-red">${window.fmtR(g.ret)}</b> | Услуги МП <b>${window.fmtR(g.com + g.log + g.ads)}</b> | Себест. <b>${window.fmtR(g.cogs)}</b></div>`).join('') +
-      `<div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="btn btn-primary" id="btn-ok-mp">✅ Сохранить в учёт</button><button type="button" class="btn btn-danger" onclick="mpBatch=null;renderMpDraft()">🗑️ Очистить</button></div>`;
+      (missingMarketFile ? `<p role="status">Для Яндекс Маркета добавьте второй CSV за тот же период: ${marketTypes.has("items") ? "«Услуги и маржа по заказам»" : "«Транзакции по заказам и товарам»"}.</p>` : '') +
+      `<div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="btn btn-primary" id="btn-ok-mp"${missingMarketFile ? " disabled" : ""}>✅ Сохранить в учёт</button><button type="button" class="btn btn-danger" onclick="mpBatch=null;renderMpDraft()">🗑️ Очистить</button></div>`;
     document.getElementById('btn-ok-mp').onclick = () => {
+      if (readingMpFiles || !mpBatch || missingMarketFile) return;
       if (window.db.locked?.[mpBatch.yr + '-' + mpBatch.mo]) return alert('Месяц закрыт!');
+      const saved = savedReportSources(mpBatch.org, mpBatch.yr, mpBatch.mo);
+      if (mpBatch.files.some(f => saved.has(f.source.hash))) {
+        return alert('Один из файлов уже сохранён. Очистите черновик и добавьте только новые файлы.');
+      }
       Object.values(grp).forEach(g => {
         const bo = (g.sQty + g.rQty) > 0 ? Math.round((g.sQty / (g.sQty + g.rQty)) * 100) : 89;
         const reportId = 'r_' + Date.now() + '_' + g.mp;
-        window.db.reports.unshift({ id: reportId, per: mpBatch.yr + '-' + mpBatch.mo, org: mpBatch.org, mp: g.mp, yr: mpBatch.yr, mo: mpBatch.mo, rev: g.rev, ret: g.ret, ads: g.ads, log: g.log, com: g.com, cogs: g.cogs, bo });
+        window.db.reports.unshift({ id: reportId, per: mpBatch.yr + '-' + mpBatch.mo, org: mpBatch.org, mp: g.mp, yr: mpBatch.yr, mo: mpBatch.mo, rev: g.rev, ret: g.ret, ads: g.ads, log: g.log, com: g.com, cogs: g.cogs, bo, sources: g.sources });
         g.items.forEach(it => window.db.itemSales.push({ ...it, repId: reportId, org: mpBatch.org, mp: g.mp, yr: mpBatch.yr, mo: mpBatch.mo, per: mpBatch.yr + '-' + mpBatch.mo }));
       });
       mpBatch = null; window.renderMpDraft(); window.save(true); window.render();
@@ -740,7 +736,36 @@
 
   window.editReportRow = id => { const r = (window.db.reports || []).find(x => x.id === id); if (!r) return; const rev = prompt('Выручка (₽):', r.rev); if (rev === null) return; const ret = prompt('Возвраты (₽):', r.ret); if (ret === null) return; const ads = prompt('Реклама (₽):', r.ads); if (ads === null) return; const log = prompt('Логистика (₽):', r.log); if (log === null) return; const com = prompt('Комиссия (₽):', r.com); if (com === null) return; const cog = prompt('Себестоимость (₽):', r.cogs); if (cog === null) return; r.rev = window.num(rev); r.ret = window.num(ret); r.ads = window.num(ads); r.log = window.num(log); r.com = window.num(com); r.cogs = window.num(cog); window.save(true); window.renderRepTab(); };
   window.saveMan = e => { e.preventDefault(); if (window.__skosReadOnly) return; window.db.reports.unshift({ id: 'r_' + Date.now(), org: document.getElementById('mn-org').value, mp: document.getElementById('mn-mp').value, yr: document.getElementById('mn-yr').value, mo: document.getElementById('mn-mo').value, rev: window.num(document.getElementById('mn-rev').value), ret: window.num(document.getElementById('mn-ret').value), ads: window.num(document.getElementById('mn-ads').value), log: window.num(document.getElementById('mn-log').value), com: window.num(document.getElementById('mn-com').value), cogs: window.num(document.getElementById('mn-cog').value), bo: window.num(document.getElementById('mn-bo').value) || 88 }); window.save(true); window.closeModals(); window.render(); };
+  function mountReportUpload() {
+    const draft = document.getElementById('map-box');
+    if (!draft || document.getElementById('skos-report-upload')) return;
+    const panel = document.createElement('div');
+    panel.id = 'skos-report-upload';
+    panel.style.cssText = 'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px;margin:10px 0;border:2px dashed #93c5fd;border-radius:10px;background:#f8faff';
+    panel.innerHTML = '<div><strong>Перетащи сюда CSV-отчёты</strong><div style="font-size:12px;margin-top:4px">Один аккаунт и месяц. Для Яндекс Маркета можно выбрать оба CSV сразу.</div></div><button type="button" class="btn btn-primary">Выбрать CSV</button><input type="file" accept=".csv,text/csv" multiple hidden>';
+    const input = panel.querySelector('input');
+    panel.querySelector('button').onclick = () => input.click();
+    input.onchange = event => window.onRepFile(event);
+    panel.ondragover = event => {
+      if (!Array.from(event.dataTransfer.types).includes('Files')) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+      panel.style.borderColor = '#2563eb';
+    };
+    panel.ondragleave = event => {
+      if (!panel.contains(event.relatedTarget)) panel.style.borderColor = '#93c5fd';
+    };
+    panel.ondrop = event => {
+      event.preventDefault();
+      panel.style.borderColor = '#93c5fd';
+      const files = Array.from(event.dataTransfer.files);
+      if (files.length) window.onRepFile({target: {files, value: ''}});
+    };
+    draft.before(panel);
+  }
+
   window.renderRepTab = () => {
+    if (!window.__skosReadOnly) mountReportUpload();
     const reps = window.db.reports || [], cnt = document.getElementById('rep-cnt'), tb = document.getElementById('tb-reps');
     if (cnt) cnt.textContent = reps.length + ' отчётов';
     if (tb) tb.innerHTML = reps.length ? reps.map(r => { const p = window.num(r.rev) - window.num(r.ads) - window.num(r.log) - window.num(r.com) - window.num(r.cogs); return `<tr><td>${r.yr}-${r.mo}</td><td class="bold">${window.esc(r.org)}</td><td><span class="badge badge-blue">${window.esc(r.mp)}</span></td><td class="num">${window.fmtR(r.rev)}</td><td class="num text-red">${window.fmtR(r.ret)}</td><td class="num">${window.fmtR(r.ads)}</td><td class="num">${window.fmtR(r.log)}</td><td class="num">${window.fmtR(r.com)}</td><td class="num">${window.fmtR(r.cogs)}</td><td class="num bold ${p >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(p)}</td><td style="white-space:nowrap"><button class="btn" style="padding:3px 7px" onclick="editReportRow('${r.id}')">✏️</button> <button class="btn btn-danger" onclick="db.reports=db.reports.filter(x=>x.id!=='${r.id}');save(true);renderRepTab()">✕</button></td></tr>`; }).join('') : '<tr><td colspan="11" style="text-align:center;color:#94a3b8;padding:16px">Отчётов пока нет</td></tr>';
@@ -1584,7 +1609,7 @@
     let text = new TextDecoder('utf-8').decode(buffer);
     if (text.includes('\uFFFD')) text = new TextDecoder('windows-1251').decode(buffer);
     const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
-    const headerIndex = lines.findIndex(line => /обоснование для оплаты|^"?id начисления|^"?id бизнес-аккаунта/i.test(line.trim()));
+    const headerIndex = lines.findIndex(line => /обоснование для оплаты|^"?id начисления|^"?id бизнес-аккаунта|ваш sku.*статус товара|статус заказа.*все услуги маркета за заказы/i.test(line.trim()));
     if (headerIndex < 0) return null;
     const headerLine = lines[headerIndex];
     const sep = headerLine.includes(';') ? ';' : '\t';
@@ -1669,74 +1694,99 @@
     return out;
   }
 
-  const _origOnRepFile = window.onRepFile;
+  function reportPeriodFromFilename(name) {
+    const match = name.match(/(?:^|[ _])(\d{2})([.-])(\d{2})\2(\d{4})[_– -](\d{2})\2(\d{2})\2(\d{4})(?:\.csv)$/i);
+    if (!match) return null;
+    const [, startDay,, startMonth,startYear,endDay,endMonth,endYear] = match;
+    const start = new Date(`${startYear}-${startMonth}-${startDay}T00:00:00Z`);
+    const end = new Date(`${endYear}-${endMonth}-${endDay}T00:00:00Z`);
+    if (!Number.isFinite(+start) || !Number.isFinite(+end) || end < start ||
+        start.getUTCDate() !== Number(startDay) || end.getUTCDate() !== Number(endDay)) return null;
+    if (startMonth === endMonth && startYear === endYear) return `${startYear}-${startMonth}`;
+    const firstOfNextMonth = new Date(Date.UTC(Number(startYear), Number(startMonth), 1));
+    if (/^united_/i.test(name) && startDay === '01' && +end === +firstOfNextMonth) return `${startYear}-${startMonth}`;
+    return null;
+  }
+
+  function savedReportSources(org, yr, mo) {
+    const sources = new Set();
+    for (const report of window.db.reports || []) {
+      if (report.org !== org || String(report.yr) !== String(yr) || String(report.mo).padStart(2, '0') !== mo) continue;
+      for (const source of report.sources || []) {
+        if (source.hash) sources.add(source.hash);
+      }
+    }
+    return sources;
+  }
+
   window.onRepFile = async function (ev) {
     if (window.__skosReadOnly) return;
     const files = Array.from(ev?.target?.files || []);
     if (!files.length) return;
-    const regularFiles = [];
-    const org = document.getElementById('up-org').value, yr = document.getElementById('up-yr').value, mo = document.getElementById('up-mo').value;
-    const rate = window.getRate(yr + '-' + mo), skuIdx = window.buildSkuIndex();
-    if (!mpBatch || mpBatch.org !== org || mpBatch.yr !== yr || mpBatch.mo !== mo) mpBatch = { org, yr, mo, files: [] };
-
-    for (const file of files) {
-      const exact = await parseUnitReport(file, rate, skuIdx);
-      if (exact) { mpBatch.files.push(exact); continue; }
-      const buf = await file.arrayBuffer();
-      let txt = new TextDecoder('utf-8').decode(buf);
-      if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
-      const lines = txt.replace(/^\uFEFF/, '').split('\n').map(l => l.split('\r').join('')).filter(l => l.trim());
-      const sample = lines.slice(0, 15).join('\n').toLowerCase();
-
-      if (sample.includes('ваш sku') && sample.includes('статус товара')) {
-        const hIdx = lines.findIndex(l => l.toLowerCase().includes('ваш sku'));
-        const sep = lines.at(hIdx).includes('\t') ? '\t' : ((lines.at(hIdx).split(';').length >= lines.at(hIdx).split(',').length) ? ';' : ',');
-        const hdr = splitCsvLine(lines.at(hIdx), sep).map(h => h.toLowerCase().trim());
-        const iSku = hdr.indexOf('ваш sku'), iName = hdr.indexOf('название товара'), iPrice = hdr.findIndex(h => h.startsWith('цена продажи'));
-        const iQty = hdr.indexOf('доставлено или возвращено'), iSt = hdr.indexOf('статус товара');
-        let grossRev = 0, ret = 0, cogs = 0, sQty = 0, rQty = 0; const items = [];
-        for (let r = hIdx + 1; r < lines.length; r++) {
-          const rw = splitCsvLine(lines.at(r), sep); if (rw.length <= iSt) continue;
-          const st = String(rw.at(iSt) || '').toLowerCase(), sku = String(rw.at(iSku) || '').trim(), nm = iName >= 0 ? String(rw.at(iName) || '').trim() : sku;
-          const pr = window.num(rw.at(iPrice)), q = Math.abs(window.num(rw.at(iQty))) || 1;
-          if (!sku || !pr) continue;
-          const m = window.resolveMetaFast(skuIdx, sku, sku, nm);
-          if (st.includes('доставлен')) {
-            grossRev += pr * q; sQty += q; if (m.usd > 0) cogs += m.usd * rate * q;
-            items.push({ bc: sku, art: m.art || sku, name: nm, sQty: q, rQty: 0, rev: pr * q, fee: 0 });
-          } else if (st.includes('возврат')) {
-            ret += pr * q; rQty += q; if (m.usd > 0) cogs -= m.usd * rate * q;
-            items.push({ bc: sku, art: m.art || sku, name: nm, sQty: 0, rQty: q, rev: -(pr * q), fee: 0 });
-          }
-        }
-        mpBatch.files.push({ fileName: file.name, mp: 'YM', rev: Math.max(0, grossRev - ret), ret, com: 0, log: 0, ads: 0, cogs: Math.max(0, cogs), sQty, rQty, items });
-      } else if (sample.includes('все услуги маркета за заказы')) {
-        const hIdx = lines.findIndex(l => l.toLowerCase().includes('все услуги маркета за заказы'));
-        const sep = lines.at(hIdx).includes('\t') ? '\t' : ((lines.at(hIdx).split(';').length >= lines.at(hIdx).split(',').length) ? ';' : ',');
-        const hdr = splitCsvLine(lines.at(hIdx), sep).map(h => h.toLowerCase().trim());
-        const iAll = hdr.findIndex(h => h.startsWith('все услуги маркета')), iBoost = hdr.findIndex(h => h.startsWith('буст продаж'));
-        const iDeliv = hdr.findIndex(h => h.startsWith('доставка покупателю'));
-        let com = 0, log = 0, ads = 0;
-        for (let r = hIdx + 1; r < lines.length; r++) {
-          const rw = splitCsvLine(lines.at(r), sep); if (rw.length <= iAll) continue;
-          const vAll = Math.abs(window.num(rw.at(iAll))), vBoost = iBoost >= 0 ? Math.abs(window.num(rw.at(iBoost))) : 0, vDel = iDeliv >= 0 ? Math.abs(window.num(rw.at(iDeliv))) : 0;
-          ads += vBoost; log += vDel; com += Math.max(0, vAll - vBoost - vDel);
-        }
-        mpBatch.files.push({ fileName: file.name, mp: 'YM', rev: 0, ret: 0, com, log, ads, cogs: 0, sQty: 0, rQty: 0, items: [] });
-      } else {
-        regularFiles.push(file);
+    ev.target.value = '';
+    if (readingMpFiles) return alert('Дождитесь завершения текущей загрузки.');
+    const org = document.getElementById('up-org').value;
+    const yearField = document.getElementById('up-yr');
+    const monthField = document.getElementById('up-mo');
+    const detected = files.map(file => reportPeriodFromFilename(file.name));
+    const knownPeriods = new Set(detected.filter(Boolean));
+    if (knownPeriods.size > 1) return alert('В выбранных файлах разные месяцы. Загрузите каждый месяц отдельно.');
+    const [autoPeriod] = knownPeriods;
+    const canAutoSelect = autoPeriod && detected.every(Boolean) && !mpBatch?.files.length;
+    if (canAutoSelect) {
+      const [autoYear, autoMonth] = autoPeriod.split('-');
+      if ([...yearField.options].some(option => option.value === autoYear) &&
+          [...monthField.options].some(option => option.value === autoMonth)) {
+        yearField.value = autoYear;
+        monthField.value = autoMonth;
       }
     }
-
-    if (regularFiles.length) {
-      const dt = new DataTransfer();
-      regularFiles.forEach(f => dt.items.add(f));
-      ev.target.files = dt.files;
-      return _origOnRepFile.call(this, ev);
-    } else {
-      ev.target.value = '';
+    const yr = yearField.value;
+    const mo = monthField.value;
+    if (autoPeriod && autoPeriod !== yr + '-' + mo) {
+      return alert('Период в имени CSV не совпадает с выбранным месяцем: ' + autoPeriod);
+    }
+    if (!org || !yr || !mo) return alert('Выберите аккаунт, год и месяц.');
+    if (window.db.locked?.[yr + '-' + mo]) return alert('Месяц закрыт!');
+    const rate = window.getRate(yr + '-' + mo);
+    const skuIdx = window.buildSkuIndex();
+    const samePeriod = mpBatch?.org === org && mpBatch.yr === yr && mpBatch.mo === mo;
+    if (mpBatch?.files.length && !samePeriod) return alert('Сохраните или очистите текущий черновик перед сменой аккаунта или периода.');
+    const batch = samePeriod ? mpBatch : {org, yr, mo, files: []};
+    const seen = savedReportSources(org, yr, mo);
+    const skipped = [], failed = [];
+    for (const file of batch.files) seen.add(file.source.hash);
+    readingMpFiles = true;
+    try {
+      for (const file of files) {
+        try {
+          if (!/\.csv$/i.test(file.name)) { failed.push(file.name + ' — нужен CSV'); continue; }
+          const bytes = await file.arrayBuffer();
+          const digest = await crypto.subtle.digest('SHA-256', bytes);
+          const hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2,'0')).join('');
+          if (seen.has(hash)) { skipped.push(file.name); continue; }
+          const parsed = await parseUnitReport(file, rate, skuIdx) || await streamParseMpFile(file, rate, skuIdx);
+          if (!parsed || !(parsed.items.length || parsed.rev || parsed.ret || parsed.log || parsed.com || parsed.ads)) {
+            failed.push(file.name + ' — нет распознанных операций');
+            continue;
+          }
+          parsed.source = {name: file.name, hash};
+          batch.files.push(parsed);
+          seen.add(hash);
+        } catch {
+          failed.push(file.name + ' — ошибка чтения');
+        }
+      }
+      mpBatch = batch.files.length ? batch : null;
+    } finally {
+      readingMpFiles = false;
       window.renderMpDraft();
     }
+    const messages = [];
+    if (skipped.length) messages.push('Повторы пропущены:\n' + skipped.join('\n'));
+    if (failed.length) messages.push('Файлы не добавлены:\n' + failed.join('\n'));
+    if (messages.length) alert(messages.join('\n\n'));
+    else window.showToastProgress('Файлы добавлены в черновик', 1500);
   };
 
   // Тихое автосохранение в Google Облако без всплывающих окон (алерт только при личном клике)
