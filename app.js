@@ -2116,7 +2116,25 @@
     const input = area.querySelector('input');
     const button = area.querySelector('button');
     const status = area.querySelector('p');
-    if (catalogOnly) button.textContent = 'Загрузить баркоды и себестоимость';
+    if (catalogOnly) {
+      button.textContent = 'Загрузить баркоды и себестоимость';
+      const templateButton = document.createElement('button');
+      templateButton.type = 'button';
+      templateButton.className = 'btn';
+      templateButton.style.marginInlineStart = '8px';
+      templateButton.textContent = 'Скачать шаблон с примером';
+      templateButton.onclick = () => {
+        const example = {"format":"skos-sheets-initial-2026-v1","groups":[],"skus":[{"bc":"2000000000015","name":"Футболка белая, размер M","usd":4.5},{"bc":"2000000000022","name":"Футболка чёрная, размер L","usd":4.8}]};
+        const blob = new Blob([JSON.stringify(example, null, 2)], {type:'application/json;charset=utf-8'});
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.href = url;
+        link.download = 'SKOS-шаблон-баркодов.json';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      };
+      button.after(templateButton);
+    }
     button.onclick = () => input.click();
     input.onchange = async () => {
       const file = input.files[0];
