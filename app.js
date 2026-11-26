@@ -1667,7 +1667,7 @@
     if (typeof window.onPerChange === 'function') window.onPerChange();
     if (typeof window.render === 'function') window.render();
   };
-    /* === ЧИСТЫЙ МОДУЛЬ ЮНИТ-ЭКОНОМИКИ SKOS (Часть 1: Меню + Расчёт по 32 папкам) === */
+      /* === ЧИСТАЯ ЮНИТ-ЭКОНОМИКА SKOS (Блок 1: Меню + Сбор по 32 папкам) === */
   window.unitState = { sub: 'WB', org: 'ALL', yr: '2026', mo: 'ALL', model: 'ALL' };
   window.unitCalcState = { mp: 'WB', model: '', price: 4500, buyout: 88, commPct: 29, acqPct: 1.5, logTo: 120, logBack: 50, pack: 65, taxPct: 8, drrPct: 5, targetMargin: 25 };
 
@@ -1679,18 +1679,18 @@
       btn.textContent = '🧮 Юнит-экономика (WB / Ozon / ЯМ)';
       btn.onclick = function () {
         document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-sec').forEach(s => s.classList.add('hidden'));
+        document.querySelectorAll('.page, .tab-sec').forEach(p => { p.classList.add('hidden'); p.classList.remove('active'); });
         btn.classList.add('active');
-        const uSec = document.getElementById('tab-unit');
-        if (uSec) uSec.classList.remove('hidden');
+        const uSec = document.getElementById('page-unit');
+        if (uSec) { uSec.classList.remove('hidden'); uSec.classList.add('active'); }
         window.renderUnitTab();
       };
       abcBtn.insertAdjacentElement('afterend', btn);
     }
-    const abcSec = document.getElementById('tab-abc');
-    if (abcSec && !document.getElementById('tab-unit')) {
-      const sec = document.createElement('section');
-      sec.id = 'tab-unit'; sec.className = 'tab-sec hidden';
+    const abcSec = document.getElementById('page-abc') || document.getElementById('tab-abc');
+    if (abcSec && !document.getElementById('page-unit')) {
+      const sec = document.createElement('div');
+      sec.id = 'page-unit'; sec.className = 'page hidden';
       abcSec.insertAdjacentElement('afterend', sec);
     }
     document.querySelectorAll('.nav-btn:not(#nav-unit)').forEach(b => {
@@ -1698,7 +1698,8 @@
         b.dataset.uClean = '1';
         b.addEventListener('click', () => {
           document.getElementById('nav-unit')?.classList.remove('active');
-          document.getElementById('tab-unit')?.classList.add('hidden');
+          document.getElementById('page-unit')?.classList.add('hidden');
+          document.getElementById('page-unit')?.classList.remove('active');
         });
       }
     });
@@ -1725,7 +1726,7 @@
     }
     return nameRaw || artRaw || 'Без модели';
   };
-  /* === ЧИСТЫЙ МОДУЛЬ ЮНИТ-ЭКОНОМИКИ SKOS (Часть 2А: Расчёт по 32 папкам) === */
+  /* === ЧИСТАЯ ЮНИТ-ЭКОНОМИКА SKOS (Блок 2А: Сбор по 32 папкам) === */
   window.buildUnitRows = function (mpCode) {
     const { org, yr, mo, model } = window.unitState;
     const fNames = window.getFolderNames ? window.getFolderNames() : {};
@@ -1789,10 +1790,10 @@
     }).sort((a, b) => b.netRev - a.netRev);
     return { rows, models: Array.from(modelsSet).sort() };
   };
-  /* === ЧИСТЫЙ МОДУЛЬ ЮНИТ-ЭКОНОМИКИ SKOS (Часть 2Б: Отрисовка таблиц + Калькулятор + Запуск) === */
+  /* === ЧИСТАЯ ЮНИТ-ЭКОНОМИКА SKOS (Блок 2Б: Отрисовка таблиц + Калькулятор + Финал) === */
   window.renderUnitTab = function () {
     window.mountUnitNav();
-    const sec = document.getElementById('tab-unit'); if (!sec) return;
+    const sec = document.getElementById('page-unit'); if (!sec) return;
     const st = window.unitState, c = window.unitCalcState, rate = window.getRate(), fNames = window.getFolderNames ? window.getFolderNames() : {};
     const nav = [['WB', '🟣 UNIT ВБ (факт)'], ['OZON', '🔵 UNIT Ozon (факт)'], ['YM', '🟡 UNIT ЯМ (факт)'], ['CALC', '🧮 Калькулятор цены (план)']]
       .map(([k, t]) => `<button type="button" class="btn ${st.sub === k ? 'btn-primary' : ''}" onclick="unitState.sub='${k}';unitState.model='ALL';renderUnitTab()">${t}</button>`).join('');
