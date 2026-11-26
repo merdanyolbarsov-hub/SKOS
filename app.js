@@ -1667,19 +1667,34 @@
     if (typeof window.onPerChange === 'function') window.onPerChange();
     if (typeof window.render === 'function') window.render();
   };
-    /* === МОДУЛЬ ЮНИТ-ЭКОНОМИКИ (Автономный и безопасный) === */
-  window.unitState = { sub: 'WB', org: 'ALL', yr: '2026', mo: 'ALL', q: '' };
+      /* === ИДЕАЛЬНАЯ ЮНИТ-ЭКОНОМИКА SKOS (32 папки, 2020-2050, Месяцы, Фильтр моделей, Без наложения вкладок) === */
+  window.unitState = { sub: 'WB', org: 'ALL', yr: '2026', mo: 'ALL', model: 'ALL' };
   window.unitCalcState = { mp: 'WB', model: '', price: 4500, buyout: 88, commPct: 29, acqPct: 1.5, logTo: 120, logBack: 50, pack: 65, taxPct: 8, drrPct: 5, targetMargin: 25 };
 
-  window.openUnitTabDirect = function () {
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-sec').forEach(s => s.classList.add('hidden'));
-    const btn = document.getElementById('nav-unit');
-    const sec = document.getElementById('tab-unit');
-    if (btn) btn.classList.add('active');
-    if (sec) sec.classList.remove('hidden');
-    if (window.db) window.db.tab = 'unit';
-    window.renderUnitTab();
+  window.switchUnitClean = function (toUnit) {
+    const uSec = document.getElementById('tab-unit');
+    const uBtn = document.getElementById('nav-unit');
+    document.querySelectorAll('.tab-sec, section[id^="tab-"]').forEach(s => {
+      if (s.id === 'tab-unit') {
+        s.style.setProperty('display', toUnit ? 'block' : 'none', 'important');
+        s.classList.toggle('hidden', !toUnit);
+        s.classList.toggle('active', toUnit);
+      } else if (toUnit) {
+        s.style.setProperty('display', 'none', 'important');
+        s.classList.add('hidden');
+        s.classList.remove('active');
+      } else {
+        s.style.removeProperty('display');
+      }
+    });
+    if (toUnit) {
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      if (uBtn) uBtn.classList.add('active');
+      if (window.db) window.db.tab = 'unit';
+      window.renderUnitTab();
+    } else if (uBtn) {
+      uBtn.classList.remove('active');
+    }
   };
 
   window.initUnitSafe = function () {
@@ -1688,59 +1703,98 @@
       const btn = document.createElement('button');
       btn.id = 'nav-unit'; btn.type = 'button'; btn.className = 'nav-btn';
       btn.textContent = '🧮 Юнит-экономика (WB / Ozon / ЯМ)';
-      btn.onclick = window.openUnitTabDirect;
+      btn.onclick = () => window.switchUnitClean(true);
       abcBtn.insertAdjacentElement('afterend', btn);
     }
     const abcSec = document.getElementById('tab-abc');
     if (abcSec && !document.getElementById('tab-unit')) {
       const sec = document.createElement('section');
       sec.id = 'tab-unit'; sec.className = 'tab-sec hidden';
+      sec.style.setProperty('display', 'none', 'important');
       abcSec.insertAdjacentElement('afterend', sec);
     }
     document.querySelectorAll('.nav-btn:not(#nav-unit)').forEach(b => {
-      if (!b.dataset.uHook) {
-        b.dataset.uHook = '1';
-        b.addEventListener('click', () => {
-          document.getElementById('nav-unit')?.classList.remove('active');
-          document.getElementById('tab-unit')?.classList.add('hidden');
-        });
+      if (!b.dataset.uBound) {
+        b.dataset.uBound = '1';
+        b.addEventListener('click', () => window.switchUnitClean(false), true);
       }
     });
   };
-  window.buildUnitFactRows = function (mpCode) {
-    const { org, yr, mo, q } = window.unitState, fNames = window.getFolderNames ? window.getFolderNames() : {}, repMap = new Map(), map = new Map();
-    (window.db.reports || []).forEach(r => repMap.set(r.id, r));
-    (window.db.itemSales || []).forEach(s => {
-      const r = repMap.get(s.repId), mp = r ? r.mp : (s.mp || ''); if (mp !== mpCode) return;
-      const rOrg = r ? r.org : (s.org || 'Без юрлица'), rPer = r ? r.per : (s.per || '');
-      if (org !== 'ALL' && rOrg !== org) return;
-      if (yr !== 'ALL' && !rPer.startsWith(yr)) return;
-      if (mo !== 'ALL' && rPer.slice(5, 7) !== mo) return;
-      const title = fNames[window.normStr ? window.normStr(s.art) : (s.art || '')] || s.name || s.art || 'Без названия';
-      if (q && !title.toLowerCase().includes(q.toLowerCase()) && !rOrg.toLowerCase().includes(q.toLowerCase())) return;
-      const k = `${rOrg}|||${rPer}|||${title}`;
-      const c = map.get(k) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, rS: 0, rR: 0, cS: 0, cR: 0, log: 0, comm: 0 };
-      c.qS += window.num(s.qSale !== undefined ? s.qSale : s.qty); c.qR += window.num(s.qRet || 0);
-      c.rS += window.num(s.revSale !== undefined ? s.revSale : s.rev); c.rR += window.num(s.revRet || 0);
-      c.cS += window.num(s.costSale !== undefined ? s.costSale : s.cost); c.cR += window.num(s.costRet || 0);
-      c.log += window.num(s.log || 0); c.comm += window.num(s.comm || 0) + window.num(s.acq || 0) + window.num(s.ads || 0);
-      map.set(k, c);
-    });
-    return Array.from(map.values()).map(x => {
-      const netQty = x.qS - x.qR, retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0, netRev = x.rS - x.rR, avgCheck = netQty > 0 ? netRev / netQty : 0;
-      const netCost = x.cS - x.cR, costPct = netRev > 0 ? (netCost / netRev) * 100 : 0, costUnit = netQty > 0 ? netCost / netQty : 0;
-      const logPct = netRev > 0 ? (x.log / netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = netRev > 0 ? (x.comm / netRev) * 100 : 0;
-      const margin = netRev - netCost - x.log - x.comm, rentPct = netRev > 0 ? (margin / netRev) * 100 : 0;
-      return Object.assign(x, { netQty, retPct, netRev, avgCheck, netCost, costPct, costUnit, logPct, logUnit, commPct, margin, rentPct });
-    }).sort((a, b) => b.netRev - a.netRev);
+  window.resolveUnitFolder = function (rawArt, rawName, fNames, skuByBc, skuByArt) {
+    const a = window.normStr ? window.normStr(rawArt) : String(rawArt || '').trim();
+    if (fNames[a]) return fNames[a];
+    const up = (a + ' ' + String(rawName || '')).toUpperCase();
+    const m = up.match(/(SKOS-[A-ZА-Я0-9]+)/);
+    if (m && m) {
+      const k = window.normStr ? window.normStr(m) : m;
+      if (fNames[k]) return fNames[k];
+      if (skuByArt.has(k)) return fNames[skuByArt.get(k).art] || skuByArt.get(k).name || k;
+    }
+    if (skuByBc.has(a)) { const s = skuByBc.get(a); return fNames[s.art] || s.name || s.art; }
+    if (skuByArt.has(a)) { const s = skuByArt.get(a); return fNames[s.art] || s.name || s.art; }
+    return rawName || a || 'Без модели';
   };
 
+  window.buildUnitFactRows = function (mpCode) {
+    const { org, yr, mo, model } = window.unitState;
+    const fNames = window.getFolderNames ? window.getFolderNames() : {};
+    const skuByBc = new Map(), skuByArt = new Map();
+    (window.db.skus || []).forEach(s => {
+      if (s.bc) skuByBc.set(window.normStr(s.bc), s);
+      if (s.art) skuByArt.set(window.normStr(s.art), s);
+    });
+    const repMap = new Map();
+    (window.db.reports || []).forEach(r => repMap.set(String(r.id), r));
+
+    const map = new Map();
+    const allModels = new Set();
+
+    (window.db.itemSales || []).forEach(s => {
+      const r = repMap.get(String(s.repId || s.reportId || ''));
+      const mp = String(r ? r.mp : (s.mp || '')).toUpperCase();
+      if (mp !== mpCode) return;
+      const rOrg = r ? r.org : (s.org || 'Без юрлица');
+      const rPer = String(r ? r.per : (s.per || ''));
+      const title = window.resolveUnitFolder(s.art || s.bc, s.name, fNames, skuByBc, skuByArt);
+      allModels.add(title);
+
+      if (org !== 'ALL' && rOrg !== org) return;
+      if (yr !== 'ALL' && rPer && !rPer.startsWith(yr)) return;
+      if (mo !== 'ALL' && rPer && rPer.slice(5, 7) !== mo) return;
+      if (model !== 'ALL' && title !== model) return;
+
+      const k = `${rOrg}|||${rPer}|||${title}`;
+      const c = map.get(k) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, rS: 0, rR: 0, cNet: 0, log: 0, comm: 0 };
+      const qS = window.num(s.qSale !== undefined ? s.qSale : (s.qty || 0));
+      const qR = window.num(s.qRet !== undefined ? s.qRet : (s.retQty || 0));
+      const rS = window.num(s.revSale !== undefined ? s.revSale : (s.rev || 0));
+      const rR = window.num(s.revRet !== undefined ? s.revRet : (s.retRev || 0));
+      const cS = window.num(s.costSale !== undefined ? s.costSale : (s.cost || 0));
+      const cR = window.num(s.costRet !== undefined ? s.costRet : (s.retCost || 0));
+
+      c.qS += qS; c.qR += qR; c.rS += rS; c.rR += rR; c.cNet += (cS - cR);
+      c.log += window.num(s.log || 0);
+      c.comm += window.num(s.comm || 0) + window.num(s.acq || 0) + window.num(s.ads || 0);
+      map.set(k, c);
+    });
+
+    const rows = Array.from(map.values()).map(x => {
+      const netQty = x.qS - x.qR, retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0, netRev = x.rS - x.rR, avgCheck = netQty > 0 ? netRev / netQty : 0;
+      const costPct = netRev > 0 ? (x.cNet / netRev) * 100 : 0, costUnit = netQty > 0 ? x.cNet / netQty : 0;
+      const logPct = netRev > 0 ? (x.log / netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = netRev > 0 ? (x.comm / netRev) * 100 : 0;
+      const margin = netRev - x.cNet - x.log - x.comm, rentPct = netRev > 0 ? (margin / netRev) * 100 : 0;
+      return Object.assign(x, { netQty, retPct, netRev, avgCheck, costPct, costUnit, logPct, logUnit, commPct, margin, rentPct });
+    }).sort((a, b) => b.netRev - a.netRev);
+
+    return { rows, models: Array.from(allModels).sort() };
+  };
   window.renderUnitTab = function () {
     window.initUnitSafe();
     const sec = document.getElementById('tab-unit'); if (!sec) return;
-    const st = window.unitState, c = window.unitCalcState, rate = window.getRate(), fNames = window.getFolderNames ? window.getFolderNames() : {};
+    const st = window.unitState, c = window.unitCalcState, rate = window.getRate();
+    const fNames = window.getFolderNames ? window.getFolderNames() : {};
     const nav = [['WB', '🟣 UNIT ВБ (факт)'], ['OZON', '🔵 UNIT Ozon (факт)'], ['YM', '🟡 UNIT ЯМ (факт)'], ['CALC', '🧮 Калькулятор цены (план)']]
-      .map(([k, t]) => `<button type="button" class="btn ${st.sub === k ? 'btn-primary' : ''}" onclick="unitState.sub='${k}';renderUnitTab()">${t}</button>`).join('');
+      .map(([k, t]) => `<button type="button" class="btn ${st.sub === k ? 'btn-primary' : ''}" onclick="unitState.sub='${k}';unitState.model='ALL';renderUnitTab()">${t}</button>`).join('');
 
     if (st.sub === 'CALC') {
       const models = [...new Set((window.db.skus || []).map(s => fNames[window.normStr(s.art)] || s.name || s.art).filter(Boolean))].sort();
@@ -1751,9 +1805,9 @@
       const fixRub = costRub + realLog + window.num(c.pack), profit = window.num(c.price) * (1 - varPct) - fixRub;
       const marginPct = window.num(c.price) > 0 ? (profit / window.num(c.price)) * 100 : 0;
       const breakEven = fixRub / Math.max(0.05, 1 - varPct), recPrice = fixRub / Math.max(0.05, 1 - varPct - Math.min(0.7, window.num(c.targetMargin) / 100));
-      sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🧮 Юнит-экономика SKOS</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${nav}</div>
+      sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🧮 Калькулятор Юнит-экономики SKOS</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${nav}</div>
         <div class="form-grid" style="margin-bottom:12px">
-          <div style="grid-column:span 2"><label>Модель (Курс: ${rate} ₽/$)</label><select class="select" onchange="unitCalcState.model=this.value;renderUnitTab()"><option value="">— Выберите модель —</option>${models.map(m => `<option value="${window.esc(m)}"${m === c.model ? ' selected' : ''}>${window.esc(m)}</option>`).join('')}</select></div>
+          <div style="grid-column:span 2"><label>Папка-модель (Курс: ${rate} ₽/$)</label><select class="select" onchange="unitCalcState.model=this.value;renderUnitTab()"><option value="">— Выберите модель —</option>${models.map(m => `<option value="${window.esc(m)}"${m === c.model ? ' selected' : ''}>${window.esc(m)}</option>`).join('')}</select></div>
           <div><label>Цена ₽</label><input type="number" class="input" value="${c.price}" onchange="unitCalcState.price=num(this.value);renderUnitTab()"></div>
           <div><label>% Выкупа</label><input type="number" class="input" value="${c.buyout}" onchange="unitCalcState.buyout=num(this.value);renderUnitTab()"></div>
           <div><label>Комиссия %</label><input type="number" step="0.1" class="input" value="${c.commPct}" onchange="unitCalcState.commPct=num(this.value);renderUnitTab()"></div>
@@ -1775,73 +1829,44 @@
       return;
     }
 
-    const rows = window.buildUnitFactRows(st.sub);
+    const { rows, models } = window.buildUnitFactRows(st.sub);
     const orgNames = [...new Set((window.db.orgs || []).map(o => o.name))];
-    const trs = rows.map(r => `<tr><td>${window.esc(r.org)}</td><td>${window.esc(r.per)}</td><td class="bold">${window.esc(r.title)}</td><td class="num">${r.qS}</td><td class="num text-red">${r.qR}</td><td class="num bold">${r.netQty}</td><td class="num">${r.retPct.toFixed(1)}%</td><td class="num bold">${window.fmtR(r.netRev)}</td><td class="num">${window.fmtR(r.avgCheck)}</td><td class="num">${window.fmtR(r.netCost)} (${r.costPct.toFixed(0)}%)</td><td class="num">${window.fmtR(r.costUnit)}</td><td class="num">${window.fmtR(r.log)} (${r.logPct.toFixed(0)}%)</td><td class="num">${window.fmtR(r.logUnit)}</td><td class="num">${window.fmtR(r.comm)} (${r.commPct.toFixed(0)}%)</td><td class="num bold ${r.margin >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(r.margin)}</td><td class="num"><span class="badge ${r.rentPct >= 25 ? 'badge-green' : (r.rentPct >= 10 ? 'badge-amber' : 'badge-red')}">${r.rentPct.toFixed(1)}%</span></td></tr>`).join('');
-    sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🧮 Юнит-экономика SKOS (${st.sub})</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${nav}</div>
+    let yrOpts = '<option value="ALL">Все года</option>';
+    for (let y = 2020; y <= 2050; y++) yrOpts += `<option value="${y}"${String(y) === st.yr ? ' selected' : ''}>${y}</option>`;
+    const mos = [['ALL', 'Все месяцы'], ['01', 'Январь'], ['02', 'Февраль'], ['03', 'Март'], ['04', 'Апрель'], ['05', 'Май'], ['06', 'Июнь'], ['07', 'Июль'], ['08', 'Август'], ['09', 'Сентябрь'], ['10', 'Октябрь'], ['11', 'Ноябрь'], ['12', 'Декабрь']];
+    const moOpts = mos.map(([k, v]) => `<option value="${k}"${k === st.mo ? ' selected' : ''}>${v}</option>`).join('');
+
+    const tot = rows.reduce((a, r) => { a.qS += r.qS; a.qR += r.qR; a.qN += r.netQty; a.rN += r.netRev; a.cN += r.cNet; a.l += r.log; a.cm += r.comm; a.m += r.margin; return a; }, { qS: 0, qR: 0, qN: 0, rN: 0, cN: 0, l: 0, cm: 0, m: 0 });
+    const tRet = tot.qS > 0 ? (tot.qR / tot.qS) * 100 : 0, tAvg = tot.qN > 0 ? tot.rN / tot.qN : 0, tRent = tot.rN > 0 ? (tot.m / tot.rN) * 100 : 0;
+
+    const trs = rows.map(r => `<tr>
+      <td>${window.esc(r.org)}</td><td>${window.esc(r.per)}</td><td class="bold">${window.esc(r.title)}</td>
+      <td class="num">${r.qS}</td><td class="num text-red">${r.qR}</td><td class="num bold">${r.netQty}</td><td class="num">${r.retPct.toFixed(1)}%</td>
+      <td class="num bold">${window.fmtR(r.netRev)}</td><td class="num">${window.fmtR(r.avgCheck)}</td>
+      <td class="num">${window.fmtR(r.cNet)} (${r.costPct.toFixed(0)}%)</td><td class="num">${window.fmtR(r.costUnit)}</td>
+      <td class="num">${window.fmtR(r.log)} (${r.logPct.toFixed(0)}%)</td><td class="num">${window.fmtR(r.logUnit)}</td>
+      <td class="num">${window.fmtR(r.comm)} (${r.commPct.toFixed(0)}%)</td>
+      <td class="num bold ${r.margin >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(r.margin)}</td>
+      <td class="num"><span class="badge ${r.rentPct >= 25 ? 'badge-green' : (r.rentPct >= 10 ? 'badge-amber' : 'badge-red')}">${r.rentPct.toFixed(1)}%</span></td>
+    </tr>`).join('');
+
+    sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🧮 Юнит-экономика SKOS (${st.sub}) — По папкам-моделям</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${nav}</div>
       <div class="form-grid" style="margin-bottom:10px">
-        <div><label>Юрлицо</label><select class="select" onchange="unitState.org=this.value;renderUnitTab()"><option value="ALL">Все (5 ИП + ООО)</option>${orgNames.map(n => `<option value="${window.esc(n)}"${n === st.org ? ' selected' : ''}>${window.esc(n)}</option>`).join('')}</select></div>
-        <div><label>Год</label><select class="select" onchange="unitState.yr=this.value;renderUnitTab()"><option value="ALL">Все</option>${[2024, 2025, 2026, 2027].map(y => `<option value="${y}"${String(y) === st.yr ? ' selected' : ''}>${y}</option>`).join('')}</select></div>
-        <div><label>Поиск модели</label><input class="input" value="${window.esc(st.q)}" oninput="unitState.q=this.value;renderUnitTab()"></div>
+        <div><label>Юрлицо / Аккаунт</label><select class="select" onchange="unitState.org=this.value;renderUnitTab()"><option value="ALL">Все (5 ИП + ООО)</option>${orgNames.map(n => `<option value="${window.esc(n)}"${n === st.org ? ' selected' : ''}>${window.esc(n)}</option>`).join('')}</select></div>
+        <div><label>Год (2020–2050)</label><select class="select" onchange="unitState.yr=this.value;renderUnitTab()">${yrOpts}</select></div>
+        <div><label>Месяц</label><select class="select" onchange="unitState.mo=this.value;renderUnitTab()">${moOpts}</select></div>
+        <div style="grid-column:span 2"><label>Папка-модель (${models.length} шт.)</label><select class="select" onchange="unitState.model=this.value;renderUnitTab()"><option value="ALL">— Все папки-модели —</option>${models.map(m => `<option value="${window.esc(m)}"${m === st.model ? ' selected' : ''}>${window.esc(m)}</option>`).join('')}</select></div>
       </div>
-      <div style="overflow-x:auto"><table style="font-size:11.5px;white-space:nowrap"><thead><tr><th>Аккаунт</th><th>Период</th><th>Модель</th><th class="num">Прод</th><th class="num">Возвр</th><th class="num">Чист</th><th class="num">%возв</th><th class="num">Выручка ₽</th><th class="num">Ср.чек</th><th class="num">Себест ₽</th><th class="num">Себ/ед</th><th class="num">Логист ₽</th><th class="num">Лог/ед</th><th class="num">Комис+Экв</th><th class="num">Маржа ₽</th><th class="num">Рентаб</th></tr></thead><tbody>${trs || '<tr><td colspan="16">Нет данных за выбранный период</td></tr>'}</tbody></table></div></div>`;
+      <div style="overflow-x:auto"><table style="font-size:11.5px;white-space:nowrap">
+        <thead>
+          <tr><th>Аккаунт</th><th>Период</th><th>Папка-модель</th><th class="num">Прод</th><th class="num">Возвр</th><th class="num">Чист</th><th class="num">%возв</th><th class="num">Выручка ₽</th><th class="num">Ср.чек</th><th class="num">Себест ₽</th><th class="num">Себ/ед</th><th class="num">Логист ₽</th><th class="num">Лог/ед</th><th class="num">Комис+Экв</th><th class="num">Маржа ₽</th><th class="num">Рентаб</th></tr>
+          <tr style="background:#f1f5f9;font-weight:800"><td colspan="3">ИТОГО (${rows.length} строк)</td><td class="num">${tot.qS}</td><td class="num text-red">${tot.qR}</td><td class="num">${tot.qN}</td><td class="num">${tRet.toFixed(1)}%</td><td class="num">${window.fmtR(tot.rN)}</td><td class="num">${window.fmtR(tAvg)}</td><td class="num">${window.fmtR(tot.cN)}</td><td class="num">${tot.qN > 0 ? window.fmtR(tot.cN / tot.qN) : '0 ₽'}</td><td class="num">${window.fmtR(tot.l)}</td><td class="num">${tot.qN > 0 ? window.fmtR(tot.l / tot.qN) : '0 ₽'}</td><td class="num">${window.fmtR(tot.cm)}</td><td class="num ${tot.m >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(tot.m)}</td><td class="num">${tRent.toFixed(1)}%</td></tr>
+        </thead>
+        <tbody>${trs || '<tr><td colspan="16">Нет данных за выбранный период</td></tr>'}</tbody>
+      </table></div></div>`;
   };
 
   setInterval(window.initUnitSafe, 1000);
   window.initUnitSafe();
-    /* === Фикс Юнит-экономики: скрытие соседних вкладок через display:none + точное чтение itemSales === */
-  window.openUnitTabDirect = function () {
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('main section, .tab-sec').forEach(s => { s.style.display = 'none'; s.classList.add('hidden'); });
-    const btn = document.getElementById('nav-unit');
-    const sec = document.getElementById('tab-unit');
-    if (btn) btn.classList.add('active');
-    if (sec) { sec.style.display = 'block'; sec.classList.remove('hidden'); }
-    if (window.db) window.db.tab = 'unit';
-    window.renderUnitTab();
-  };
-
-  document.addEventListener('click', function (ev) {
-    const otherNav = ev.target.closest('.nav-btn:not(#nav-unit)');
-    if (otherNav) {
-      const uSec = document.getElementById('tab-unit');
-      if (uSec) { uSec.style.display = 'none'; uSec.classList.add('hidden'); }
-      document.querySelectorAll('main section, .tab-sec').forEach(s => { if (s.id !== 'tab-unit') s.style.display = ''; });
-    }
-  }, true);
-
-  window.buildUnitFactRows = function (mpCode) {
-    const { org, yr, mo, q } = window.unitState, fNames = window.getFolderNames ? window.getFolderNames() : {}, repMap = new Map(), map = new Map();
-    (window.db.reports || []).forEach(r => repMap.set(String(r.id), r));
-    (window.db.itemSales || []).forEach(s => {
-      const r = repMap.get(String(s.repId || s.reportId || ''));
-      const mp = String(r ? r.mp : (s.mp || '')).toUpperCase();
-      if (mp !== mpCode) return;
-      const rOrg = r ? r.org : (s.org || 'Без юрлица'), rPer = String(r ? r.per : (s.per || ''));
-      if (org !== 'ALL' && rOrg !== org) return;
-      if (yr !== 'ALL' && rPer && !rPer.startsWith(yr)) return;
-      if (mo !== 'ALL' && rPer && rPer.slice(5, 7) !== mo) return;
-      const artKey = window.normStr ? window.normStr(s.art) : (s.art || '');
-      const title = fNames[artKey] || s.name || artKey || 'Без названия';
-      if (q && !title.toLowerCase().includes(q.toLowerCase()) && !rOrg.toLowerCase().includes(q.toLowerCase())) return;
-      const k = `${rOrg}|||${rPer}|||${title}`;
-      const c = map.get(k) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, rS: 0, rR: 0, cS: 0, cR: 0, log: 0, comm: 0 };
-      c.qS += window.num(s.qSale !== undefined ? s.qSale : (s.qty || 0));
-      c.qR += window.num(s.qRet || 0);
-      c.rS += window.num(s.revSale !== undefined ? s.revSale : (s.rev || 0));
-      c.rR += window.num(s.revRet || 0);
-      c.cS += window.num(s.costSale !== undefined ? s.costSale : (s.cost || 0));
-      c.cR += window.num(s.costRet || 0);
-      c.log += window.num(s.log || 0);
-      c.comm += window.num(s.comm || 0) + window.num(s.acq || 0) + window.num(s.ads || 0);
-      map.set(k, c);
-    });
-    return Array.from(map.values()).map(x => {
-      const netQty = x.qS - x.qR, retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0, netRev = x.rS - x.rR, avgCheck = netQty > 0 ? netRev / netQty : 0;
-      const netCost = x.cS - x.cR, costPct = netRev > 0 ? (netCost / netRev) * 100 : 0, costUnit = netQty > 0 ? netCost / netQty : 0;
-      const logPct = netRev > 0 ? (x.log / netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = netRev > 0 ? (x.comm / netRev) * 100 : 0;
-      const margin = netRev - netCost - x.log - x.comm, rentPct = netRev > 0 ? (margin / netRev) * 100 : 0;
-      return Object.assign(x, { netQty, retPct, netRev, avgCheck, netCost, costPct, costUnit, logPct, logUnit, commPct, margin, rentPct });
-    }).sort((a, b) => b.netRev - a.netRev);
-  };
 })();
