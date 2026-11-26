@@ -63,11 +63,11 @@
     if (!window.db.erp || typeof window.db.erp !== 'object') window.db.erp = {};
     const e = window.db.erp;
     ['materials', 'matIn', 'orders', 'bom', 'fgStocks', 'defects', 'osList', 'contractors', 'contractorOps', 'staffList', 'payrollOps', 'taxDebts', 'customDictFolders'].forEach(k => { if (!Array.isArray(e[k])) e[k] = []; });
-    if (!Array.isArray(e.dictMatCats) || !e.dictMatCats.length) e.dictMatCats = [{ name: 'Ткань', arch: false }, { name: 'Фурнитура', arch: false }, { name: 'Упаковка и бирки', arch: false }, { name: 'Услуги пошива', arch: false }];
-    if (!Array.isArray(e.dictUnits) || !e.dictUnits.length) e.dictUnits = [{ name: 'м2', arch: false }, { name: 'кг', arch: false }, { name: 'м', arch: false }, { name: 'шт', arch: false }, { name: 'усл', arch: false }];
-    if (!Array.isArray(e.dictSuppliers) || !e.dictSuppliers.length) e.dictSuppliers = [{ name: 'Турция', arch: false }, { name: 'Китай', arch: false }, { name: 'РФ', arch: false }, { name: 'Туркменистан', arch: false }];
-    if (!Array.isArray(e.dictTaxTypes) || !e.dictTaxTypes.length) e.dictTaxTypes = [{ name: 'АУСН', arch: false }, { name: 'УСН', arch: false }, { name: 'НДС', arch: false }, { name: 'ЕНП', arch: false }, { name: 'Взносы ИП', arch: false }, { name: 'Патент', arch: false }];
-    if (!Array.isArray(e.dictOpiuArticles) || !e.dictOpiuArticles.length) e.dictOpiuArticles = [{ name: 'Аренда склада', arch: false }, { name: 'Программное обеспечение', arch: false }, { name: 'Административные и юридические услуги', arch: false }, { name: 'Федеральная таможенная служба', arch: false }, { name: 'Закуп товара / сырья USD', arch: false }, { name: 'Общепроизводственные расходы', arch: false }, { name: 'ФОТ и персонал', arch: false }];
+    if (!Array.isArray(e.dictMatCats)) e.dictMatCats = [{ name: 'Ткань', arch: false }, { name: 'Фурнитура', arch: false }, { name: 'Упаковка и бирки', arch: false }, { name: 'Услуги пошива', arch: false }];
+    if (!Array.isArray(e.dictUnits)) e.dictUnits = [{ name: 'м2', arch: false }, { name: 'кг', arch: false }, { name: 'м', arch: false }, { name: 'шт', arch: false }, { name: 'усл', arch: false }];
+    if (!Array.isArray(e.dictSuppliers)) e.dictSuppliers = [{ name: 'Турция', arch: false }, { name: 'Китай', arch: false }, { name: 'РФ', arch: false }, { name: 'Туркменистан', arch: false }];
+    if (!Array.isArray(e.dictTaxTypes)) e.dictTaxTypes = [{ name: 'АУСН', arch: false }, { name: 'УСН', arch: false }, { name: 'НДС', arch: false }, { name: 'ЕНП', arch: false }, { name: 'Взносы ИП', arch: false }, { name: 'Патент', arch: false }];
+    if (!Array.isArray(e.dictOpiuArticles)) e.dictOpiuArticles = [{ name: 'Аренда склада', arch: false }, { name: 'Программное обеспечение', arch: false }, { name: 'Административные и юридические услуги', arch: false }, { name: 'Федеральная таможенная служба', arch: false }, { name: 'Закуп товара / сырья USD', arch: false }, { name: 'Общепроизводственные расходы', arch: false }, { name: 'ФОТ и персонал', arch: false }];
     if (!Array.isArray(window.db.ddsCats) || !window.db.ddsCats.length) window.db.ddsCats = JSON.parse(JSON.stringify(DEFAULT_CATS));
     if (!e.dictSub) e.dictSub = 'opiu';
     if (!e.stkSub) e.stkSub = 'sum';
@@ -887,7 +887,7 @@
   window.deleteWholeFolder = enc => { const fKey = decodeURIComponent(enc), cnt = (window.db.skus || []).filter(s => (window.normStr(s.art) || 'Без артикула') === fKey).length; if (cnt && confirm('Удалить папку «' + fKey + '» (' + cnt + ' ШК)?')) { window.db.skus = window.db.skus.filter(s => (window.normStr(s.art) || 'Без артикула') !== fKey); window.save(true); window.renderSkuTab(); } };
   window.openEditSkuModal = id => { const s = (window.db.skus || []).find(x => x.id === id); if (!s) return; const m = document.createElement('div'); m.className = 'modal-bg'; m.innerHTML = `<div class="modal-box"><h3 style="font-size:16px;font-weight:800">✏️ Редактировать ШК</h3><div style="display:grid;gap:8px;margin-top:10px"><div><label>ШК</label><input id="e-bc" class="input" value="${window.esc(s.bc)}"></div><div><label>Артикул (папка)</label><input id="e-ar" class="input" value="${window.esc(s.art)}"></div><div><label>Название</label><input id="e-nm" class="input" value="${window.esc(s.name)}"></div><div><label>Себест. ($)</label><input id="e-us" type="number" step="0.01" class="input" value="${s.usd || 0}"></div></div><div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button><button class="btn btn-primary" id="e-sv">💾 Сохранить</button></div></div>`; document.body.appendChild(m); document.getElementById('e-sv').onclick = () => { const nb = window.normStr(document.getElementById('e-bc').value); if (!nb) return alert('Введите ШК!'); s.bc = nb; s.art = window.normStr(document.getElementById('e-ar').value) || 'Без артикула'; s.name = window.normStr(document.getElementById('e-nm').value) || s.art; s.usd = window.num(document.getElementById('e-us').value); s.isNew = s.usd === 0; window.recalcReportsCogs(); m.remove(); window.save(true); window.renderSkuTab(); }; };
   window.deleteSingleSku = id => { if (confirm('Удалить ШК?')) { window.db.skus = window.db.skus.filter(x => x.id !== id); window.save(true); window.renderSkuTab(); } };
-  window.openAddSingleSkuModal = () => { const m = document.createElement('div'); m.className = 'modal-bg'; m.innerHTML = `<div class="modal-box"><h3 style="font-size:16px;font-weight:800">+ Новый ШК</h3><div style="display:grid;gap:8px;margin-top:10px"><div><label>ШК *</label><input id="a-bc" class="input"></div><div><label>Артикул (папка) *</label><input id="a-ar" class="input"></div><div><label>Название</label><input id="a-nm" class="input"></div><div><label>Себест. ($)</label><input id="a-us" type="number" step="0.01" class="input" value="0"></div></div><div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button><button class="btn btn-primary" id="a-sv">✅ Добавить</button></div></div>`; document.body.appendChild(m); document.getElementById('a-sv').onclick = () => { const bc = window.normStr(document.getElementById('a-bc').value); if (!bc || window.db.skus.some(x => window.normStr(x.bc) === bc)) return alert('Пустой или дублирующий ШК!'); const art = window.normStr(document.getElementById('a-ar').value) || 'Без артикула', name = window.normStr(document.getElementById('a-nm').value) || art, usd = window.num(document.getElementById('a-us').value); window.db.skus.unshift({ id: 's_' + Date.now(), bc, art, name, col: '—', siz: '—', usd, src: 'Вручную', isNew: usd === 0 }); m.remove(); window.save(true); window.renderSkuTab(); }; };
+  window.openAddSingleSkuModal = () => { const m = document.createElement('div'); m.className = 'modal-bg'; m.innerHTML = `<div class="modal-box"><h3 style="font-size:16px;font-weight:800">+ Новый ШК</h3><div style="display:grid;gap:8px;margin-top:10px"><div><label>ШК *</label><input id="a-bc" class="input"></div><div><label>Артикул (папка) *</label><input id="a-ar" class="input"></div><div><label>Название</label><input id="a-nm" class="input"></div><div><label>Цвет</label><select id="a-col" class="select"><option value="—">Не указан</option>${window.getDictOptions(window.ensureStore().dictColors || [])}</select></div><div><label>Размер</label><select id="a-size" class="select"><option value="—">Не указан</option>${window.getDictOptions(window.ensureStore().dictSizes || [])}</select></div><div><label>Себест. ($)</label><input id="a-us" type="number" step="0.01" class="input" value="0"></div></div><div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button><button class="btn btn-primary" id="a-sv">✅ Добавить</button></div></div>`; document.body.appendChild(m); document.getElementById('a-sv').onclick = () => { const bc = window.normStr(document.getElementById('a-bc').value); if (!bc || window.db.skus.some(x => window.normStr(x.bc) === bc)) return alert('Пустой или дублирующий ШК!'); const art = window.normStr(document.getElementById('a-ar').value) || 'Без артикула', name = window.normStr(document.getElementById('a-nm').value) || art, usd = window.num(document.getElementById('a-us').value); window.db.skus.unshift({ id: 's_' + Date.now(), bc, art, name, col: document.getElementById('a-col').value, siz: document.getElementById('a-size').value, usd, src: 'Вручную', isNew: usd === 0 }); m.remove(); window.save(true); window.renderSkuTab(); }; };
 
   window.importCostCsv = async function (ev) {
     const f = ev?.target?.files?.[0]; if (!f) return; ev.target.value = '';
@@ -980,8 +980,9 @@
   };
   /* === Часть 10В-1: ДДС, входящие остатки 01.01 и конвертация === */
   window.buildDdsCatOptions = sel => {
-    const cats = window.db.ddsCats || [], groups = {};
-    cats.forEach(c => { (groups[c.grp] = groups[c.grp] || []).push(c.name); });
+    const cats = window.db.ddsCats || [], groups = Object.create(null);
+    cats.filter(c => !c.arch || c.name === sel).forEach(c => { (groups[c.grp] = groups[c.grp] || []).push(c.name); });
+    if (sel && !cats.some(c => c.name === sel)) (groups['История'] ||= []).push(sel);
     return Object.keys(groups).map(g => `<optgroup label="${window.esc(g)}">${groups[g].map(n => `<option value="${window.esc(n)}"${n === sel ? ' selected' : ''}>${window.esc(n)}</option>`).join('')}</optgroup>`).join('');
   };
 
@@ -1393,7 +1394,7 @@
   const _origEnsureSizes = window.ensureStore;
   window.ensureStore = function () {
     const e = _origEnsureSizes.apply(this, arguments);
-    if (!Array.isArray(e.dictSizes) || !e.dictSizes.length) {
+    if (!Array.isArray(e.dictSizes)) {
       e.dictSizes = [
         { name: 'XS', arch: false }, { name: 'S', arch: false }, { name: 'M', arch: false },
         { name: 'L', arch: false }, { name: 'XL', arch: false }, { name: '2XL', arch: false },
@@ -2106,6 +2107,42 @@
       reports:addedReports.length,items:addedSales.length,skus:addedSkus.length,skipped,unknownOrg};
   }
 
+  function parseCatalogCsv(text) {
+    const cells=[];
+    let row=[],field='',quoted=false;
+    text=text.replace(/^\uFEFF/,'');
+    const headerLine=text.split(/\r?\n/).find(line=>line.trim())||'';
+    const delimiter=headerLine.includes(';')?';':headerLine.includes('\t')?'\t':',';
+    for(let i=0;i<text.length;i++){
+      const character=text[i];
+      if(character==='"'){
+        if(quoted&&text[i+1]==='"'){field+='"';i++;}
+        else quoted=!quoted;
+      }else if(!quoted&&(character===delimiter||character==='\n'||character==='\r')){
+        row.push(field);field='';
+        if(character===delimiter)continue;
+        if(character==='\r'&&text[i+1]==='\n')i++;
+        if(row.some(x=>x.trim()))cells.push(row);
+        row=[];
+      }else field+=character;
+    }
+    if(quoted)throw new Error('В CSV не закрыты кавычки.');
+    row.push(field);
+    if(row.some(x=>x.trim()))cells.push(row);
+    const header=(cells.shift()||[]).map(x=>x.trim().toLowerCase());
+    const col=(...labels)=>header.findIndex(x=>labels.includes(x));
+    const barcode=col('баркод','шк','barcode','bc'), name=col('название','наименование товара','name'), usd=col('себестоимость usd','себестоимость в usd','usd');
+    if(Math.min(barcode,name,usd)<0)throw new Error('Нужны колонки «Баркод», «Название» и «Себестоимость USD».');
+    const skus=cells.map((values,index)=>{
+      const bc=(values[barcode]||'').trim(), title=(values[name]||'').trim();
+      const cost=Number((values[usd]||'').replace(/\s/g,'').replace(',','.'));
+      if(!bc||!title||!Number.isFinite(cost)||cost<=0)throw new Error('Проверь данные в строке '+(index+2)+'.');
+      return {bc,name:title,usd:cost};
+    });
+    if(!skus.length)throw new Error('В CSV нет товаров.');
+    return {format:'skos-sheets-initial-2026-v1',groups:[],skus};
+  }
+
   function mountImport(anchor, catalogOnly = false) {
     const id = catalogOnly ? 'skos-catalog-sheets-import' : 'skos-sheets-import';
     if (!anchor || document.getElementById(id) || window.__skosReadOnly) return;
@@ -2118,18 +2155,18 @@
     const status = area.querySelector('p');
     if (catalogOnly) {
       button.textContent = 'Загрузить баркоды и себестоимость';
+      input.accept = '.csv,.json,text/csv,application/json';
       const templateButton = document.createElement('button');
       templateButton.type = 'button';
       templateButton.className = 'btn';
       templateButton.style.marginInlineStart = '8px';
-      templateButton.textContent = 'Скачать шаблон с примером';
+      templateButton.textContent = 'Скачать шаблон CSV с примером';
       templateButton.onclick = () => {
-        const example = {"format":"skos-sheets-initial-2026-v1","groups":[],"skus":[{"bc":"2000000000015","name":"Футболка белая, размер M","usd":4.5},{"bc":"2000000000022","name":"Футболка чёрная, размер L","usd":4.8}]};
-        const blob = new Blob([JSON.stringify(example, null, 2)], {type:'application/json;charset=utf-8'});
+        const blob = new Blob(["﻿Баркод;Название;Себестоимость USD\r\n2000000000015;Футболка белая размер M;4.50\r\n2000000000022;Футболка чёрная размер L;4.80\r\n"], {type:'text/csv;charset=utf-8'});
         const link = document.createElement('a');
         const url = URL.createObjectURL(blob);
         link.href = url;
-        link.download = 'SKOS-шаблон-баркодов.json';
+        link.download = 'SKOS-шаблон-баркодов.csv';
         link.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       };
@@ -2142,7 +2179,15 @@
       if (!file) return;
       button.disabled = true;
       try {
-        const payload = JSON.parse(await file.text());
+        let payload;
+        if (catalogOnly && /\.csv$/i.test(file.name)) {
+          const bytes = await file.arrayBuffer();
+          let text = new TextDecoder('utf-8').decode(bytes);
+          if (text.includes('\uFFFD')) text = new TextDecoder('windows-1251').decode(bytes);
+          payload = parseCatalogCsv(text);
+        } else {
+          payload = JSON.parse(await file.text());
+        }
         const result = plan(window.db, payload, catalogOnly);
         const message = `Новые отчёты: ${result.reports}. Строки по моделям: ${result.items}. Новые баркоды: ${result.skus}. Пропущено групп с данными или закрытым месяцем: ${result.skipped}. Не найдено юрлиц для групп: ${result.unknownOrg}.`;
         const preview = catalogOnly ? 'Новые баркоды: ' + result.skus + '. Себестоимость существующих баркодов сохраняется.' : message;
@@ -2204,3 +2249,139 @@
     if (old) old.style.display = 'none';
   });
 })();
+
+;(function installDirectories(sourceRows) {
+  const originalStore = window.ensureStore;
+  const originalOptions = window.buildDdsCatOptions;
+  const prepared = new WeakSet();
+  const norm = s => String(s || '').trim().toLocaleLowerCase('ru');
+  const commonColors = ['Белый','Чёрный','Серый','Бежевый','Молочный','Синий','Голубой','Зелёный','Коричневый','Красный','Розовый','Бордовый','Хаки'];
+  const groups = [
+    ['dds','ddsCats','Статьи ДДС'], ['opiu','dictOpiuArticles','Статьи ОПиУ'],
+    ['ctrs','contractors','Контрагенты'], ['staff','staffList','Сотрудники'],
+    ['taxes','dictTaxTypes','Виды налогов'], ['cats','dictMatCats','Категории сырья'],
+    ['units','dictUnits','Единицы измерения'], ['sups','dictSuppliers','Поставщики'],
+    ['sizes','dictSizes','Размерный ряд'], ['colors','dictColors','Цвета']
+  ];
+
+  function seedDds(db) {
+    if (!Array.isArray(db.ddsCats)) db.ddsCats = [];
+    if (prepared.has(db.ddsCats)) return;
+    const hidden = new Set(db.ddsSeedRemoved || []);
+    const index = new Map(db.ddsCats.map(c => [norm(c.name),c]));
+    for (const [name, direction, activity, cur] of sourceRows) {
+      const key = norm(name);
+      const current = index.get(key);
+      if (current && !current.sourceMetadata && !hidden.has(key)) {
+        Object.assign(current,{direction:current.direction || direction,activity:current.activity || activity,cur:current.cur || cur,sourceMetadata:true});
+      } else if (!current && !hidden.has(key)) {
+        const item = {id:'sheets-dds-' + encodeURIComponent(key),name,grp:direction,direction,activity,cur,sourceMetadata:true};
+        db.ddsCats.push(item);
+        index.set(key,item);
+      }
+    }
+    prepared.add(db.ddsCats);
+  }
+  window.ensureStore = function () {
+    const store = originalStore.apply(this,arguments);
+    seedDds(window.db);
+    if (!Array.isArray(store.dictColors)) {
+      const values = new Map(commonColors.map(c => [norm(c),c]));
+      for (const item of window.db.skus || []) if (item.col && item.col !== '—') values.set(norm(item.col),item.col);
+      store.dictColors = [...values.values()].map(name=>({name,arch:false}));
+    }
+    return store;
+  };
+  window.buildDdsCatOptions = function (selected) {
+    window.ensureStore();
+    return originalOptions(selected);
+  };
+  function sections(store) {
+    return [
+      {id:'sku', label:'Товары, ШК и себестоимость',count:(window.db.skus || []).length},
+      ...groups.map(([id,key,label])=>({id,key,label})),
+      ...(store.customDictFolders || []).map(x=>({id:x.id,key:x.key,label:x.title}))
+    ];
+  }
+  function records(store, section) {
+    return section.key === 'ddsCats' ? window.db.ddsCats : store[section.key] || (store[section.key]=[]);
+  }
+  function remember(name) {
+    const key=norm(name);
+    if (!sourceRows.some(r=>norm(r[0])===key)) return;
+    window.db.ddsSeedRemoved=[...new Set([...(window.db.ddsSeedRemoved||[]),key])];
+  }
+  function change(section, row) {
+    if (window.__skosReadOnly) return;
+    const store=window.ensureStore();
+    const list=records(store,section);
+    const isDds=section.key==='ddsCats', isStaff=section.key==='staffList', isParty=section.key==='contractors';
+    const esc=window.esc;
+    const extra=isDds? '<label>Папка<input name="grp" class="input"></label><label>Движение<select name="direction" class="select"><option value="">Не выбрано</option><option>Поступление</option><option>Выбытие</option></select></label><label>Вид деятельности<input name="activity" class="input"></label>':
+      isStaff?'<label>Должность<input name="role" class="input"></label>':
+      isParty?'<label>Статья ОПиУ<select name="art" class="select">'+window.getDictOptions(store.dictOpiuArticles)+'</select></label>':'';
+    const currency=isDds||isStaff||isParty?'<label>Валюта<select name="cur" class="select"><option value="">Без ограничения</option><option>RUB</option><option>USD</option></select></label>':'';
+    const balance=isStaff||isParty?'<label>Сальдо на начало года<input name="initDebt" class="input" type="number" step="0.01"></label>':'';
+    const box=document.createElement('dialog');
+    box.style.cssText='max-width:min(520px,92vw);width:100%;border:1px solid #cbd5e1;border-radius:14px;padding:20px;color:#0f172a';
+    box.innerHTML=`<form method="dialog"><h3 style="margin-top:0">${row?'Редактировать':'Добавить'} · ${esc(section.label)}</h3><div style="display:grid;gap:10px"><label>Название<input name="name" class="input" required></label>${extra}${currency}${balance}</div><p role="status" style="color:#b91c1c"></p><div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn">Отмена</button><button class="btn btn-primary">Сохранить</button></div></form>`;
+    document.body.appendChild(box);
+    const form=box.querySelector('form');
+    for (const field of form.querySelectorAll('[name]')) {
+      const fallback=field.name==='cur'&&!isDds?'RUB':'';
+      field.value=row?.[field.name] ?? fallback;
+    }
+    form.querySelector('button[type=button]').onclick=()=>box.close();
+    box.onclose=()=>box.remove();
+    form.onsubmit=event=>{
+      event.preventDefault();
+      const values=Object.fromEntries([...new FormData(form)].map(([key,value])=>[key,String(value).trim()]));
+      if(!values.name || list.some(x=>x!==row && norm(x.name)===norm(values.name))){
+        form.querySelector('[role=status]').textContent='Укажи уникальное название.';
+        return;
+      }
+      if (isDds) {
+        values.grp=values.grp||values.direction||'Прочее';
+        values.sourceMetadata=true;
+        if (row && norm(row.name)!==norm(values.name)) remember(row.name);
+      }
+      if (isStaff||isParty) values.initDebt=window.num(values.initDebt);
+      if (row) Object.assign(row,values);
+      else list.push({id:'dict-' + crypto.randomUUID(),arch:false,...values});
+      box.close(); window.save(true); window.renderDictTab();
+    };
+    box.showModal();
+  }
+  function remove(section,row) {
+    if (window.__skosReadOnly) return;
+    const list=records(window.ensureStore(),section);
+    const isDds=section.key==='ddsCats';
+    const linked=isDds && (window.db.dds||[]).some(op=>op.cat===row.name);
+    if (!confirm(linked?'Скрыть статью из новых операций? История ДДС сохранится.':'Удалить «'+row.name+'»?')) return;
+    if (isDds) remember(row.name);
+    if (linked) row.arch=true;
+    else {const index=list.indexOf(row);if(index>=0)list.splice(index,1);}
+    window.save(true); window.renderDictTab();
+  }
+  window.renderDictTab = function () {
+    const target=document.getElementById('tab-dict'); if(!target)return;
+    const store=window.ensureStore(), all=sections(store);
+    const current=all.find(s=>s.key&&s.id===store.dictSub)||all[1];
+    const list=records(store,current), readOnly=window.__skosReadOnly;
+    const esc=window.esc, dds=current.key==='ddsCats';
+    const action=readOnly?'':'<button type="button" id="skos-dir-add" class="btn btn-primary">Добавить</button>';
+    target.innerHTML=`<section class="card"><div class="card-header"><div class="card-title">Справочники SKOS</div></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:8px">${all.map(s=>`<button type="button" class="btn ${s.id===current.id?'btn-primary':''}" data-directory="${esc(s.id)}" style="text-align:left;white-space:normal;min-height:46px">${esc(s.label)} (${s.count ?? records(store,s).filter(x=>!x.arch).length})</button>`).join('')}</div></section>
+    <section class="card"><div class="card-header"><div class="card-title">${esc(current.label)}</div>${action}</div><div style="overflow:auto"><table><thead><tr><th>Название</th>${dds?'<th>Папка</th><th>Движение</th><th>Вид деятельности</th><th>Валюта</th>':'<th>Состояние</th>'}${readOnly?'':'<th>Действия</th>'}</tr></thead><tbody>${list.map((row,i)=>`<tr><td>${esc(row.name)}${row.arch?' (в архиве)':''}</td>${dds?`<td>${esc(row.grp)}</td><td>${esc(row.direction||'—')}</td><td>${esc(row.activity||'—')}</td><td>${esc(row.cur||'—')}</td>`:`<td>${row.arch?'В архиве':'Активен'}</td>`}${readOnly?'':`<td style="white-space:nowrap"><button type="button" class="btn" data-edit-directory="${i}">Редактировать</button> <button type="button" class="btn" data-archive-directory="${i}">${row.arch?'Восстановить':'В архив'}</button> <button type="button" class="btn btn-danger" data-remove-directory="${i}">Удалить</button></td>`}</tr>`).join('')||'<tr><td colspan="6">Пока нет записей.</td></tr>'}</tbody></table></div></section>`;
+    for(const button of target.querySelectorAll('[data-directory]'))button.onclick=()=>{
+      if(button.dataset.directory==='sku')window.tab('sku');
+      else {store.dictSub=button.dataset.directory;window.renderDictTab();}
+    };
+    if(readOnly)return;
+    document.getElementById('skos-dir-add').onclick=()=>change(current);
+    for(const button of target.querySelectorAll('[data-edit-directory]'))button.onclick=()=>change(current,list[Number(button.dataset.editDirectory)]);
+    for(const button of target.querySelectorAll('[data-archive-directory]'))button.onclick=()=>{
+      const row=list[Number(button.dataset.archiveDirectory)];row.arch=!row.arch;window.save(true);window.renderDictTab();
+    };
+    for(const button of target.querySelectorAll('[data-remove-directory]'))button.onclick=()=>remove(current,list[Number(button.dataset.removeDirectory)]);
+  };
+})([["Поступление — Перевод между счетами","Поступление","Техническая операция",""],["Выбытие — Перевод между счетами","Выбытие","Техническая операция",""],["Поступление от ВБ","Поступление","Операционная","RUB"],["Поступление от Озон","Поступление","Операционная","RUB"],["Поступление от ЯМ","Поступление","Операционная","RUB"],["Поступление от соц. сетей","Поступление","Операционная","RUB"],["Прочие поступления","Поступление","Операционная","RUB"],["Возвраты от поставщиков","Поступление","Операционная","RUB"],["Возвраты клиентам","Выбытие","Операционная","RUB"],["Закуп товара RUB","Выбытие","Операционная","RUB"],["Закуп товара USD","Выбытие","Операционная","USD"],["Поставщик товара USD","Выбытие","Операционная","USD"],["Сертификация товара","Выбытие","Операционная","RUB"],["Упаковочные материалы RUB","Выбытие","Операционная","RUB"],["Упаковочные материалы USD","Выбытие","Операционная","USD"],["Доставка по РФ до склада","Выбытие","Операционная","RUB"],["Доставка из Китая","Выбытие","Операционная","USD"],["Доставка из Турции","Выбытие","Операционная","USD"],["Транспортные и курьерские услуги","Выбытие","Операционная","RUB"],["Организация таможенного оформления RUB","Выбытие","Операционная","RUB"],["Организация таможенного оформления USD","Выбытие","Операционная","USD"],["Авто расходы компании","Выбытие","Операционная","RUB"],["Комиссия РКО","Выбытие","Операционная","RUB"],["УСН","Выбытие","Операционная","RUB"],["АУСН","Выбытие","Операционная","RUB"],["НДС","Выбытие","Операционная","RUB"],["ЕНП","Выбытие","Операционная","RUB"],["ФОТ склад","Выбытие","Операционная","RUB"],["ФОТ менеджеры","Выбытие","Операционная","USD"],["ФОТ офис","Выбытие","Операционная","USD"],["ФОТ собственик","Выбытие","Операционная","RUB"],["Взносы ИП фикс. + 1%","Выбытие","Операционная","RUB"],["Обучение","Выбытие","Операционная","RUB"],["Мебато","Выбытие","Операционная","USD"],["Расходы на персонал","Выбытие","Операционная","RUB"],["Командировки RUB","Выбытие","Операционная","RUB"],["Командировки USD","Выбытие","Операционная","USD"],["Представительские расходы RUB","Выбытие","Операционная","RUB"],["Представительские расходы USD","Выбытие","Операционная","USD"],["Поиск и найм персонала","Выбытие","Операционная","RUB"],["Оплата рекламных систем","Выбытие","Операционная","RUB"],["Маркетинговые подрядчики","Выбытие","Операционная","RUB"],["Программное обеспечение","Выбытие","Операционная","RUB"],["Административные и юридические услуги","Выбытие","Операционная","RUB"],["Содержание офиса","Выбытие","Операционная","RUB"],["Аренда склада","Выбытие","Операционная","RUB"],["Прочие расходы","Выбытие","Операционная","RUB"],["Федеральное таможенная служба","Выбытие","Операционная","RUB"],["Вклады от собственников RUB","Поступление","Финансовая","RUB"],["Вклады от собственников USD","Поступление","Финансовая","USD"],["Дивиденды","Выбытие","Финансовая","RUB"],["Поступление - Конвертация валют USD","Поступление","Конвертация валют","USD"],["Выбытие - Конвертация валют RUB","Выбытие","Конвертация валют","RUB"],["Комиссия за конвертацию валют RUB","Выбытие","Операционная","RUB"],["Комиссия за конвертацию валют USD","Выбытие","Операционная","USD"],["Продажа ОС","Поступление","Инвестиционная","RUB"],["Покупка ОС","Выбытие","Инвестиционная","RUB"],["Ремонт ОС","Выбытие","Инвестиционная","RUB"]]);
