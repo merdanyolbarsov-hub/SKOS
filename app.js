@@ -1869,4 +1869,80 @@
 
   setInterval(window.initUnitSafe, 1000);
   window.initUnitSafe();
+    /* === Фикс-папка и точные поля itemSales для Юнит-экономики === */
+  window.resolveUnitFolder = function (rawArt, rawName, fNames, skuByBc, skuByArt) {
+    const a = window.normStr ? window.normStr(rawArt) : String(rawArt || '').trim().toLowerCase();
+    if (fNames[a]) return fNames[a];
+    const up = (String(rawArt || '') + ' ' + String(rawName || '')).toUpperCase();
+    const m = up.match(/(SKOS-[A-ZА-Я0-9]+)/);
+    if (m && m[1]) {
+      const k = window.normStr ? window.normStr(m[1]) : m[1].toLowerCase();
+      if (fNames[k]) return fNames[k];
+      if (skuByArt.has(k)) { const s = skuByArt.get(k); return fNames[window.normStr(s.art)] || s.name || k; }
+    }
+    if (skuByBc.has(a)) { const s = skuByBc.get(a); return fNames[window.normStr(s.art)] || s.name || s.art; }
+    if (skuByArt.has(a)) { const s = skuByArt.get(a); return fNames[window.normStr(s.art)] || s.name || s.art; }
+    return rawName || a || 'Без модели';
+  };
+
+  window.buildUnitFactRows = function (mpCode) {
+    const { org, yr, mo, model } = window.unitState;
+    const fNames = window.getFolderNames ? window.getFolderNames() : {};
+    const skuByBc = new Map(), skuByArt = new Map();
+    (window.db.skus || []).forEach(s => {
+      if (s.bc) skuByBc.set(window.normStr(s.bc), s);
+      if (s.art) skuByArt.set(window.normStr(s.art), s);
+    });
+    const repMap = new Map();
+    (window.db.reports || []).forEach(r => repMap.set(String(r.id), r));
+
+    // Считаем сумму выручки по каждому отчёту, чтобы пропорционально распределить общую логистику/комиссию отчёта, если в строках 0
+    const repRevSum = new Map();
+    (window.db.itemSales || []).forEach(s => {
+      const rid = String(s.repId || s.rId || s.reportId || '');
+      repRevSum.set(rid, (repRevSum.get(rid) || 0) + window.num(s.rev || 0));
+    });
+
+    const map = new Map(), allModels = new Set();
+    (window.db.itemSales || []).forEach(s => {
+      const rid = String(s.repId || s.rId || s.reportId || '');
+      const r = repMap.get(rid);
+      const mp = String(r ? r.mp : (s.mp || '')).toUpperCase();
+      if (mp !== mpCode) return;
+      const rOrg = r ? r.org : (s.org || 'Без юрлица');
+      const rPer = String(r ? (r.per || r.period || r.month || '') : (s.per || ''));
+      const title = window.resolveUnitFolder(s.art || s.bc, s.name, fNames, skuByBc, skuByArt);
+      allModels.add(title);
+
+      if (org !== 'ALL' && rOrg !== org) return;
+      if (yr !== 'ALL' && rPer && !rPer.startsWith(yr)) return;
+      if (mo !== 'ALL' && rPer && rPer.slice(5, 7) !== mo) return;
+      if (model !== 'ALL' && title !== model) return;
+
+      const k = `${rOrg}|||${rPer}|||${title}`;
+      const c = map.get(k) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, rS: 0, rR: 0, cNet: 0, log: 0, comm: 0 };
+      const qS = window.num(s.q !== undefined ? s.q : (s.qty !== undefined ? s.qty : (s.saleQty || 0)));
+      const qR = window.num(s.rq !== undefined ? s.rq : (s.retQty !== undefined ? s.retQty : (s.qRet || 0)));
+      const rS = window.num(s.rev || 0);
+      const rR = window.num(s.ret !== undefined ? s.ret : (s.retRev || 0));
+      const share = (r && repRevSum.get(rid) > 0) ? (rS / repRevSum.get(rid)) : 0;
+
+      const rowCost = window.num(s.cost || 0) || (r ? window.num(r.cost || 0) * share : 0);
+      const rowLog = window.num(s.log || 0) || (r ? window.num(r.log || 0) * share : 0);
+      const rowComm = (window.num(s.comm || 0) + window.num(s.acq || 0) + window.num(s.ads || 0)) || (r ? (window.num(r.comm || 0) + window.num(r.ads || 0)) * share : 0);
+
+      c.qS += qS; c.qR += qR; c.rS += rS; c.rR += rR; c.cNet += rowCost; c.log += rowLog; c.comm += rowComm;
+      map.set(k, c);
+    });
+
+    const rows = Array.from(map.values()).map(x => {
+      const netQty = Math.max(0, x.qS - x.qR), retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0, netRev = x.rS - x.rR, avgCheck = netQty > 0 ? netRev / netQty : 0;
+      const costPct = netRev > 0 ? (x.cNet / netRev) * 100 : 0, costUnit = netQty > 0 ? x.cNet / netQty : 0;
+      const logPct = netRev > 0 ? (x.log / netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = netRev > 0 ? (x.comm / netRev) * 100 : 0;
+      const margin = netRev - x.cNet - x.log - x.comm, rentPct = netRev > 0 ? (margin / netRev) * 100 : 0;
+      return Object.assign(x, { netQty, retPct, netRev, avgCheck, costPct, costUnit, logPct, logUnit, commPct, margin, rentPct });
+    }).sort((a, b) => b.netRev - a.netRev);
+
+    return { rows, models: Array.from(allModels).sort() };
+  };
 })();
