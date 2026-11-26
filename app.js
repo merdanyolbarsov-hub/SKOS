@@ -318,6 +318,8 @@
   };
   /* === Часть 5/10: Сводка руководителя (KPI, ИП/ООО, МП и Лесенка прибыли) === */
   let dynMode = 'MONTH';
+  let ladderMp = 'ALL';
+  let ladderOrg = 'ALL';
   let compareYears = ['2024', '2025', '2026'];
   window.setSkosDynMode = m => { dynMode = m; window.renderDashTab(); };
   window.toggleSkosYr = y => { const i = compareYears.indexOf(y); if (i >= 0) { if (compareYears.length > 1) compareYears.splice(i, 1); } else { compareYears.push(y); compareYears.sort(); } window.renderDashTab(); };
@@ -335,15 +337,15 @@
     return { matRows, rawUsd, wipUsd, fgUsd, totalUsd: rawUsd + wipUsd + fgUsd };
   };
 
-  window.calcPeriodStats = function (yr, mo, orgF) {
+  window.calcPeriodStats = function (yr, mo, orgF, mp = 'ALL') {
     const rate = window.getRate((yr === 'ALL' ? '2026' : yr) + '-' + (mo === 'ALL' ? '11' : mo));
-    const reps = (window.db.reports || []).filter(r => (yr === 'ALL' || String(r.yr) === String(yr)) && (mo === 'ALL' || String(r.mo) === String(mo)) && (orgF === 'ALL' || r.org === orgF));
+    const reps = (window.db.reports || []).filter(r => (yr === 'ALL' || String(r.yr) === String(yr)) && (mo === 'ALL' || String(r.mo) === String(mo)) && (orgF === 'ALL' || r.org === orgF) && (mp === 'ALL' || r.mp === mp));
     let rev = 0, ret = 0, ads = 0, log = 0, com = 0, cogs = 0, boSum = 0;
     reps.forEach(r => { rev += window.num(r.rev); ret += window.num(r.ret); ads += window.num(r.ads); log += window.num(r.log); com += window.num(r.com); cogs += window.num(r.cogs); boSum += window.num(r.bo); });
     const mpFee = ads + log + com, afterMp = rev - mpFee, mpProf = afterMp - cogs;
 
     let taxMonth = 0, expRub = 0, depMonth = 0, defectRub = 0;
-    if (window.db.mode === 'FULL') {
+    if (window.db.mode === 'FULL' && mp === 'ALL') {
       const kvMap = { 1: ['01', '02', '03'], 2: ['04', '05', '06'], 3: ['07', '08', '09'], 4: ['10', '11', '12'] };
       (window.db.taxes || []).forEach(t => {
         if ((yr === 'ALL' || String(t.yr) === String(yr)) && (orgF === 'ALL' || t.org === orgF)) {
@@ -418,14 +420,35 @@
     const dash = document.getElementById('tab-dash'), pct = (a, b) => b > 0 ? ((a / b) * 100).toFixed(1) : '0.0';
     let ladderBox = document.getElementById('skos-boss-ladder-box');
     if (!ladderBox) { ladderBox = document.createElement('div'); ladderBox.id = 'skos-boss-ladder-box'; dash.querySelector('.kpi-grid')?.insertAdjacentElement('afterend', ladderBox); }
-    const ovh = st.taxMonth + st.expRub + st.depMonth + st.defectRub;
+    const marketplaces = [['ALL', 'Все маркетплейсы'], ['WB', 'Wildberries'], ['OZON', 'Ozon'], ['YM', 'Яндекс Маркет']];
+    const accountNames = [...new Set([...visNames, ...(window.db.reports || []).map(r => r.org).filter(Boolean)])];
+    const selectedOrg = orgF !== 'ALL' ? orgF : accountNames.includes(ladderOrg) ? ladderOrg : 'ALL';
+    const ladder = ladderMp === 'ALL' && selectedOrg === orgF ? st : window.calcPeriodStats(yr, mo, selectedOrg, ladderMp);
+    const ovh = ladder.taxMonth + ladder.expRub + ladder.depMonth + ladder.defectRub;
+    const hasNet = ladderMp === 'ALL';
+    const option = (value, title, selected) => `<option value="${window.esc(value)}"${value === selected ? ' selected' : ''}>${window.esc(title)}</option>`;
     ladderBox.innerHTML = `<div class="card" style="border:1.5px solid #bfdbfe;background:linear-gradient(180deg,#f8faff 0%,#ffffff 100%)">
-      <div class="card-header"><div class="card-title">🪜 Лесенка прибыли для руководителя</div></div>
+      <div class="card-header" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <div class="card-title">🪜 Лесенка прибыли для руководителя</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <select id="skos-ladder-mp" class="select" aria-label="Маркетплейс">${marketplaces.map(([code, name]) => option(code, name, ladderMp)).join('')}</select>
+          <select id="skos-ladder-org" class="select" aria-label="Аккаунт"${orgF === 'ALL' ? '' : ' disabled'}>${option('ALL', 'Все аккаунты', selectedOrg)}${(orgF === 'ALL' ? accountNames : [orgF]).map(name => option(name, name, selectedOrg)).join('')}</select>
+        </div>
+      </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">
-        <div style="background:#fff;border:1px solid #cbd5e1;border-left:4px solid #2563eb;border-radius:10px;padding:10px"><div style="font-size:11px;font-weight:700;color:#1d4ed8">1. ОСТАТОК ОТ МП (БЕЗ СЕБЕСТ.)</div><div style="font-size:19px;font-weight:800;margin:4px 0">${window.fmtR(st.afterMp)}</div><div style="font-size:11px;color:#475569">Нагрузка МП: <b class="text-red">${window.fmtR(st.mpFee)} (${pct(st.mpFee, st.rev)}%)</b></div></div>
-        <div style="background:#fff;border:1px solid #cbd5e1;border-left:4px solid #d97706;border-radius:10px;padding:10px"><div style="font-size:11px;font-weight:700;color:#b45309">2. ЗАРАБОТОК НА ТОВАРЕ</div><div style="font-size:19px;font-weight:800;margin:4px 0">${window.fmtR(st.mpProf)}</div><div style="font-size:11px;color:#475569">Себестоимость: <b>${window.fmtR(st.cogs)} (${pct(st.cogs, st.rev)}%)</b></div></div>
-        <div style="background:#fff;border:1px solid #cbd5e1;border-left:4px solid ${st.net >= 0 ? '#059669' : '#e11d48'};border-radius:10px;padding:10px"><div style="font-size:11px;font-weight:700;color:#047857">3. ЧИСТАЯ ПРИБЫЛЬ В КАРМАН</div><div style="font-size:19px;font-weight:800;margin:4px 0" class="${st.net >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(st.net)}</div><div style="font-size:11px;color:#475569">Налоги, ЗП и офис: <b>${window.fmtR(ovh)} (${pct(ovh, st.rev)}%)</b></div></div>
+        <div style="background:#fff;border:1px solid #cbd5e1;border-left:4px solid #2563eb;border-radius:10px;padding:10px"><div style="font-size:11px;font-weight:700;color:#1d4ed8">1. ОСТАТОК ОТ МП (БЕЗ СЕБЕСТ.)</div><div style="font-size:19px;font-weight:800;margin:4px 0">${window.fmtR(ladder.afterMp)}</div><div style="font-size:11px;color:#475569">Нагрузка МП: <b class="text-red">${window.fmtR(ladder.mpFee)} (${pct(ladder.mpFee, ladder.rev)}%)</b></div></div>
+        <div style="background:#fff;border:1px solid #cbd5e1;border-left:4px solid #d97706;border-radius:10px;padding:10px"><div style="font-size:11px;font-weight:700;color:#b45309">2. ЗАРАБОТОК НА ТОВАРЕ</div><div style="font-size:19px;font-weight:800;margin:4px 0">${window.fmtR(ladder.mpProf)}</div><div style="font-size:11px;color:#475569">Себестоимость: <b>${window.fmtR(ladder.cogs)} (${pct(ladder.cogs, ladder.rev)}%)</b></div></div>
+        <div style="background:#fff;border:1px solid #cbd5e1;border-left:4px solid ${ladder.net >= 0 ? '#059669' : '#e11d48'};border-radius:10px;padding:10px"><div style="font-size:11px;font-weight:700;color:#047857">3. ЧИСТАЯ ПРИБЫЛЬ В КАРМАН</div><div style="font-size:19px;font-weight:800;margin:4px 0" class="${ladder.net >= 0 ? 'text-green' : 'text-red'}">${hasNet ? window.fmtR(ladder.net) : "—"}</div><div style="font-size:11px;color:#475569">${hasNet ? `Налоги, ЗП и офис: <b>${window.fmtR(ovh)} (${pct(ovh, ladder.rev)}%)</b>` : "Общие расходы учитываются по всем маркетплейсам"}</div></div>
       </div></div>`;
+
+    ladderBox.querySelector('#skos-ladder-mp').onchange = event => {
+      ladderMp = event.target.value;
+      window.renderDashTab();
+    };
+    ladderBox.querySelector('#skos-ladder-org').onchange = event => {
+      ladderOrg = event.target.value;
+      window.renderDashTab();
+    };
 
     let dynBox = document.getElementById('skos-dyn-card');
     if (!dynBox) { dynBox = document.createElement('div'); dynBox.id = 'skos-dyn-card'; ladderBox.insertAdjacentElement('afterend', dynBox); }
