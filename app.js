@@ -1656,4 +1656,15 @@
     }
     return res;
   };
+    /* === Точечный фикс: Авто-отрисовка Сводки после загрузки Google Облака + фильтр Весь год === */
+  const _origPullCloudRefresh = window.pullCloud;
+  window.pullCloud = async function (silent) {
+    await _origPullCloudRefresh.apply(this, arguments);
+    const moSel = document.getElementById('f-mo');
+    if (moSel && moSel.value === '11' && (window.db.reports || []).length > 0 && !(window.db.reports || []).some(r => String(r.mo) === '11')) {
+      moSel.value = 'ALL';
+    }
+    if (typeof window.onPerChange === 'function') window.onPerChange();
+    if (typeof window.render === 'function') window.render();
+  };
 })();
