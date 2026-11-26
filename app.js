@@ -1789,4 +1789,59 @@
 
   setInterval(window.initUnitSafe, 1000);
   window.initUnitSafe();
+    /* === Фикс Юнит-экономики: скрытие соседних вкладок через display:none + точное чтение itemSales === */
+  window.openUnitTabDirect = function () {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('main section, .tab-sec').forEach(s => { s.style.display = 'none'; s.classList.add('hidden'); });
+    const btn = document.getElementById('nav-unit');
+    const sec = document.getElementById('tab-unit');
+    if (btn) btn.classList.add('active');
+    if (sec) { sec.style.display = 'block'; sec.classList.remove('hidden'); }
+    if (window.db) window.db.tab = 'unit';
+    window.renderUnitTab();
+  };
+
+  document.addEventListener('click', function (ev) {
+    const otherNav = ev.target.closest('.nav-btn:not(#nav-unit)');
+    if (otherNav) {
+      const uSec = document.getElementById('tab-unit');
+      if (uSec) { uSec.style.display = 'none'; uSec.classList.add('hidden'); }
+      document.querySelectorAll('main section, .tab-sec').forEach(s => { if (s.id !== 'tab-unit') s.style.display = ''; });
+    }
+  }, true);
+
+  window.buildUnitFactRows = function (mpCode) {
+    const { org, yr, mo, q } = window.unitState, fNames = window.getFolderNames ? window.getFolderNames() : {}, repMap = new Map(), map = new Map();
+    (window.db.reports || []).forEach(r => repMap.set(String(r.id), r));
+    (window.db.itemSales || []).forEach(s => {
+      const r = repMap.get(String(s.repId || s.reportId || ''));
+      const mp = String(r ? r.mp : (s.mp || '')).toUpperCase();
+      if (mp !== mpCode) return;
+      const rOrg = r ? r.org : (s.org || 'Без юрлица'), rPer = String(r ? r.per : (s.per || ''));
+      if (org !== 'ALL' && rOrg !== org) return;
+      if (yr !== 'ALL' && rPer && !rPer.startsWith(yr)) return;
+      if (mo !== 'ALL' && rPer && rPer.slice(5, 7) !== mo) return;
+      const artKey = window.normStr ? window.normStr(s.art) : (s.art || '');
+      const title = fNames[artKey] || s.name || artKey || 'Без названия';
+      if (q && !title.toLowerCase().includes(q.toLowerCase()) && !rOrg.toLowerCase().includes(q.toLowerCase())) return;
+      const k = `${rOrg}|||${rPer}|||${title}`;
+      const c = map.get(k) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, rS: 0, rR: 0, cS: 0, cR: 0, log: 0, comm: 0 };
+      c.qS += window.num(s.qSale !== undefined ? s.qSale : (s.qty || 0));
+      c.qR += window.num(s.qRet || 0);
+      c.rS += window.num(s.revSale !== undefined ? s.revSale : (s.rev || 0));
+      c.rR += window.num(s.revRet || 0);
+      c.cS += window.num(s.costSale !== undefined ? s.costSale : (s.cost || 0));
+      c.cR += window.num(s.costRet || 0);
+      c.log += window.num(s.log || 0);
+      c.comm += window.num(s.comm || 0) + window.num(s.acq || 0) + window.num(s.ads || 0);
+      map.set(k, c);
+    });
+    return Array.from(map.values()).map(x => {
+      const netQty = x.qS - x.qR, retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0, netRev = x.rS - x.rR, avgCheck = netQty > 0 ? netRev / netQty : 0;
+      const netCost = x.cS - x.cR, costPct = netRev > 0 ? (netCost / netRev) * 100 : 0, costUnit = netQty > 0 ? netCost / netQty : 0;
+      const logPct = netRev > 0 ? (x.log / netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = netRev > 0 ? (x.comm / netRev) * 100 : 0;
+      const margin = netRev - netCost - x.log - x.comm, rentPct = netRev > 0 ? (margin / netRev) * 100 : 0;
+      return Object.assign(x, { netQty, retPct, netRev, avgCheck, netCost, costPct, costUnit, logPct, logUnit, commPct, margin, rentPct });
+    }).sort((a, b) => b.netRev - a.netRev);
+  };
 })();
