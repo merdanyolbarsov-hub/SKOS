@@ -286,7 +286,7 @@
 
   const CRUMBS = {
     dash: 'SKOS / Сводка и 5 ИП + 1 ООО', abc: 'SKOS / Двойной ABC-анализ', rep: 'SKOS / Отчёты WB, Ozon и Яндекс Маркет',
-    sku: 'SKOS / Товары, ШК и Себестоимость (32 папки)', stk: 'SKOS / Запасы, Брак и Фурнитура', dds: 'SKOS / ДДС, Выписки и Кассы',
+    sku: 'SKOS / Справочники / Товары, ШК и себестоимость', stk: 'SKOS / Запасы, Брак и Фурнитура', dds: 'SKOS / ДДС, Выписки и Кассы',
     exp: 'SKOS / Расходы, Налоги и ЗПВ', sup: 'SKOS / Контрагенты и Основные средства', set: 'SKOS / Юрлица, Банки и Облако', dict: 'SKOS / Единые справочники'
   };
 
@@ -295,7 +295,7 @@
     window.db.tab = id;
     ['dash', 'abc', 'rep', 'sku', 'stk', 'dds', 'exp', 'sup', 'set', 'dict'].forEach(t => {
       document.getElementById('tab-' + t)?.classList.toggle('hidden', t !== id);
-      document.getElementById('nav-' + t)?.classList.toggle('active', t === id);
+      document.getElementById('nav-' + t)?.classList.toggle('active', t === (id === 'sku' ? 'dict' : id));
     });
     const c = document.getElementById('crumb');
     if (c) c.textContent = (CRUMBS[id] || 'SKOS Finance 3.0') + (window.__skosReadOnly ? ' [👁️ ТОЛЬКО ПРОСМОТР]' : '');
@@ -852,7 +852,7 @@
     if (!wrap) { wrap = document.createElement('div'); wrap.id = 'skos-folders-wrap'; wrap.className = 'card'; tabSku.appendChild(wrap); }
 
     const q = (filterQ !== undefined ? filterQ : (document.getElementById('sku-q')?.value || '')).trim().toLowerCase();
-    const rate = window.getRate(), fNames = window.getFolderNames(), folders = {};
+    const rate = window.getRate(), fNames = window.getFolderNames(), folders = Object.create(null);
     (window.db.skus || []).forEach(s => {
       const fKey = window.normStr(s.art) || 'Без артикула';
       if (!folders[fKey]) folders[fKey] = { key: fKey, title: fNames[fKey] || s.name || fKey, items: [] };
@@ -2053,6 +2053,8 @@
 
 ;(function installInitialSheetsImport() {
   const render = window.renderRepTab;
+  const renderCatalog = window.renderSkuTab;
+  const renderDirectories = window.renderDictTab;
   const format = 'skos-sheets-initial-2026-v1';
   const metricNames = ['rev','ret','ads','log','com','cogs'];
   const periodOf = row => row.per || (row.yr && row.mo ? `${row.yr}-${String(row.mo).padStart(2,'0')}` : '');
@@ -2060,7 +2062,7 @@
   const clean = value => typeof value === 'string' ? value.trim() : '';
   const norm = value => clean(value).toLocaleLowerCase('ru');
 
-  function plan(data, payload) {
+  function plan(data, payload, catalogOnly = false) {
     if (payload?.format !== format || !Array.isArray(payload.groups) || !Array.isArray(payload.skus)) {
       throw new Error('Выберите стартовый пакет SKOS из Google Таблиц.');
     }
@@ -2071,7 +2073,7 @@
     const knownArticles = new Map(skus.filter(s => clean(s.name) && clean(s.art)).map(s => [norm(s.name), clean(s.art)]));
     const addedReports = [], addedSales = [], addedSkus = [];
     let skipped = 0, unknownOrg = 0;
-    for (const group of payload.groups) {
+    for (const group of catalogOnly ? [] : payload.groups) {
       if (!group || !['WB','OZON','YM'].includes(group.mp) || !/^2026-(0[1-9]|1[0-2])$/.test(group.per) ||
           !metricNames.every(name => Number.isFinite(group[name])) || !Array.isArray(group.items)) {
         throw new Error('Пакет содержит некорректный отчёт.');
@@ -2104,17 +2106,17 @@
       reports:addedReports.length,items:addedSales.length,skus:addedSkus.length,skipped,unknownOrg};
   }
 
-  window.renderRepTab = function () {
-    render.apply(this, arguments);
-    const anchor = document.getElementById('skos-report-upload');
-    if (!anchor || document.getElementById('skos-sheets-import') || window.__skosReadOnly) return;
+  function mountImport(anchor, catalogOnly = false) {
+    const id = catalogOnly ? 'skos-catalog-sheets-import' : 'skos-sheets-import';
+    if (!anchor || document.getElementById(id) || window.__skosReadOnly) return;
     const area = document.createElement('div');
-    area.id = 'skos-sheets-import';
+    area.id = id;
     area.style.marginBottom = '10px';
     area.innerHTML = '<button class="btn" type="button">Загрузить стартовые данные Google Таблиц</button><input type="file" accept=".json,application/json" hidden><p role="status"></p>';
     const input = area.querySelector('input');
     const button = area.querySelector('button');
     const status = area.querySelector('p');
+    if (catalogOnly) button.textContent = 'Загрузить баркоды и себестоимость';
     button.onclick = () => input.click();
     input.onchange = async () => {
       const file = input.files[0];
@@ -2123,13 +2125,14 @@
       button.disabled = true;
       try {
         const payload = JSON.parse(await file.text());
-        const result = plan(window.db, payload);
+        const result = plan(window.db, payload, catalogOnly);
         const message = `Новые отчёты: ${result.reports}. Строки по моделям: ${result.items}. Новые баркоды: ${result.skus}. Пропущено групп с данными или закрытым месяцем: ${result.skipped}. Не найдено юрлиц для групп: ${result.unknownOrg}.`;
-        status.textContent = message;
-        if (!(result.reports || result.skus) || !confirm(message + '\n\nДобавить эти данные в локальную базу SKOS?')) return;
+        const preview = catalogOnly ? 'Новые баркоды: ' + result.skus + '. Себестоимость существующих баркодов сохраняется.' : message;
+        status.textContent = preview;
+        if (!(result.reports || result.skus) || !confirm(preview + '\n\nДобавить эти данные в локальную базу SKOS?')) return;
         localStorage.setItem(window._CFG.KEY, JSON.stringify(result.next));
         Object.assign(window.db,result.next);
-        status.textContent = 'Стартовые данные сохранены. ' + message;
+        status.textContent = 'Стартовые данные сохранены. ' + preview;
         window.render();
       } catch (error) {
         status.textContent = error.name === 'QuotaExceededError'
@@ -2140,5 +2143,46 @@
       }
     };
     anchor.after(area);
+  }
+
+  function navigationButton(id, title, target) {
+    const button = document.createElement('button');
+    button.id = id;
+    button.type = 'button';
+    button.className = 'btn';
+    button.style.marginBottom = '10px';
+    button.textContent = title;
+    button.onclick = () => window.tab(target);
+    return button;
+  }
+
+  window.renderRepTab = function () {
+    render.apply(this, arguments);
+    mountImport(document.getElementById('skos-report-upload'));
   };
+
+  window.renderDictTab = function () {
+    renderDirectories.apply(this, arguments);
+    const section = document.getElementById('tab-dict');
+    if (section && !document.getElementById('skos-open-product-directory')) {
+      section.prepend(navigationButton('skos-open-product-directory', '🏷️ Товары, ШК и себестоимость', 'sku'));
+    }
+  };
+
+  window.renderSkuTab = function () {
+    renderCatalog.apply(this, arguments);
+    const card = document.querySelector('#tab-sku .card:first-child');
+    if (!card) return;
+    let back = document.getElementById('skos-back-to-directories');
+    if (!back) {
+      back = navigationButton('skos-back-to-directories', '← Все справочники', 'dict');
+      card.prepend(back);
+    }
+    mountImport(back, true);
+  };
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const old = document.getElementById('nav-sku');
+    if (old) old.style.display = 'none';
+  });
 })();
