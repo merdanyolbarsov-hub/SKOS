@@ -1,7 +1,7 @@
-/* === SKOS Finance 3.0 — Точная Юнит-экономика (1-в-1 как в таблице SKOS) === */
+/* === SKOS Finance 3.0 — Точная Юнит-экономика (WB / Ozon / ЯМ + 32 папки ШК) === */
 (function () {
-  window.unitState = { sub: 'WB', org: 'ALL', yr: '2026', mo: 'ALL', model: 'ALL' };
-  window.unitCalcState = { mp: 'WB', model: '', price: 4500, buyout: 30, commPct: 29, acqPct: 1.5, logTo: 120, logBack: 50, pack: 65, taxPct: 8, drrPct: 5, targetMargin: 25 };
+  window.unitState = { sub: 'WB', org: 'ALL', yr: 'ALL', mo: 'ALL', model: 'ALL' };
+  window.unitCalcState = { mp: 'WB', model: '', price: 4500, buyout: 88, commPct: 37, acqPct: 1.5, logTo: 350, logBack: 50, pack: 65, taxPct: 6, drrPct: 5, targetMargin: 30 };
 
   function hidePages(keepId) {
     document.querySelectorAll('[id^="tab-"], [id^="page-"], [id^="sec-"], .tab-sec, .page').forEach(el => {
@@ -49,127 +49,237 @@
     });
   };
 
-  function resolveFolder(artRaw, nameRaw, fNames, skuMap) {
-    const aLow = String(artRaw || '').trim().toLowerCase();
-    const nLow = String(nameRaw || '').trim().toLowerCase();
-    if (fNames[aLow]) return fNames[aLow];
-    if (skuMap.has(aLow)) {
-      const s = skuMap.get(aLow);
-      const k = String(s.art || '').trim().toLowerCase();
-      if (fNames[k]) return fNames[k];
-    }
-    const full = (String(artRaw || '') + ' ' + String(nameRaw || '')).toUpperCase().replace(/SKOS[\s\-_]+/g, 'SKOS-');
-    const match = full.match(/SKOS-([A-ZА-Я]{1,5})/);
-    if (match && match[1]) {
-      const pref = 'skos-' + match[1].toLowerCase();
-      if (fNames[pref]) return fNames[pref];
-    }
-    if (nLow.includes('двойка') && fNames['skos-kd']) return fNames['skos-kd'];
-    return nameRaw || artRaw || 'Без модели';
+  function getModelCode(str) {
+    const up = String(str || '').toUpperCase().replace(/SKOS[\s\-_]+/g, 'SKOS-');
+    const m = up.match(/SKOS-([A-ZА-Я]{1,5})/);
+    return m ? ('SKOS-' + m) : '';
+  }
+
+  function buildFolderDict() {
+    const fNames = window.getFolderNames ? window.getFolderNames() : {};
+    const codeToTitle = new Map(), skuToCode = new Map(), codeToUsd = new Map();
+
+    Object.entries(fNames).forEach(([k, val]) => {
+      const code = getModelCode(k + ' ' + val);
+      if (code && !codeToTitle.has(code)) {
+        const cleanName = String(val || '').replace(/^SKOS-[A-ZА-Я0-9]+\s*[—\-]\s*/i, '').trim();
+        codeToTitle.set(code, cleanName ? `${code} — ${cleanName}` : code);
+      }
+    });
+
+    (window.db.skus || []).forEach(s => {
+      const art = String(s.art || '').trim().toLowerCase();
+      const bc = String(s.bc || '').trim().toLowerCase();
+      const raw = (s.folder || '') + ' ' + (s.art || '') + ' ' + (s.name || '');
+      const code = getModelCode(raw) || getModelCode(fNames[art] || '');
+      const u = window.num(s.usd || s.costUsd || 0);
+
+      if (code) {
+        if (art) skuToCode.set(art, code);
+        if (bc) skuToCode.set(bc, code);
+        if (!codeToTitle.has(code)) {
+          const nm = String(s.name || '').trim();
+          codeToTitle.set(code, nm ? `${code} — ${nm}` : code);
+        }
+        if (u > 0 && !codeToUsd.has(code)) codeToUsd.set(code, u);
+      } else if (art) {
+        const fb = fNames[art] || s.name || s.art;
+        skuToCode.set(art, fb);
+        if (bc) skuToCode.set(bc, fb);
+        if (u > 0 && !codeToUsd.has(fb)) codeToUsd.set(fb, u);
+      }
+    });
+
+    return { codeToTitle, skuToCode, codeToUsd };
   }
   window.buildUnitRows = function (mpCode) {
     const { org, yr, mo, model } = window.unitState;
-    const fNames = window.getFolderNames ? window.getFolderNames() : {};
-    const skuMap = new Map(), usdByFolder = new Map();
-    (window.db.skus || []).forEach(s => {
-      const a = String(s.art || '').trim().toLowerCase(), b = String(s.bc || '').trim().toLowerCase();
-      if (a) skuMap.set(a, s);
-      if (b) skuMap.set(b, s);
-      const u = window.num(s.usd || 0);
-      if (u > 0) {
-        const fn = resolveFolder(a, s.name, fNames, skuMap);
-        if (fn && !usdByFolder.has(fn)) usdByFolder.set(fn, u);
-        if (a && !usdByFolder.has(a)) usdByFolder.set(a, u);
-        const m = (String(s.art || '') + ' ' + String(s.name || '')).toUpperCase().replace(/SKOS[\s\-_]+/g, 'SKOS-').match(/SKOS-([A-ZА-Я]{1,5})/);
-        if (m && m[1]) {
-          const pf = 'skos-' + m[1].toLowerCase();
-          if (!usdByFolder.has(pf)) usdByFolder.set(pf, u);
-        }
-      }
-    });
+    const { codeToTitle, skuToCode, codeToUsd } = buildFolderDict();
+
+    function resolveModel(s) {
+      const a = String(s.art || '').trim().toLowerCase();
+      const b = String(s.bc || '').trim().toLowerCase();
+      const code = skuToCode.get(b) || skuToCode.get(a) || getModelCode((s.art || '') + ' ' + (s.name || ''));
+      if (code) return { key: code, title: codeToTitle.get(code) || code };
+      const fb = String(s.name || s.art || 'Без модели').trim();
+      return { key: fb, title: fb };
+    }
 
     const repMap = new Map(), repTotals = new Map();
     (window.db.reports || []).forEach(r => {
       repMap.set(String(r.id), r);
-      if (String(r.mp || '').toUpperCase() !== mpCode) return;
-      const k = `${r.org || ''}|||${String(r.per || r.period || r.month || '')}`;
-      const cur = repTotals.get(k) || { rev: 0, log: 0, comm: 0, ret: 0, retQty: 0 };
-      cur.rev += window.num(r.rev || 0);
-      cur.log += window.num(r.log || 0);
-      cur.comm += window.num(r.comm || 0) + window.num(r.ads || 0);
-      cur.ret += window.num(r.ret || 0);
-      cur.retQty += window.num(r.retQty || r.rq || 0);
+      const rMp = String(r.mp || '').toUpperCase();
+      if (rMp !== mpCode) return;
+      const rPer = String(r.per || r.period || r.month || '');
+      const k = `${r.org || ''}|||${rPer}`;
+      const cur = repTotals.get(k) || { rev: 0, log: 0, comm: 0, retQty: 0, retSum: 0 };
+      cur.rev += window.num(r.rev || r.netRev || 0);
+      cur.log += window.num(r.log || r.logistics || 0);
+      cur.comm += window.num(r.comm || r.commission || 0) + window.num(r.acq || 0) + window.num(r.ads || 0);
+      cur.retQty += window.num(r.retQty || r.rq || r.returnsQty || 0);
+      cur.retSum += window.num(r.ret || r.returns || 0);
       repTotals.set(k, cur);
     });
-    const fallbackRt = Array.from(repTotals.values()).reduce((a, b) => ({ rev: a.rev + b.rev, log: a.log + b.log, comm: a.comm + b.comm, ret: a.ret + b.ret, retQty: a.retQty + b.retQty }), { rev: 0, log: 0, comm: 0, ret: 0, retQty: 0 });
 
     const map = new Map(), modelsSet = new Set(), rate = window.getRate();
+
     (window.db.itemSales || []).forEach(s => {
       const r = repMap.get(String(s.repId || s.rId || s.reportId || ''));
       const mp = String(r ? r.mp : (s.mp || '')).toUpperCase();
       if (mp !== mpCode) return;
+
       const rOrg = r ? r.org : (s.org || 'ИП Каримов Артем');
-      const rPer = String(r ? (r.per || r.period || r.month || '') : (s.per || s.period || '2026-01'));
-      const title = resolveFolder(s.art || s.bc, s.name, fNames, skuMap);
-      modelsSet.add(title);
+      const rPer = String(r ? (r.per || r.period || r.month || '') : (s.per || s.period || ''));
+      const mod = resolveModel(s);
+      modelsSet.add(mod.title);
 
       if (org !== 'ALL' && rOrg !== org) return;
       if (yr !== 'ALL' && rPer && !rPer.startsWith(yr)) return;
       if (mo !== 'ALL' && rPer && rPer.slice(5, 7) !== mo) return;
-      if (model !== 'ALL' && title !== model) return;
+      if (model !== 'ALL' && mod.title !== model) return;
 
-      const rNet = window.num(s.rev || 0);
-      const aLow = String(s.art || '').trim().toLowerCase();
-      const mTitle = String(title || '').toUpperCase().replace(/SKOS[\s\-_]+/g, 'SKOS-').match(/SKOS-([A-ZА-Я]{1,5})/);
-      const pfTitle = (mTitle && mTitle[1]) ? ('skos-' + mTitle[1].toLowerCase()) : '';
-      const uUsd = usdByFolder.get(title) || usdByFolder.get(aLow) || usdByFolder.get(pfTitle) || 0;
+      let qN = window.num(s.sold ?? s.q ?? s.qty ?? s.cnt ?? 0);
+      let qR = window.num(s.rq ?? s.retQty ?? s.qRet ?? s.retCnt ?? s.rQty ?? 0);
+      let qS = window.num(s.qSale ?? s.saleQty ?? s.soldAll ?? 0);
+      const revRaw = window.num(s.rev || 0);
+      const retRub = window.num(s.retRev ?? s.ret ?? s.retSum ?? 0);
 
-      const rt = repTotals.get(`${rOrg}|||${rPer}`) || fallbackRt;
-      const share = (rt && rt.rev > 0) ? (rNet / rt.rev) : 0;
+      const isRetOp = String(s.type || s.op || s.oper || '').toLowerCase().includes('возвр') || qN < 0 || revRaw < 0;
+      if (isRetOp) {
+        qR += Math.abs(qN || qS || 1);
+        qN = 0; qS = 0;
+      } else {
+        if (qS > 0 && qN === 0) qN = Math.max(0, qS - qR);
+        if (qN > 0 && qS === 0) qS = qN + qR;
+      }
 
-      let qNet = window.num(s.sold ?? s.q ?? s.qty ?? s.qSale ?? s.saleQty ?? s.cnt ?? 0);
-      let qR = window.num(s.rq ?? s.retQty ?? s.qRet ?? s.retCnt ?? 0);
-      if (qNet < 0) { qR += Math.abs(qNet); qNet = 0; }
-      if (!qNet && rNet > 0) qNet = Math.max(1, Math.round(rNet / 2600));
-      if (!qR && rt && rt.retQty > 0) qR = Math.round(rt.retQty * share);
-      if (!qR && rt && rt.ret > 0 && rNet > 0) qR = Math.round((rt.ret * share) / (rNet / Math.max(1, qNet)));
+      const netRev = isRetOp ? -Math.abs(revRaw) : (revRaw - retRub);
+      const rt = repTotals.get(`${rOrg}|||${rPer}`);
+      const share = (rt && rt.rev > 0 && netRev > 0) ? (netRev / rt.rev) : 0;
 
-      const cNet = (qNet > 0 && uUsd > 0) ? (qNet * uUsd * rate) : window.num(s.cost || 0);
-      const sLog = window.num(s.log || 0);
-      const sComm = window.num(s.comm || 0) + window.num(s.ads || 0);
-      const log = sLog > 0 ? sLog : (rt ? rt.log * share : 0);
-      const comm = sComm > 0 ? sComm : (rt ? rt.comm * share : 0);
+      const uUsd = codeToUsd.get(mod.key) || window.num(s.usd || 0);
+      const cNet = uUsd > 0 ? (qN * uUsd * rate) : (qN > 0 ? window.num(s.cost || 0) : 0);
 
-      const key = `${rOrg}|||${rPer}|||${title}`;
-      const cur = map.get(key) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, qN: 0, netRev: 0, cNet: 0, log: 0, comm: 0 };
-      cur.qN += qNet; cur.qR += qR; cur.qS += (qNet + qR);
-      cur.netRev += rNet; cur.cNet += cNet; cur.log += log; cur.comm += comm;
-      map.set(key, cur);
+      const sLog = window.num(s.log || s.logistics || 0);
+      const sComm = window.num(s.comm || s.commission || 0) + window.num(s.acq || 0) + window.num(s.ads || 0);
+      const log = sLog !== 0 ? sLog : (rt && rt.log > 0 ? rt.log * share : 0);
+      const comm = sComm !== 0 ? sComm : (rt && rt.comm > 0 ? rt.comm * share : 0);
+
+      const groupKey = `${rOrg}|||${rPer}|||${mod.title}`;
+      const cur = map.get(groupKey) || { org: rOrg, per: rPer, title: mod.title, qS: 0, qR: 0, qN: 0, netRev: 0, cNet: 0, log: 0, comm: 0 };
+      cur.qS += qS; cur.qR += qR; cur.qN += qN; cur.netRev += netRev; cur.cNet += cNet; cur.log += log; cur.comm += comm;
+      map.set(groupKey, cur);
     });
 
     const rows = Array.from(map.values()).map(x => {
-      const netQty = x.qN, retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0, buyoutPct = x.qS > 0 ? (netQty / x.qS) * 100 : 0;
+      const netQty = x.qN;
+      const totalTried = x.qS > 0 ? x.qS : (netQty + x.qR);
+      const retPct = totalTried > 0 ? (x.qR / totalTried) * 100 : 0;
+      const buyoutPct = totalTried > 0 ? (netQty / totalTried) * 100 : 0;
       const avgCheck = netQty > 0 ? x.netRev / netQty : 0;
       const costPct = x.netRev > 0 ? (x.cNet / x.netRev) * 100 : 0, costUnit = netQty > 0 ? x.cNet / netQty : 0;
-      const logPct = x.netRev > 0 ? (x.log / x.netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = x.netRev > 0 ? (x.comm / x.netRev) * 100 : 0;
-      const commUnit = netQty > 0 ? x.comm / netQty : 0;
+      const logPct = x.netRev > 0 ? (x.log / x.netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0;
+      const commPct = x.netRev > 0 ? (x.comm / x.netRev) * 100 : 0, commUnit = netQty > 0 ? x.comm / netQty : 0;
       const margin = x.netRev - x.cNet - x.log - x.comm, margUnit = netQty > 0 ? margin / netQty : 0;
       const rentPct = x.netRev > 0 ? (margin / x.netRev) * 100 : 0;
-      return Object.assign(x, { netQty, retPct, buyoutPct, avgCheck, costPct, costUnit, logPct, logUnit, commPct, commUnit, margin, margUnit, rentPct });
+      return Object.assign(x, { qS: totalTried, netQty, retPct, buyoutPct, avgCheck, costPct, costUnit, logPct, logUnit, commPct, commUnit, margin, margUnit, rentPct });
     }).sort((a, b) => b.netRev - a.netRev);
+
     return { rows, models: Array.from(modelsSet).sort() };
+  };
+  window.importUnitCsvFiles = async function (files) {
+    if (!files || !files.length) return;
+    const parseNum = v => parseFloat(String(v || '0').replace(/[^\d,.-]/g, '').replace(',', '.')) || 0;
+    const items = [];
+    let detectedMp = window.unitState.sub;
+    let repPer = '2026-01';
+    const ymOrderSku = new Map();
+
+    for (const f of files) {
+      const text = await f.text();
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (!lines.length) continue;
+      const sep = lines.includes(';') ? ';' : ',';
+      const rows = lines.map(l => l.split(sep).map(c => c.replace(/^"|"$/g, '').trim()));
+      const hIdx = rows.findIndex(r => r.some(c => /Артикул|Предмет|ID бизнес-аккаунта/i.test(c)));
+      if (hIdx < 0) continue;
+      const hdr = rows[hIdx];
+      const col = name => hdr.findIndex(h => h.toLowerCase().includes(name.toLowerCase()));
+
+      // 1. Ozon
+      if (hdr.includes('Тип начисления')) {
+        detectedMp = 'OZON';
+        const cGrp = col('Группа услуг'), cType = col('Тип начисления'), cArt = col('Артикул'), cQty = col('Количество'), cPrice = col('Цена продавца'), cSum = col('Сумма итого'), cDate = col('Дата начисления');
+        for (let i = hIdx + 1; i < rows.length; i++) {
+          const r = rows[i]; if (!r[cType]) continue;
+          const art = r[cArt] || 'ОБЩИЕ УСЛУГИ';
+          const dt = r[cDate] || '';
+          if (dt.length >= 10) repPer = dt.slice(6, 10) + '-' + dt.slice(3, 5);
+          const grp = r[cGrp] || '', typ = r[cType] || '', qty = parseNum(r[cQty]) || 1, sum = parseNum(r[cSum]);
+          if (grp === 'Продажи' && typ === 'Выручка') items.push({ mp: 'OZON', per: repPer, art, sold: qty, rq: 0, rev: parseNum(r[cPrice]) || sum, log: 0, comm: 0 });
+          else if (grp === 'Возвраты' && typ === 'Возврат выручки') items.push({ mp: 'OZON', per: repPer, art, sold: 0, rq: qty, rev: -Math.abs(parseNum(r[cPrice]) || sum), log: 0, comm: 0 });
+          else if (grp === 'Услуги доставки' || typ.includes('Доставка') || typ.includes('возврат')) items.push({ mp: 'OZON', per: repPer, art, sold: 0, rq: 0, rev: 0, log: Math.abs(sum), comm: 0 });
+          else if (sum !== 0) items.push({ mp: 'OZON', per: repPer, art, sold: 0, rq: 0, rev: 0, log: 0, comm: -sum });
+        }
+      }
+      // 2. Wildberries
+      else if (hdr.includes('Обоснование для оплаты')) {
+        detectedMp = 'WB';
+        const cArt = col('Артикул поставщика'), cBc = col('Баркод'), cOb = col('Обоснование для оплаты'), cQty = col('Кол-во'), cRev = col('Вайлдберриз реализовал'), cComm = col('Вознаграждение Вайлдберриз'), cNds = col('НДС с Вознаграждения'), cAcq = col('Компенсация платёжных'), cLog = col('Услуги по доставке'), cStor = col('Хранение'), cHold = col('Удержания'), cFine = col('штрафов'), cDate = col('Дата продажи');
+        for (let i = hIdx + 1; i < rows.length; i++) {
+          const r = rows[i]; const ob = r[cOb] || ''; if (!ob) continue;
+          const dt = r[cDate] || ''; if (dt.length >= 7) repPer = dt.slice(0, 7);
+          const art = r[cArt] || '', bc = r[cBc] || '', qty = parseNum(r[cQty]), rev = parseNum(r[cRev]);
+          const comm = parseNum(r[cComm]) + parseNum(r[cNds]) + parseNum(r[cAcq]);
+          const log = parseNum(r[cLog]) + parseNum(r[cStor]) + parseNum(r[cHold]) + parseNum(r[cFine]);
+          if (ob === 'Продажа') items.push({ mp: 'WB', per: repPer, art, bc, sold: qty || 1, rq: 0, rev, log, comm });
+          else if (ob === 'Возврат') items.push({ mp: 'WB', per: repPer, art, bc, sold: 0, rq: qty || 1, rev: -Math.abs(rev), log, comm });
+          else if (log > 0 || comm !== 0) items.push({ mp: 'WB', per: repPer, art, bc, sold: 0, rq: 0, rev: 0, log, comm });
+        }
+      }
+      // 3. Яндекс Маркет (заказы + услуги)
+      else if (hdr.includes('Номер заказа')) {
+        detectedMp = 'YM';
+        const cOrd = col('Номер заказа'), cSku = col('Ваш SKU'), cStat = col('Статус товара'), cOrdStat = col('Статус заказа'), cPrice = col('Цена продажи'), cAllSrv = col('Все услуги Маркета'), cDeliv = col('Доставка покупателю'), cDate = col('Дата оформления');
+        for (let i = hIdx + 1; i < rows.length; i++) {
+          const r = rows[i]; const ord = r[cOrd]; if (!ord) continue;
+          const dt = r[cDate] || ''; if (dt.length >= 10) repPer = dt.slice(6, 10) + '-' + dt.slice(3, 5);
+          if (cSku >= 0 && r[cSku]) ymOrderSku.set(ord, r[cSku]);
+          const sku = (cSku >= 0 && r[cSku]) ? r[cSku] : (ymOrderSku.get(ord) || 'ЯМ Заказ');
+          const st = (cStat >= 0 ? r[cStat] : '') || (cOrdStat >= 0 ? r[cOrdStat] : '');
+          const price = parseNum(r[cPrice]);
+          const srv = cAllSrv >= 0 ? parseNum(r[cAllSrv]) : 0;
+          const log = cDeliv >= 0 ? parseNum(r[cDeliv]) : 0;
+          const comm = Math.max(0, srv - log);
+          if (st.includes('Доставлен')) items.push({ mp: 'YM', per: repPer, art: sku, sold: 1, rq: 0, rev: cAllSrv >= 0 ? 0 : price, log, comm });
+          else if (st.includes('Возврат') || st.includes('Невыкуп')) items.push({ mp: 'YM', per: repPer, art: sku, sold: 0, rq: 1, rev: 0, log, comm });
+        }
+      }
+    }
+    if (!items.length) return alert('Не удалось распознать строки отчёта.');
+    const repId = 'unit_' + detectedMp + '_' + Date.now();
+    window.db.reports = (window.db.reports || []).filter(r => !(r.mp === detectedMp && r.per === repPer));
+    window.db.itemSales = (window.db.itemSales || []).filter(s => !(s.mp === detectedMp && s.per === repPer));
+    window.db.reports.push({ id: repId, mp: detectedMp, org: 'ИП Каримов Артем', per: repPer, rev: items.reduce((a, b) => a + b.rev, 0), log: items.reduce((a, b) => a + b.log, 0), comm: items.reduce((a, b) => a + b.comm, 0) });
+    items.forEach(it => window.db.itemSales.push(Object.assign({ repId, org: 'ИП Каримов Артем' }, it)));
+    window.unitState.sub = detectedMp;
+    if (typeof window.saveDb === 'function') window.saveDb();
+    window.renderUnitTab();
   };
   window.renderUnitTab = function () {
     window.mountUnitNav();
     const sec = document.getElementById('page-unit'); if (!sec) return;
-    const st = window.unitState, c = window.unitCalcState, rate = window.getRate(), fNames = window.getFolderNames ? window.getFolderNames() : {};
+    const st = window.unitState, c = window.unitCalcState, rate = window.getRate();
+    const { codeToTitle, codeToUsd } = buildFolderDict();
+
     const nav = [['WB', '🟣 UNIT ВБ (факт)'], ['OZON', '🔵 UNIT Ozon (факт)'], ['YM', '🟡 UNIT ЯМ (факт)'], ['CALC', '🧮 Калькулятор цены (план)']]
-      .map(([k, t]) => `<button type="button" class="btn ${st.sub === k ? 'btn-primary' : ''}" style="display:inline-flex;align-items:center" onclick="unitState.sub='${k}';unitState.model='ALL';renderUnitTab()">${t}</button>`).join('');
+      .map(([k, t]) => `<button type="button" class="btn ${st.sub === k ? 'btn-primary' : ''}" style="display:inline-flex;align-items:center" onclick="unitState.sub='${k}';unitState.model='ALL';renderUnitTab()">${t}</button>`).join('') +
+      `<label class="btn" style="margin-left:auto;background:#ecfdf5;border-color:#10b981;color:#065f46;cursor:pointer">📥 Загрузить CSV отчёт (WB/Ozon/ЯМ)<input type="file" multiple accept=".csv" style="display:none" onchange="importUnitCsvFiles(this.files)"></label>`;
 
     if (st.sub === 'CALC') {
-      const models = [...new Set((window.db.skus || []).map(s => fNames[String(s.art || '').trim().toLowerCase()] || s.name || s.art).filter(Boolean))].sort();
-      const usd = (window.db.skus || []).find(s => (fNames[String(s.art || '').trim().toLowerCase()] || s.name || s.art) === c.model && window.num(s.usd) > 0)?.usd || 0;
-      const costRub = window.num(usd) * rate, bRate = Math.max(0.1, Math.min(1, window.num(c.buyout) / 100));
+      const modelEntries = Array.from(codeToTitle.entries()).sort((a, b) => a.localeCompare(b));
+      const usd = codeToUsd.get(c.model) || 0;
+      const costRub = usd * rate, bRate = Math.max(0.1, Math.min(1, window.num(c.buyout) / 100));
       const realLog = (window.num(c.logTo) + (1 - bRate) * window.num(c.logBack)) / bRate;
       const varPct = (window.num(c.commPct) + window.num(c.acqPct) + window.num(c.taxPct) + window.num(c.drrPct)) / 100;
       const fixRub = costRub + realLog + window.num(c.pack), profit = window.num(c.price) * (1 - varPct) - fixRub;
@@ -177,7 +287,7 @@
       const breakEven = fixRub / Math.max(0.05, 1 - varPct), recPrice = fixRub / Math.max(0.05, 1 - varPct - Math.min(0.7, window.num(c.targetMargin) / 100));
       sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🧮 Калькулятор Юнит-экономики SKOS</div></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${nav}</div>
         <div class="form-grid" style="margin-bottom:12px">
-          <div style="grid-column:span 2"><label>Папка-модель (Курс: ${rate} ₽/$)</label><select class="select" onchange="unitCalcState.model=this.value;renderUnitTab()"><option value="">— Выберите модель —</option>${models.map(m => `<option value="${window.esc(m)}"${m === c.model ? ' selected' : ''}>${window.esc(m)}</option>`).join('')}</select></div>
+          <div style="grid-column:span 2"><label>Папка-модель (Курс: ${rate} ₽/$)</label><select class="select" onchange="unitCalcState.model=this.value;renderUnitTab()"><option value="">— Выберите модель —</option>${modelEntries.map(([k, t]) => `<option value="${window.esc(k)}"${k === c.model ? ' selected' : ''}>${window.esc(t)}</option>`).join('')}</select></div>
           <div><label>Цена ₽</label><input type="number" class="input" value="${c.price}" onchange="unitCalcState.price=num(this.value);renderUnitTab()"></div>
           <div><label>% Выкупа</label><input type="number" class="input" value="${c.buyout}" onchange="unitCalcState.buyout=num(this.value);renderUnitTab()"></div>
           <div><label>Комиссия %</label><input type="number" step="0.1" class="input" value="${c.commPct}" onchange="unitCalcState.commPct=num(this.value);renderUnitTab()"></div>
@@ -190,7 +300,7 @@
           <div><label>Цель маржи %</label><input type="number" class="input" value="${c.targetMargin}" onchange="unitCalcState.targetMargin=num(this.value);renderUnitTab()"></div>
         </div>
         <div class="kpi-grid">
-          <div class="kpi-card"><div>Себест. (${window.num(usd).toFixed(2)} $)</div><div class="kpi-val">${window.fmtR(costRub)}</div></div>
+          <div class="kpi-card"><div>Себест. (${usd.toFixed(2)} $)</div><div class="kpi-val">${window.fmtR(costRub)}</div></div>
           <div class="kpi-card"><div>Логист. с выкупом</div><div class="kpi-val">${window.fmtR(realLog)}</div></div>
           <div class="kpi-card highlight"><div>Прибыль с 1 шт</div><div class="kpi-val ${profit >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(profit)} (${marginPct.toFixed(1)}%)</div></div>
           <div class="kpi-card" style="background:#fef2f2"><div>Мин. цена в ноль</div><div class="kpi-val text-red">${window.fmtR(breakEven)}</div></div>
@@ -198,6 +308,7 @@
         </div></div>`;
       return;
     }
+
     const { rows, models } = window.buildUnitRows(st.sub);
     const orgNames = [...new Set((window.db.orgs || []).map(o => o.name))];
     let yrOpts = '<option value="ALL">Все года</option>';
@@ -205,9 +316,11 @@
     const mos = [['ALL', 'Все месяцы'], ['01', 'Январь'], ['02', 'Февраль'], ['03', 'Март'], ['04', 'Апрель'], ['05', 'Май'], ['06', 'Июнь'], ['07', 'Июль'], ['08', 'Август'], ['09', 'Сентябрь'], ['10', 'Октябрь'], ['11', 'Ноябрь'], ['12', 'Декабрь']];
     const moOpts = mos.map(([k, v]) => `<option value="${k}"${k === st.mo ? ' selected' : ''}>${v}</option>`).join('');
     const tot = rows.reduce((a, r) => { a.qS += r.qS; a.qR += r.qR; a.qN += r.netQty; a.rN += r.netRev; a.cN += r.cNet; a.l += r.log; a.cm += r.comm; a.m += r.margin; return a; }, { qS: 0, qR: 0, qN: 0, rN: 0, cN: 0, l: 0, cm: 0, m: 0 });
-    const tRet = tot.qS > 0 ? (tot.qR / tot.qS) * 100 : 0, tBuy = tot.qS > 0 ? (tot.qN / tot.qS) * 100 : 0;
-    const tAvg = tot.qN > 0 ? tot.rN / tot.qN : 0, tCostU = tot.qN > 0 ? tot.cN / tot.qN : 0, tLogU = tot.qN > 0 ? tot.l / tot.qN : 0, tCommU = tot.qN > 0 ? tot.cm / tot.qN : 0, tMargU = tot.qN > 0 ? tot.m / tot.qN : 0;
-    const tRent = tot.rN > 0 ? (tot.m / tot.rN) * 100 : 0;
+    const tRet = tot.qS > 0 ? (tot.qR / tot.qS) * 100 : 0, tBuy = tot.qS > 0 ? (tot.qN / tot.qS) * 100 : 0, tAvg = tot.qN > 0 ? tot.rN / tot.qN : 0;
+    const tCostP = tot.rN > 0 ? (tot.cN / tot.rN) * 100 : 0, tCostU = tot.qN > 0 ? tot.cN / tot.qN : 0;
+    const tLogP = tot.rN > 0 ? (tot.l / tot.rN) * 100 : 0, tLogU = tot.qN > 0 ? tot.l / tot.qN : 0;
+    const tCommP = tot.rN > 0 ? (tot.cm / tot.rN) * 100 : 0, tCommU = tot.qN > 0 ? tot.cm / tot.qN : 0;
+    const tMargU = tot.qN > 0 ? tot.m / tot.qN : 0, tRent = tot.rN > 0 ? (tot.m / tot.rN) * 100 : 0;
 
     const trs = rows.map(r => `<tr>
       <td>${window.esc(r.org)}</td><td>${window.esc(r.per)}</td><td class="bold">${window.esc(r.title)}</td>
@@ -233,7 +346,7 @@
       <div style="overflow-x:auto"><table style="font-size:11.5px;white-space:nowrap">
         <thead>
           <tr><th>Аккаунт</th><th>Период</th><th>Папка-модель</th><th class="num">Прод</th><th class="num">Возвр</th><th class="num">Чист</th><th class="num">Выкуп %</th><th class="num">%возв</th><th class="num">Выручка ₽</th><th class="num" style="background:#eef2ff">Ср.чек/шт</th><th class="num">Себест ₽</th><th class="num" style="background:#eef2ff">Себ/шт</th><th class="num">Логист ₽</th><th class="num" style="background:#eef2ff">Лог/шт</th><th class="num">Комис+Экв</th><th class="num" style="background:#eef2ff">Ком/шт</th><th class="num">Маржа ₽</th><th class="num" style="background:#dcfce7">Маржа/шт</th><th class="num">Рентаб</th></tr>
-          <tr style="background:#f1f5f9;font-weight:800"><td colspan="3">ИТОГО (${rows.length} папок)</td><td class="num">${tot.qS}</td><td class="num text-red">${tot.qR}</td><td class="num">${tot.qN}</td><td class="num text-green">${tBuy.toFixed(1)}%</td><td class="num">${tRet.toFixed(1)}%</td><td class="num">${window.fmtR(tot.rN)}</td><td class="num">${window.fmtR(tAvg)}</td><td class="num">${window.fmtR(tot.cN)}</td><td class="num">${window.fmtR(tCostU)}</td><td class="num">${window.fmtR(tot.l)}</td><td class="num">${window.fmtR(tLogU)}</td><td class="num">${window.fmtR(tot.cm)}</td><td class="num">${window.fmtR(tCommU)}</td><td class="num ${tot.m >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(tot.m)}</td><td class="num ${tMargU >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(tMargU)}</td><td class="num">${tRent.toFixed(1)}%</td></tr>
+          <tr style="background:#f1f5f9;font-weight:800"><td colspan="3">ИТОГО (${rows.length} папок)</td><td class="num">${tot.qS}</td><td class="num text-red">${tot.qR}</td><td class="num">${tot.qN}</td><td class="num text-green">${tBuy.toFixed(1)}%</td><td class="num">${tRet.toFixed(1)}%</td><td class="num">${window.fmtR(tot.rN)}</td><td class="num">${window.fmtR(tAvg)}</td><td class="num">${window.fmtR(tot.cN)} (${tCostP.toFixed(0)}%)</td><td class="num">${window.fmtR(tCostU)}</td><td class="num">${window.fmtR(tot.l)} (${tLogP.toFixed(0)}%)</td><td class="num">${window.fmtR(tLogU)}</td><td class="num">${window.fmtR(tot.cm)} (${tCommP.toFixed(0)}%)</td><td class="num">${window.fmtR(tCommU)}</td><td class="num ${tot.m >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(tot.m)}</td><td class="num ${tMargU >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(tMargU)}</td><td class="num">${tRent.toFixed(1)}%</td></tr>
         </thead><tbody>${trs || '<tr><td colspan="19">Нет данных за выбранный период</td></tr>'}</tbody>
       </table></div></div>`;
   };
