@@ -238,14 +238,4 @@
       if (activeNav && activeNav.id === 'nav-svod') activeNav.click();
     }
   }, 600);
-  window.mountUnitNav();
-})();
-  let _cloudRefreshedOnce = false;
-  setInterval(() => {
-    if (!_cloudRefreshedOnce && window.db && (window.db.reports || []).length > 0) {
-      _cloudRefreshedOnce = true;
-      const activeNav = document.querySelector('.nav-btn.active');
-      if (activeNav && activeNav.id === 'nav-svod') activeNav.click();
-    }
-  }, 600);
 })();
