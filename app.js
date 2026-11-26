@@ -1667,16 +1667,28 @@
     if (typeof window.onPerChange === 'function') window.onPerChange();
     if (typeof window.render === 'function') window.render();
   };
-    /* === МОДУЛЬ ЮНИТ-ЭКОНОМИКИ (WB / Ozon / ЯМ) — Часть ЮЭ-1 === */
+    /* === МОДУЛЬ ЮНИТ-ЭКОНОМИКИ (Автономный и безопасный) === */
   window.unitState = { sub: 'WB', org: 'ALL', yr: '2026', mo: 'ALL', q: '' };
+  window.unitCalcState = { mp: 'WB', model: '', price: 4500, buyout: 88, commPct: 29, acqPct: 1.5, logTo: 120, logBack: 50, pack: 65, taxPct: 8, drrPct: 5, targetMargin: 25 };
 
-  window.ensureUnitMenu = function () {
+  window.openUnitTabDirect = function () {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-sec').forEach(s => s.classList.add('hidden'));
+    const btn = document.getElementById('nav-unit');
+    const sec = document.getElementById('tab-unit');
+    if (btn) btn.classList.add('active');
+    if (sec) sec.classList.remove('hidden');
+    if (window.db) window.db.tab = 'unit';
+    window.renderUnitTab();
+  };
+
+  window.initUnitSafe = function () {
     const abcBtn = document.getElementById('nav-abc');
     if (abcBtn && !document.getElementById('nav-unit')) {
       const btn = document.createElement('button');
       btn.id = 'nav-unit'; btn.type = 'button'; btn.className = 'nav-btn';
-      btn.innerHTML = '🧮 Юнит-экономика (WB / Ozon / ЯМ)';
-      btn.onclick = () => { if (typeof window.goTab === 'function') window.goTab('unit'); };
+      btn.textContent = '🧮 Юнит-экономика (WB / Ozon / ЯМ)';
+      btn.onclick = window.openUnitTabDirect;
       abcBtn.insertAdjacentElement('afterend', btn);
     }
     const abcSec = document.getElementById('tab-abc');
@@ -1685,280 +1697,96 @@
       sec.id = 'tab-unit'; sec.className = 'tab-sec hidden';
       abcSec.insertAdjacentElement('afterend', sec);
     }
+    document.querySelectorAll('.nav-btn:not(#nav-unit)').forEach(b => {
+      if (!b.dataset.uHook) {
+        b.dataset.uHook = '1';
+        b.addEventListener('click', () => {
+          document.getElementById('nav-unit')?.classList.remove('active');
+          document.getElementById('tab-unit')?.classList.add('hidden');
+        });
+      }
+    });
   };
-
   window.buildUnitFactRows = function (mpCode) {
-    const { org, yr, mo, q } = window.unitState;
-    const fNames = window.getFolderNames ? window.getFolderNames() : {};
-    const repMap = new Map();
+    const { org, yr, mo, q } = window.unitState, fNames = window.getFolderNames ? window.getFolderNames() : {}, repMap = new Map(), map = new Map();
     (window.db.reports || []).forEach(r => repMap.set(r.id, r));
-    const map = new Map();
-
     (window.db.itemSales || []).forEach(s => {
-      const r = repMap.get(s.repId);
-      const mp = r ? r.mp : (s.mp || '');
-      if (mp !== mpCode) return;
-      const rOrg = r ? r.org : (s.org || 'Без юрлица');
-      const rPer = r ? r.per : (s.per || '');
+      const r = repMap.get(s.repId), mp = r ? r.mp : (s.mp || ''); if (mp !== mpCode) return;
+      const rOrg = r ? r.org : (s.org || 'Без юрлица'), rPer = r ? r.per : (s.per || '');
       if (org !== 'ALL' && rOrg !== org) return;
       if (yr !== 'ALL' && !rPer.startsWith(yr)) return;
       if (mo !== 'ALL' && rPer.slice(5, 7) !== mo) return;
-
-      const artKey = window.normStr ? window.normStr(s.art) : (s.art || '');
-      const title = fNames[artKey] || s.name || artKey || 'Без названия';
+      const title = fNames[window.normStr ? window.normStr(s.art) : (s.art || '')] || s.name || s.art || 'Без названия';
       if (q && !title.toLowerCase().includes(q.toLowerCase()) && !rOrg.toLowerCase().includes(q.toLowerCase())) return;
-
-      const key = `${rOrg}|||${rPer}|||${title}`;
-      const cur = map.get(key) || { org: rOrg, per: rPer, title, qSale: 0, qRet: 0, revSale: 0, revRet: 0, costSale: 0, costRet: 0, log: 0, comm: 0, acq: 0, ads: 0 };
-      const qS = window.num(s.qSale !== undefined ? s.qSale : s.qty), qR = window.num(s.qRet || 0);
-      const rS = window.num(s.revSale !== undefined ? s.revSale : s.rev), rR = window.num(s.revRet || 0);
-      const cS = window.num(s.costSale !== undefined ? s.costSale : s.cost), cR = window.num(s.costRet || 0);
-      cur.qSale += qS; cur.qRet += qR;
-      cur.revSale += rS; cur.revRet += rR;
-      cur.costSale += cS; cur.costRet += cR;
-      cur.log += window.num(s.log || 0);
-      cur.comm += window.num(s.comm || 0);
-      cur.acq += window.num(s.acq || 0);
-      cur.ads += window.num(s.ads || 0);
-      map.set(key, cur);
+      const k = `${rOrg}|||${rPer}|||${title}`;
+      const c = map.get(k) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, rS: 0, rR: 0, cS: 0, cR: 0, log: 0, comm: 0 };
+      c.qS += window.num(s.qSale !== undefined ? s.qSale : s.qty); c.qR += window.num(s.qRet || 0);
+      c.rS += window.num(s.revSale !== undefined ? s.revSale : s.rev); c.rR += window.num(s.revRet || 0);
+      c.cS += window.num(s.costSale !== undefined ? s.costSale : s.cost); c.cR += window.num(s.costRet || 0);
+      c.log += window.num(s.log || 0); c.comm += window.num(s.comm || 0) + window.num(s.acq || 0) + window.num(s.ads || 0);
+      map.set(k, c);
     });
-
     return Array.from(map.values()).map(x => {
-      const netQty = x.qSale - x.qRet;
-      const retPct = x.qSale > 0 ? (x.qRet / x.qSale) * 100 : 0;
-      const netRev = x.revSale - x.revRet;
-      const avgCheck = netQty > 0 ? netRev / netQty : 0;
-      const netCost = x.costSale - x.costRet;
-      const costPct = netRev > 0 ? (netCost / netRev) * 100 : 0;
-      const costUnit = netQty > 0 ? netCost / netQty : 0;
-      const logPct = netRev > 0 ? (x.log / netRev) * 100 : 0;
-      const logUnit = netQty > 0 ? x.log / netQty : 0;
-      const totalComm = x.comm + x.acq + x.ads;
-      const commPct = netRev > 0 ? (totalComm / netRev) * 100 : 0;
-      const margin = netRev - netCost - x.log - totalComm;
-      const rentPct = netRev > 0 ? (margin / netRev) * 100 : 0;
-      return Object.assign(x, { netQty, retPct, netRev, avgCheck, netCost, costPct, costUnit, logPct, logUnit, totalComm, commPct, margin, rentPct });
+      const netQty = x.qS - x.qR, retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0, netRev = x.rS - x.rR, avgCheck = netQty > 0 ? netRev / netQty : 0;
+      const netCost = x.cS - x.cR, costPct = netRev > 0 ? (netCost / netRev) * 100 : 0, costUnit = netQty > 0 ? netCost / netQty : 0;
+      const logPct = netRev > 0 ? (x.log / netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = netRev > 0 ? (x.comm / netRev) * 100 : 0;
+      const margin = netRev - netCost - x.log - x.comm, rentPct = netRev > 0 ? (margin / netRev) * 100 : 0;
+      return Object.assign(x, { netQty, retPct, netRev, avgCheck, netCost, costPct, costUnit, logPct, logUnit, commPct, margin, rentPct });
     }).sort((a, b) => b.netRev - a.netRev);
-  };
-  /* === МОДУЛЬ ЮНИТ-ЭКОНОМИКИ — Часть ЮЭ-2 (Таблица факта + Светофор + Экспорт CSV) === */
-  window.exportUnitCsv = function () {
-    const mp = window.unitState.sub;
-    const rows = window.buildUnitFactRows(mp);
-    if (!rows.length) return alert('Нет данных для выгрузки по выбранному фильтру.');
-    const hdr = ['Аккаунт', 'Период', 'Модель', 'Продажа шт', 'Возврат шт', 'Чистые продажи шт', '% возврата', 'Продажа руб', 'Возврат руб', 'Выручка руб', 'Средний чек', 'Себест. руб', 'Себест. %', 'Себест./шт', 'Логистика руб', 'Логистика %', 'Логистика/шт', 'Комиссия+Экв руб', 'Комиссия %', 'Маржинальный доход', 'Рентабельность %'];
-    const lines = [hdr.join(';')].concat(rows.map(r => [
-      r.org, r.per, r.title, r.qSale, r.qRet, r.netQty, r.retPct.toFixed(1) + '%',
-      r.revSale.toFixed(2), r.revRet.toFixed(2), r.netRev.toFixed(2), r.avgCheck.toFixed(0),
-      r.netCost.toFixed(2), r.costPct.toFixed(1) + '%', r.costUnit.toFixed(0),
-      r.log.toFixed(2), r.logPct.toFixed(1) + '%', r.logUnit.toFixed(0),
-      r.totalComm.toFixed(2), r.commPct.toFixed(1) + '%',
-      r.margin.toFixed(2), r.rentPct.toFixed(1) + '%'
-    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(';')));
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' }));
-    a.download = `UNIT_${mp}_${window.unitState.yr}_${window.unitState.mo}.csv`;
-    a.click();
-  };
-
-  window.renderUnitFactBody = function (mpCode) {
-    const rows = window.buildUnitFactRows(mpCode);
-    const tot = rows.reduce((a, r) => {
-      a.qS += r.qSale; a.qR += r.qRet; a.qN += r.netQty;
-      a.rS += r.revSale; a.rR += r.revRet; a.rN += r.netRev;
-      a.cN += r.netCost; a.l += r.log; a.cm += r.totalComm; a.m += r.margin;
-      return a;
-    }, { qS: 0, qR: 0, qN: 0, rS: 0, rR: 0, rN: 0, cN: 0, l: 0, cm: 0, m: 0 });
-
-    const tRetPct = tot.qS > 0 ? (tot.qR / tot.qS) * 100 : 0;
-    const tAvg = tot.qN > 0 ? tot.rN / tot.qN : 0;
-    const tCostPct = tot.rN > 0 ? (tot.cN / tot.rN) * 100 : 0;
-    const tCostU = tot.qN > 0 ? tot.cN / tot.qN : 0;
-    const tLogPct = tot.rN > 0 ? (tot.l / tot.rN) * 100 : 0;
-    const tLogU = tot.qN > 0 ? tot.l / tot.qN : 0;
-    const tCommPct = tot.rN > 0 ? (tot.cm / tot.rN) * 100 : 0;
-    const tRent = tot.rN > 0 ? (tot.m / tot.rN) * 100 : 0;
-
-    // Бонус 1: Авто-анализатор проблемных позиций (Анти-слив)
-    const alerts = [];
-    const lowMargin = rows.filter(r => r.netRev > 10000 && r.rentPct < 15);
-    const highRet = rows.filter(r => r.qSale >= 5 && r.retPct > 22);
-    if (lowMargin.length) alerts.push(`⚠️ <b>Низкая маржа (&lt;15%):</b> ${lowMargin.slice(0, 3).map(x => `${window.esc(x.title)} (${x.rentPct.toFixed(1)}%)`).join(', ')}`);
-    if (highRet.length) alerts.push(`🔄 <b>Высокие возвраты (&gt;22%):</b> ${highRet.slice(0, 3).map(x => `${window.esc(x.title)} (${x.retPct.toFixed(1)}%)`).join(', ')}`);
-
-    const alertHtml = alerts.length
-      ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#92400e">${alerts.join(' &nbsp;|&nbsp; ')}</div>`
-      : '';
-
-    const trs = rows.map(r => {
-      const badgeCls = r.rentPct >= 25 ? 'badge-green' : (r.rentPct >= 10 ? 'badge-amber' : 'badge-red');
-      return `<tr>
-        <td>${window.esc(r.org)}</td>
-        <td>${window.esc(r.per)}</td>
-        <td class="bold">${window.esc(r.title)}</td>
-        <td class="num">${r.qSale}</td>
-        <td class="num text-red">${r.qRet}</td>
-        <td class="num bold">${r.netQty}</td>
-        <td class="num ${r.retPct > 20 ? 'text-red bold' : ''}">${r.retPct.toFixed(1)}%</td>
-        <td class="num bold">${window.fmtR(r.netRev)}</td>
-        <td class="num">${window.fmtR(r.avgCheck)}</td>
-        <td class="num">${window.fmtR(r.netCost)}</td>
-        <td class="num">${r.costPct.toFixed(1)}%</td>
-        <td class="num">${window.fmtR(r.costUnit)}</td>
-        <td class="num">${window.fmtR(r.log)}</td>
-        <td class="num">${r.logPct.toFixed(1)}%</td>
-        <td class="num">${window.fmtR(r.logUnit)}</td>
-        <td class="num">${window.fmtR(r.totalComm)}</td>
-        <td class="num">${r.commPct.toFixed(1)}%</td>
-        <td class="num bold ${r.margin >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(r.margin)}</td>
-        <td class="num"><span class="badge ${badgeCls}">${r.rentPct.toFixed(1)}%</span></td>
-      </tr>`;
-    }).join('');
-
-    return `${alertHtml}
-      <div style="overflow-x:auto">
-        <table style="font-size:11.5px;white-space:nowrap">
-          <thead>
-            <tr style="background:#1e293b;color:#fff">
-              <th>Аккаунт</th><th>Период</th><th>Наименование модели</th>
-              <th class="num">Прод. шт</th><th class="num">Возвр. шт</th><th class="num">Чист. шт</th><th class="num">% возвр.</th>
-              <th class="num">Продажи ₽</th><th class="num">Ср. чек</th>
-              <th class="num">Себест. ₽</th><th class="num">Себ. %</th><th class="num">Себ./ед</th>
-              <th class="num">Логист. ₽</th><th class="num">Лог. %</th><th class="num">Лог./ед</th>
-              <th class="num">Комис.${mpCode === 'OZON' ? '+Экв' : ''} ₽</th><th class="num">Ком. %</th>
-              <th class="num">Маржа ₽</th><th class="num">Рентаб. %</th>
-            </tr>
-            <tr style="background:#f1f5f9;font-weight:800">
-              <td colspan="3">ИТОГО ПО ВЫБОРКЕ (${rows.length} поз.)</td>
-              <td class="num">${tot.qS}</td><td class="num text-red">${tot.qR}</td><td class="num">${tot.qN}</td><td class="num">${tRetPct.toFixed(1)}%</td>
-              <td class="num">${window.fmtR(tot.rN)}</td><td class="num">${window.fmtR(tAvg)}</td>
-              <td class="num">${window.fmtR(tot.cN)}</td><td class="num">${tCostPct.toFixed(1)}%</td><td class="num">${window.fmtR(tCostU)}</td>
-              <td class="num">${window.fmtR(tot.l)}</td><td class="num">${tLogPct.toFixed(1)}%</td><td class="num">${window.fmtR(tLogU)}</td>
-              <td class="num">${window.fmtR(tot.cm)}</td><td class="num">${tCommPct.toFixed(1)}%</td>
-              <td class="num ${tot.m >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(tot.m)}</td><td class="num">${tRent.toFixed(1)}%</td>
-            </tr>
-          </thead>
-          <tbody>${trs || '<tr><td colspan="19" style="text-align:center;color:#64748b;padding:16px">Нет загруженных отчётов по этой площадке за выбранный период</td></tr>'}</tbody>
-        </table>
-      </div>`;
-  };
-  /* === МОДУЛЬ ЮНИТ-ЭКОНОМИКИ — Часть ЮЭ-3 (Умный калькулятор цены + Рекомендация цены + Запуск) === */
-  window.unitCalcState = { mp: 'WB', model: '', price: 4500, buyout: 88, commPct: 29, acqPct: 1.5, logTo: 120, logBack: 50, pack: 65, taxPct: 8, drrPct: 5, targetMargin: 25 };
-
-  window.calcUnitPlan = function () {
-    const c = window.unitCalcState, rate = window.getRate();
-    const fNames = window.getFolderNames ? window.getFolderNames() : {};
-    let usd = 0;
-    if (c.model) {
-      const f = (window.db.skus || []).find(s => (fNames[window.normStr(s.art)] || s.name || s.art) === c.model && window.num(s.usd) > 0);
-      if (f) usd = window.num(f.usd);
-    }
-    const costRub = usd * rate;
-    const bRate = Math.max(0.1, Math.min(1, window.num(c.buyout) / 100));
-    const realLog = (window.num(c.logTo) + (1 - bRate) * window.num(c.logBack)) / bRate;
-    const varPct = (window.num(c.commPct) + window.num(c.acqPct) + window.num(c.taxPct) + window.num(c.drrPct)) / 100;
-    const fixRub = costRub + realLog + window.num(c.pack);
-
-    const price = window.num(c.price);
-    const commRub = price * (window.num(c.commPct) + window.num(c.acqPct)) / 100;
-    const taxRub = price * (window.num(c.taxPct) / 100);
-    const drrRub = price * (window.num(c.drrPct) / 100);
-    const profit = price - fixRub - commRub - taxRub - drrRub;
-    const marginPct = price > 0 ? (profit / price) * 100 : 0;
-    const roiPct = costRub > 0 ? (profit / costRub) * 100 : 0;
-
-    // Бонус 2: Точка безубыточности и Рекомендуемая цена под желаемую маржу
-    const denomZero = Math.max(0.05, 1 - varPct);
-    const breakEvenPrice = fixRub / denomZero;
-    const tMarg = Math.min(0.7, Math.max(0, window.num(c.targetMargin) / 100));
-    const denomTarget = Math.max(0.05, 1 - varPct - tMarg);
-    const recommendedPrice = fixRub / denomTarget;
-
-    return { usd, costRub, realLog, commRub, taxRub, drrRub, profit, marginPct, roiPct, breakEvenPrice, recommendedPrice };
-  };
-
-  window.renderUnitCalcBody = function () {
-    const c = window.unitCalcState, r = window.calcUnitPlan(), rate = window.getRate();
-    const fNames = window.getFolderNames ? window.getFolderNames() : {};
-    const models = [...new Set((window.db.skus || []).map(s => fNames[window.normStr(s.art)] || s.name || s.art).filter(Boolean))].sort();
-    const mOpts = '<option value="">— Выберите модель (себестоимость подтянется сама) —</option>' + models.map(m => `<option value="${window.esc(m)}"${m === c.model ? ' selected' : ''}>${window.esc(m)}</option>`).join('');
-
-    const setPreset = (mp) => {
-      c.mp = mp;
-      if (mp === 'WB') { c.commPct = 29; c.acqPct = 1.5; c.logTo = 120; c.logBack = 50; }
-      else if (mp === 'OZON') { c.commPct = 34; c.acqPct = 1.5; c.logTo = 160; c.logBack = 80; }
-      else { c.commPct = 24; c.acqPct = 1.2; c.logTo = 140; c.logBack = 70; }
-      window.renderUnitTab();
-    };
-    window.setUnitCalcPreset = setPreset;
-
-    return `<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
-        <button type="button" class="btn ${c.mp === 'WB' ? 'btn-primary' : ''}" onclick="setUnitCalcPreset('WB')">🟣 Пресет WB</button>
-        <button type="button" class="btn ${c.mp === 'OZON' ? 'btn-primary' : ''}" onclick="setUnitCalcPreset('OZON')">🔵 Пресет Ozon</button>
-        <button type="button" class="btn ${c.mp === 'YM' ? 'btn-primary' : ''}" onclick="setUnitCalcPreset('YM')">🟡 Пресет Яндекс Маркет</button>
-      </div>
-      <div class="form-grid" style="margin-bottom:14px">
-        <div style="grid-column:span 2"><label>Модель из каталога SKOS (Курс: ${rate} ₽/$)</label><select class="select" onchange="unitCalcState.model=this.value;renderUnitTab()">${mOpts}</select></div>
-        <div><label>Цена продажи ₽</label><input type="number" class="input" value="${c.price}" onchange="unitCalcState.price=num(this.value);renderUnitTab()"></div>
-        <div><label>% Выкупа (одежда)</label><input type="number" class="input" value="${c.buyout}" onchange="unitCalcState.buyout=num(this.value);renderUnitTab()"></div>
-        <div><label>Комиссия МП %</label><input type="number" step="0.1" class="input" value="${c.commPct}" onchange="unitCalcState.commPct=num(this.value);renderUnitTab()"></div>
-        <div><label>Эквайринг %</label><input type="number" step="0.1" class="input" value="${c.acqPct}" onchange="unitCalcState.acqPct=num(this.value);renderUnitTab()"></div>
-        <div><label>Логистика туда ₽</label><input type="number" class="input" value="${c.logTo}" onchange="unitCalcState.logTo=num(this.value);renderUnitTab()"></div>
-        <div><label>Возврат (покатушка) ₽</label><input type="number" class="input" value="${c.logBack}" onchange="unitCalcState.logBack=num(this.value);renderUnitTab()"></div>
-        <div><label>Упаковка / ФФ ₽</label><input type="number" class="input" value="${c.pack}" onchange="unitCalcState.pack=num(this.value);renderUnitTab()"></div>
-        <div><label>Налог (УСН/АУСН) %</label><input type="number" step="0.1" class="input" value="${c.taxPct}" onchange="unitCalcState.taxPct=num(this.value);renderUnitTab()"></div>
-        <div><label>Реклама (ДРР) %</label><input type="number" step="0.1" class="input" value="${c.drrPct}" onchange="unitCalcState.drrPct=num(this.value);renderUnitTab()"></div>
-        <div><label>Желаемая маржа %</label><input type="number" class="input" value="${c.targetMargin}" onchange="unitCalcState.targetMargin=num(this.value);renderUnitTab()"></div>
-      </div>
-      <div class="kpi-grid">
-        <div class="kpi-card"><div>Себестоимость (${r.usd.toFixed(2)} $)</div><div class="kpi-val">${window.fmtR(r.costRub)}</div></div>
-        <div class="kpi-card"><div>Реальная логистика (с % выкупа)</div><div class="kpi-val">${window.fmtR(r.realLog)}</div></div>
-        <div class="kpi-card"><div>Комиссия + Эквайринг</div><div class="kpi-val">${window.fmtR(r.commRub)}</div></div>
-        <div class="kpi-card"><div>Налог + Реклама</div><div class="kpi-val">${window.fmtR(r.taxRub + r.drrRub)}</div></div>
-        <div class="kpi-card highlight"><div>Чистая прибыль с 1 шт</div><div class="kpi-val ${r.profit >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(r.profit)} (${r.marginPct.toFixed(1)}%)</div></div>
-        <div class="kpi-card"><div>ROI на товар</div><div class="kpi-val">${r.roiPct.toFixed(0)}%</div></div>
-        <div class="kpi-card" style="background:#fef2f2;border-color:#fecaca"><div>Мин. цена в ноль (Безубыток)</div><div class="kpi-val text-red">${window.fmtR(r.breakEvenPrice)}</div></div>
-        <div class="kpi-card" style="background:#f0fdf4;border-color:#bbf7d0"><div>Рекомендуемая цена (${c.targetMargin}% маржи)</div><div class="kpi-val text-green">${window.fmtR(r.recommendedPrice)}</div></div>
-      </div>`;
   };
 
   window.renderUnitTab = function () {
-    window.ensureUnitMenu();
+    window.initUnitSafe();
     const sec = document.getElementById('tab-unit'); if (!sec) return;
-    const st = window.unitState;
-    const orgNames = [...new Set((window.db.orgs || []).map(o => o.name))];
-    const orgOpts = '<option value="ALL">Все юрлица (5 ИП + ООО)</option>' + orgNames.map(n => `<option value="${window.esc(n)}"${n === st.org ? ' selected' : ''}>${window.esc(n)}</option>`).join('');
-    let yrOpts = '<option value="ALL">Все года</option>';
-    for (let y = 2020; y <= 2030; y++) yrOpts += `<option value="${y}"${String(y) === st.yr ? ' selected' : ''}>${y}</option>`;
-    const mos = [['ALL', 'Весь год'], ['01', 'Январь'], ['02', 'Февраль'], ['03', 'Март'], ['04', 'Апрель'], ['05', 'Май'], ['06', 'Июнь'], ['07', 'Июль'], ['08', 'Август'], ['09', 'Сентябрь'], ['10', 'Октябрь'], ['11', 'Ноябрь'], ['12', 'Декабрь']];
-    const moOpts = mos.map(([k, v]) => `<option value="${k}"${k === st.mo ? ' selected' : ''}>${v}</option>`).join('');
-
+    const st = window.unitState, c = window.unitCalcState, rate = window.getRate(), fNames = window.getFolderNames ? window.getFolderNames() : {};
     const nav = [['WB', '🟣 UNIT ВБ (факт)'], ['OZON', '🔵 UNIT Ozon (факт)'], ['YM', '🟡 UNIT ЯМ (факт)'], ['CALC', '🧮 Калькулятор цены (план)']]
       .map(([k, t]) => `<button type="button" class="btn ${st.sub === k ? 'btn-primary' : ''}" onclick="unitState.sub='${k}';renderUnitTab()">${t}</button>`).join('');
 
-    const filters = st.sub !== 'CALC' ? `<div class="form-grid" style="margin-bottom:10px">
-      <div><label>Аккаунт / Юрлицо</label><select class="select" onchange="unitState.org=this.value;renderUnitTab()">${orgOpts}</select></div>
-      <div><label>Год</label><select class="select" onchange="unitState.yr=this.value;renderUnitTab()">${yrOpts}</select></div>
-      <div><label>Месяц</label><select class="select" onchange="unitState.mo=this.value;renderUnitTab()">${moOpts}</select></div>
-      <div><label>Поиск модели</label><input class="input" value="${window.esc(st.q)}" placeholder="Брюки, костюм..." oninput="unitState.q=this.value;renderUnitTab()"></div>
-      <div><button type="button" class="btn btn-success" style="width:100%" onclick="exportUnitCsv()">⬇️ Скачать Excel (CSV)</button></div>
-    </div>` : '';
+    if (st.sub === 'CALC') {
+      const models = [...new Set((window.db.skus || []).map(s => fNames[window.normStr(s.art)] || s.name || s.art).filter(Boolean))].sort();
+      const usd = (window.db.skus || []).find(s => (fNames[window.normStr(s.art)] || s.name || s.art) === c.model && window.num(s.usd) > 0)?.usd || 0;
+      const costRub = window.num(usd) * rate, bRate = Math.max(0.1, Math.min(1, window.num(c.buyout) / 100));
+      const realLog = (window.num(c.logTo) + (1 - bRate) * window.num(c.logBack)) / bRate;
+      const varPct = (window.num(c.commPct) + window.num(c.acqPct) + window.num(c.taxPct) + window.num(c.drrPct)) / 100;
+      const fixRub = costRub + realLog + window.num(c.pack), profit = window.num(c.price) * (1 - varPct) - fixRub;
+      const marginPct = window.num(c.price) > 0 ? (profit / window.num(c.price)) * 100 : 0;
+      const breakEven = fixRub / Math.max(0.05, 1 - varPct), recPrice = fixRub / Math.max(0.05, 1 - varPct - Math.min(0.7, window.num(c.targetMargin) / 100));
+      sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🧮 Юнит-экономика SKOS</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${nav}</div>
+        <div class="form-grid" style="margin-bottom:12px">
+          <div style="grid-column:span 2"><label>Модель (Курс: ${rate} ₽/$)</label><select class="select" onchange="unitCalcState.model=this.value;renderUnitTab()"><option value="">— Выберите модель —</option>${models.map(m => `<option value="${window.esc(m)}"${m === c.model ? ' selected' : ''}>${window.esc(m)}</option>`).join('')}</select></div>
+          <div><label>Цена ₽</label><input type="number" class="input" value="${c.price}" onchange="unitCalcState.price=num(this.value);renderUnitTab()"></div>
+          <div><label>% Выкупа</label><input type="number" class="input" value="${c.buyout}" onchange="unitCalcState.buyout=num(this.value);renderUnitTab()"></div>
+          <div><label>Комиссия %</label><input type="number" step="0.1" class="input" value="${c.commPct}" onchange="unitCalcState.commPct=num(this.value);renderUnitTab()"></div>
+          <div><label>Эквайринг %</label><input type="number" step="0.1" class="input" value="${c.acqPct}" onchange="unitCalcState.acqPct=num(this.value);renderUnitTab()"></div>
+          <div><label>Логистика туда ₽</label><input type="number" class="input" value="${c.logTo}" onchange="unitCalcState.logTo=num(this.value);renderUnitTab()"></div>
+          <div><label>Возврат ₽</label><input type="number" class="input" value="${c.logBack}" onchange="unitCalcState.logBack=num(this.value);renderUnitTab()"></div>
+          <div><label>Упаковка ₽</label><input type="number" class="input" value="${c.pack}" onchange="unitCalcState.pack=num(this.value);renderUnitTab()"></div>
+          <div><label>Налог %</label><input type="number" step="0.1" class="input" value="${c.taxPct}" onchange="unitCalcState.taxPct=num(this.value);renderUnitTab()"></div>
+          <div><label>ДРР %</label><input type="number" step="0.1" class="input" value="${c.drrPct}" onchange="unitCalcState.drrPct=num(this.value);renderUnitTab()"></div>
+          <div><label>Цель маржи %</label><input type="number" class="input" value="${c.targetMargin}" onchange="unitCalcState.targetMargin=num(this.value);renderUnitTab()"></div>
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi-card"><div>Себест. (${window.num(usd).toFixed(2)} $)</div><div class="kpi-val">${window.fmtR(costRub)}</div></div>
+          <div class="kpi-card"><div>Логист. с выкупом</div><div class="kpi-val">${window.fmtR(realLog)}</div></div>
+          <div class="kpi-card highlight"><div>Прибыль с 1 шт</div><div class="kpi-val ${profit >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(profit)} (${marginPct.toFixed(1)}%)</div></div>
+          <div class="kpi-card" style="background:#fef2f2"><div>Мин. цена в ноль</div><div class="kpi-val text-red">${window.fmtR(breakEven)}</div></div>
+          <div class="kpi-card" style="background:#f0fdf4"><div>Реком. цена (${c.targetMargin}%)</div><div class="kpi-val text-green">${window.fmtR(recPrice)}</div></div>
+        </div></div>`;
+      return;
+    }
 
-    const body = st.sub === 'CALC' ? window.renderUnitCalcBody() : window.renderUnitFactBody(st.sub);
-    sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🧮 Юнит-экономика SKOS (WB / Ozon / Яндекс Маркет)</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${nav}</div>${filters}${body}</div>`;
+    const rows = window.buildUnitFactRows(st.sub);
+    const orgNames = [...new Set((window.db.orgs || []).map(o => o.name))];
+    const trs = rows.map(r => `<tr><td>${window.esc(r.org)}</td><td>${window.esc(r.per)}</td><td class="bold">${window.esc(r.title)}</td><td class="num">${r.qS}</td><td class="num text-red">${r.qR}</td><td class="num bold">${r.netQty}</td><td class="num">${r.retPct.toFixed(1)}%</td><td class="num bold">${window.fmtR(r.netRev)}</td><td class="num">${window.fmtR(r.avgCheck)}</td><td class="num">${window.fmtR(r.netCost)} (${r.costPct.toFixed(0)}%)</td><td class="num">${window.fmtR(r.costUnit)}</td><td class="num">${window.fmtR(r.log)} (${r.logPct.toFixed(0)}%)</td><td class="num">${window.fmtR(r.logUnit)}</td><td class="num">${window.fmtR(r.comm)} (${r.commPct.toFixed(0)}%)</td><td class="num bold ${r.margin >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(r.margin)}</td><td class="num"><span class="badge ${r.rentPct >= 25 ? 'badge-green' : (r.rentPct >= 10 ? 'badge-amber' : 'badge-red')}">${r.rentPct.toFixed(1)}%</span></td></tr>`).join('');
+    sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🧮 Юнит-экономика SKOS (${st.sub})</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${nav}</div>
+      <div class="form-grid" style="margin-bottom:10px">
+        <div><label>Юрлицо</label><select class="select" onchange="unitState.org=this.value;renderUnitTab()"><option value="ALL">Все (5 ИП + ООО)</option>${orgNames.map(n => `<option value="${window.esc(n)}"${n === st.org ? ' selected' : ''}>${window.esc(n)}</option>`).join('')}</select></div>
+        <div><label>Год</label><select class="select" onchange="unitState.yr=this.value;renderUnitTab()"><option value="ALL">Все</option>${[2024, 2025, 2026, 2027].map(y => `<option value="${y}"${String(y) === st.yr ? ' selected' : ''}>${y}</option>`).join('')}</select></div>
+        <div><label>Поиск модели</label><input class="input" value="${window.esc(st.q)}" oninput="unitState.q=this.value;renderUnitTab()"></div>
+      </div>
+      <div style="overflow-x:auto"><table style="font-size:11.5px;white-space:nowrap"><thead><tr><th>Аккаунт</th><th>Период</th><th>Модель</th><th class="num">Прод</th><th class="num">Возвр</th><th class="num">Чист</th><th class="num">%возв</th><th class="num">Выручка ₽</th><th class="num">Ср.чек</th><th class="num">Себест ₽</th><th class="num">Себ/ед</th><th class="num">Логист ₽</th><th class="num">Лог/ед</th><th class="num">Комис+Экв</th><th class="num">Маржа ₽</th><th class="num">Рентаб</th></tr></thead><tbody>${trs || '<tr><td colspan="16">Нет данных за выбранный период</td></tr>'}</tbody></table></div></div>`;
   };
 
-  // Подключаем отрисовку вкладки Юнит-экономики без изменения существующих функций
-  const _origGoTabUnit = window.goTab;
-  window.goTab = function (t) {
-    window.ensureUnitMenu();
-    if (typeof _origGoTabUnit === 'function') _origGoTabUnit.apply(this, arguments);
-    if (t === 'unit') window.renderUnitTab();
-  };
-  const _origRenderUnit = window.render;
-  window.render = function () {
-    window.ensureUnitMenu();
-    if (typeof _origRenderUnit === 'function') _origRenderUnit.apply(this, arguments);
-    if (window.db && window.db.tab === 'unit') window.renderUnitTab();
-  };
-  setTimeout(window.ensureUnitMenu, 100);
+  setInterval(window.initUnitSafe, 1000);
+  window.initUnitSafe();
 })();
