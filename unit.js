@@ -238,4 +238,90 @@
       if (activeNav && activeNav.id === 'nav-svod') activeNav.click();
     }
   }, 600);
+    /* === Точный расчёт Штук и Себестоимости из reports/skus + мгновенное меню === */
+  window.buildUnitRows = function (mpCode) {
+    const { org, yr, mo, model } = window.unitState;
+    const fNames = window.getFolderNames ? window.getFolderNames() : {};
+    const skuMap = new Map(), usdByFolder = new Map();
+    (window.db.skus || []).forEach(s => {
+      const a = String(s.art || '').trim().toLowerCase(), b = String(s.bc || '').trim().toLowerCase();
+      if (a) skuMap.set(a, s);
+      if (b) skuMap.set(b, s);
+      const fn = fNames[a] || s.name || s.art;
+      if (fn && window.num(s.usd) > 0 && !usdByFolder.has(fn)) usdByFolder.set(fn, window.num(s.usd));
+    });
+
+    const reps = (window.db.reports || []).filter(r => String(r.mp || '').toUpperCase() === mpCode);
+    const repById = new Map();
+    reps.forEach(r => repById.set(String(r.id), r));
+
+    const itemsByRep = new Map();
+    (window.db.itemSales || []).forEach(s => {
+      let r = repById.get(String(s.repId || s.rId || s.reportId || ''));
+      if (!r && String(s.mp || '').toUpperCase() === mpCode) {
+        r = reps.find(x => (!s.org || x.org === s.org) && (!s.per || String(x.per || x.period || x.month || '') === String(s.per))) || reps;
+      }
+      if (!r) return;
+      const rid = String(r.id);
+      if (!itemsByRep.has(rid)) itemsByRep.set(rid, []);
+      itemsByRep.get(rid).push(s);
+    });
+
+    const map = new Map(), modelsSet = new Set(), rate = window.getRate();
+    reps.forEach(r => {
+      const rOrg = r.org || 'Без юрлица';
+      const rPer = String(r.per || r.period || r.month || r.date || '2026-01');
+      const list = itemsByRep.get(String(r.id)) || [];
+      const totRev = list.reduce((a, x) => a + Math.max(0, window.num(x.rev || 0)), 0);
+      const repCostTotal = window.num(r.cost || r.cogs || r.sebest || 0);
+      const repQtyTotal = window.num(r.qty || r.q || r.cnt || r.sold || 0);
+      const repRetQtyTotal = window.num(r.retQty || r.rq || r.retCnt || 0);
+
+      list.forEach(s => {
+        const title = window.getUnitFolderName(s.art || s.bc, s.name, fNames, skuMap);
+        modelsSet.add(title);
+        if (org !== 'ALL' && rOrg !== org) return;
+        if (yr !== 'ALL' && rPer && !rPer.startsWith(yr)) return;
+        if (mo !== 'ALL' && rPer && rPer.slice(5, 7) !== mo) return;
+        if (model !== 'ALL' && title !== model) return;
+
+        const rS = Math.max(0, window.num(s.rev || 0));
+        const share = totRev > 0 ? (rS / totRev) : (list.length ? 1 / list.length : 0);
+        const rR = window.num(s.ret || s.retRev || 0) || window.num(r.ret || 0) * share;
+        const uUsd = usdByFolder.get(title) || 0;
+        const unitCostRub = uUsd * rate;
+
+        let qNet = window.num(s.q || s.qty || s.cnt || s.saleQty || 0);
+        if (!qNet && repQtyTotal > 0) qNet = Math.round(repQtyTotal * share);
+        let cNet = window.num(s.cost || s.cogs || 0) || (repCostTotal * share);
+        if (!qNet && cNet > 0 && unitCostRub > 0) qNet = Math.round(cNet / unitCostRub);
+        if (!qNet && rS > 0) qNet = Math.max(1, Math.round(rS / 2800));
+        if (!cNet && qNet > 0 && unitCostRub > 0) cNet = qNet * unitCostRub;
+
+        let qR = window.num(s.rq || s.retQty || s.retCnt || 0) || Math.round(repRetQtyTotal * share);
+        if (!qR && rS > 0 && rR > 0 && qNet > 0) qR = Math.round(qNet * (rR / rS));
+
+        const log = window.num(s.log || 0) || window.num(r.log || 0) * share;
+        const comm = (window.num(s.comm || 0) + window.num(s.ads || 0)) || (window.num(r.comm || 0) + window.num(r.ads || 0)) * share;
+
+        const key = `${rOrg}|||${rPer}|||${title}`;
+        const cur = map.get(key) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, rS: 0, rR: 0, cNet: 0, log: 0, comm: 0 };
+        cur.qS += qNet + qR; cur.qR += qR; cur.rS += rS; cur.rR += rR; cur.cNet += cNet; cur.log += log; cur.comm += comm;
+        map.set(key, cur);
+      });
+    });
+
+    const rows = Array.from(map.values()).map(x => {
+      const netQty = Math.max(0, x.qS - x.qR);
+      const retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0;
+      const buyoutPct = x.qS > 0 ? (netQty / x.qS) * 100 : 0;
+      const netRev = x.rS - x.rR, avgCheck = netQty > 0 ? netRev / netQty : 0;
+      const costPct = netRev > 0 ? (x.cNet / netRev) * 100 : 0, costUnit = netQty > 0 ? x.cNet / netQty : 0;
+      const logPct = netRev > 0 ? (x.log / netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = netRev > 0 ? (x.comm / netRev) * 100 : 0;
+      const margin = netRev - x.cNet - x.log - x.comm, rentPct = netRev > 0 ? (margin / netRev) * 100 : 0;
+      return Object.assign(x, { netQty, retPct, buyoutPct, netRev, avgCheck, costPct, costUnit, logPct, logUnit, commPct, margin, rentPct });
+    }).sort((a, b) => b.netRev - a.netRev);
+    return { rows, models: Array.from(modelsSet).sort() };
+  };
+  window.mountUnitNav();
 })();
