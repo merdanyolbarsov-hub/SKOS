@@ -423,9 +423,13 @@
     const marketplaces = [['ALL', 'Все маркетплейсы'], ['WB', 'Wildberries'], ['OZON', 'Ozon'], ['YM', 'Яндекс Маркет']];
     const accountNames = [...new Set([...visNames, ...(window.db.reports || []).map(r => r.org).filter(Boolean)])];
     const selectedOrg = orgF !== 'ALL' ? orgF : accountNames.includes(ladderOrg) ? ladderOrg : 'ALL';
-    const ladder = ladderMp === 'ALL' && selectedOrg === orgF ? st : window.calcPeriodStats(yr, mo, selectedOrg, ladderMp);
-    const ovh = ladder.taxMonth + ladder.expRub + ladder.depMonth + ladder.defectRub;
-    const hasNet = ladderMp === 'ALL';
+    const accountTotals = selectedOrg === orgF ? st : window.calcPeriodStats(yr, mo, selectedOrg);
+    const ladder = ladderMp === 'ALL' ? accountTotals : window.calcPeriodStats(yr, mo, selectedOrg, ladderMp);
+    const accountExpenses = accountTotals.mpProf - accountTotals.net;
+    const expenseShare = ladderMp === 'ALL' ? 1 : accountTotals.rev > 0 ? Math.min(1, Math.max(0, ladder.rev / accountTotals.rev)) : 0;
+    const ovh = accountExpenses * expenseShare;
+    const ladderNet = ladder.mpProf - ovh;
+    const expenseLabel = ladderMp === 'ALL' ? 'Налоги, ЗП и офис' : 'Доля общих расходов по выручке';
     const option = (value, title, selected) => `<option value="${window.esc(value)}"${value === selected ? ' selected' : ''}>${window.esc(title)}</option>`;
     ladderBox.innerHTML = `<div class="card" style="border:1.5px solid #bfdbfe;background:linear-gradient(180deg,#f8faff 0%,#ffffff 100%)">
       <div class="card-header" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
@@ -438,7 +442,7 @@
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">
         <div style="background:#fff;border:1px solid #cbd5e1;border-left:4px solid #2563eb;border-radius:10px;padding:10px"><div style="font-size:11px;font-weight:700;color:#1d4ed8">1. ОСТАТОК ОТ МП (БЕЗ СЕБЕСТ.)</div><div style="font-size:19px;font-weight:800;margin:4px 0">${window.fmtR(ladder.afterMp)}</div><div style="font-size:11px;color:#475569">Нагрузка МП: <b class="text-red">${window.fmtR(ladder.mpFee)} (${pct(ladder.mpFee, ladder.rev)}%)</b></div></div>
         <div style="background:#fff;border:1px solid #cbd5e1;border-left:4px solid #d97706;border-radius:10px;padding:10px"><div style="font-size:11px;font-weight:700;color:#b45309">2. ЗАРАБОТОК НА ТОВАРЕ</div><div style="font-size:19px;font-weight:800;margin:4px 0">${window.fmtR(ladder.mpProf)}</div><div style="font-size:11px;color:#475569">Себестоимость: <b>${window.fmtR(ladder.cogs)} (${pct(ladder.cogs, ladder.rev)}%)</b></div></div>
-        <div style="background:#fff;border:1px solid #cbd5e1;border-left:4px solid ${ladder.net >= 0 ? '#059669' : '#e11d48'};border-radius:10px;padding:10px"><div style="font-size:11px;font-weight:700;color:#047857">3. ЧИСТАЯ ПРИБЫЛЬ В КАРМАН</div><div style="font-size:19px;font-weight:800;margin:4px 0" class="${ladder.net >= 0 ? 'text-green' : 'text-red'}">${hasNet ? window.fmtR(ladder.net) : "—"}</div><div style="font-size:11px;color:#475569">${hasNet ? `Налоги, ЗП и офис: <b>${window.fmtR(ovh)} (${pct(ovh, ladder.rev)}%)</b>` : "Общие расходы учитываются по всем маркетплейсам"}</div></div>
+        <div style="background:#fff;border:1px solid #cbd5e1;border-left:4px solid ${ladderNet >= 0 ? '#059669' : '#e11d48'};border-radius:10px;padding:10px"><div style="font-size:11px;font-weight:700;color:#047857">3. ЧИСТАЯ ПРИБЫЛЬ В КАРМАН</div><div style="font-size:19px;font-weight:800;margin:4px 0" class="${ladderNet >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(ladderNet)}</div><div style="font-size:11px;color:#475569">${expenseLabel}: <b>${window.fmtR(ovh)} (${pct(ovh, ladder.rev)}%)</b></div></div>
       </div></div>`;
 
     ladderBox.querySelector('#skos-ladder-mp').onchange = event => {
