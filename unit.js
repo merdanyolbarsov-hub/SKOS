@@ -49,7 +49,7 @@
     });
   };
 
-  function resolveFolder(artRaw, nameRaw, fNames, skuMap) {
+    function resolveFolder(artRaw, nameRaw, fNames, skuMap) {
     const aLow = String(artRaw || '').trim().toLowerCase();
     const nLow = String(nameRaw || '').trim().toLowerCase();
     if (fNames[aLow]) return fNames[aLow];
@@ -58,15 +58,17 @@
       const k = String(s.art || '').trim().toLowerCase();
       if (fNames[k]) return fNames[k];
     }
-    const full = (String(artRaw || '') + ' ' + String(nameRaw || '')).toUpperCase().replace(/SKOS[\s\-_]+/g, 'SKOS-');
-    const match = full.match(/SKOS-([A-ZА-Я]{1,5})/);
-    if (match) {
-      const pref = 'skos-' + match[1].toLowerCase();
-      if (fNames[pref]) return fNames[pref];
+    const clean = (aLow + ' ' + nLow).replace(/skos[\s\-_]+/g, 'skos-');
+    const idx = clean.indexOf('skos-');
+    if (idx !== -1) {
+      const tail = clean.slice(idx + 5);
+      const code = 'skos-' + tail.replace(/[^a-zа-яё].*$/, '');
+      if (fNames[code]) return fNames[code];
     }
     if (nLow.includes('двойка') && fNames['skos-kd']) return fNames['skos-kd'];
     return nameRaw || artRaw || 'Без модели';
   }
+  
   window.buildUnitRows = function (mpCode) {
     const { org, yr, mo, model } = window.unitState;
     const fNames = window.getFolderNames ? window.getFolderNames() : {};
