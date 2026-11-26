@@ -324,4 +324,129 @@
     return { rows, models: Array.from(modelsSet).sort() };
   };
   window.mountUnitNav();
+    window.buildUnitRows = function (mpCode) {
+    const { org, yr, mo, model } = window.unitState;
+    const fNames = window.getFolderNames ? window.getFolderNames() : {};
+    const skuMap = new Map(), usdByFolder = new Map();
+    (window.db.skus || []).forEach(s => {
+      const a = String(s.art || '').trim().toLowerCase(), b = String(s.bc || '').trim().toLowerCase();
+      if (a) skuMap.set(a, s);
+      if (b) skuMap.set(b, s);
+      const fn = fNames[a] || s.name || s.art;
+      if (fn && window.num(s.usd) > 0 && !usdByFolder.has(fn)) usdByFolder.set(fn, window.num(s.usd));
+    });
+
+    const repMap = new Map();
+    (window.db.reports || []).forEach(r => repMap.set(String(r.id), r));
+
+    // Считаем общие коэффициенты логистики и комиссии из отчётов по связке (МП + Юрлицо + Период)
+    const repTotals = new Map();
+    (window.db.reports || []).forEach(r => {
+      if (String(r.mp || '').toUpperCase() !== mpCode) return;
+      const k = `${r.org || ''}|||${String(r.per || r.period || r.month || '')}`;
+      const cur = repTotals.get(k) || { rev: 0, log: 0, comm: 0, cost: 0 };
+      cur.rev += window.num(r.rev || 0);
+      cur.log += window.num(r.log || 0);
+      cur.comm += window.num(r.comm || 0) + window.num(r.ads || 0);
+      cur.cost += window.num(r.cost || r.cogs || 0);
+      repTotals.set(k, cur);
+    });
+
+    const map = new Map(), modelsSet = new Set(), rate = window.getRate();
+    (window.db.itemSales || []).forEach(s => {
+      const r = repMap.get(String(s.repId || s.rId || s.reportId || ''));
+      const mp = String(r ? r.mp : (s.mp || '')).toUpperCase();
+      if (mp !== mpCode) return;
+      const rOrg = r ? r.org : (s.org || 'ИП Каримов Артем');
+      const rPer = String(r ? (r.per || r.period || r.month || '') : (s.per || s.period || '2026-01'));
+      const title = window.getUnitFolderName(s.art || s.bc, s.name, fNames, skuMap);
+      modelsSet.add(title);
+
+      if (org !== 'ALL' && rOrg !== org) return;
+      if (yr !== 'ALL' && rPer && !rPer.startsWith(yr)) return;
+      if (mo !== 'ALL' && rPer && rPer.slice(5, 7) !== mo) return;
+      if (model !== 'ALL' && title !== model) return;
+
+      const qNet = window.num(s.q !== undefined ? s.q : (s.qty !== undefined ? s.qty : (s.saleQty || 0)));
+      const qR = window.num(s.rq !== undefined ? s.rq : (s.retQty !== undefined ? s.retQty : (s.qRet || 0)));
+      const rNet = window.num(s.rev || 0);
+      const rR = window.num(s.ret || s.retRev || 0);
+      const uUsd = usdByFolder.get(title) || 0;
+      const cNet = window.num(s.cost || 0) || (qNet > 0 && uUsd > 0 ? qNet * uUsd * rate : 0);
+
+      const rt = repTotals.get(`${rOrg}|||${rPer}`) || Array.from(repTotals.values());
+      const share = (rt && rt.rev > 0) ? (rNet / rt.rev) : 0;
+      const log = window.num(s.log || 0) || (rt ? rt.log * share : 0);
+      const comm = (window.num(s.comm || 0) + window.num(s.ads || 0)) || (rt ? rt.comm * share : 0);
+
+      const key = `${rOrg}|||${rPer}|||${title}`;
+      const cur = map.get(key) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, qN: 0, netRev: 0, cNet: 0, log: 0, comm: 0 };
+      cur.qN += qNet;
+      cur.qR += qR;
+      cur.qS += (qNet + qR);
+      cur.netRev += rNet;
+      cur.cNet += cNet;
+      cur.log += log;
+      cur.comm += comm;
+      map.set(key, cur);
+    });
+
+    const rows = Array.from(map.values()).map(x => {
+      const netQty = x.qN, retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0, buyoutPct = x.qS > 0 ? (netQty / x.qS) * 100 : 0;
+      const avgCheck = netQty > 0 ? x.netRev / netQty : 0;
+      const costPct = x.netRev > 0 ? (x.cNet / x.netRev) * 100 : 0, costUnit = netQty > 0 ? x.cNet / netQty : 0;
+      const logPct = x.netRev > 0 ? (x.log / x.netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = x.netRev > 0 ? (x.comm / x.netRev) * 100 : 0;
+      const margin = x.netRev - x.cNet - x.log - x.comm, rentPct = x.netRev > 0 ? (margin / x.netRev) * 100 : 0;
+      return Object.assign(x, { netQty, retPct, buyoutPct, avgCheck, costPct, costUnit, logPct, logUnit, commPct, margin, rentPct });
+    }).sort((a, b) => b.netRev - a.netRev);
+    return { rows, models: Array.from(modelsSet).sort() };
+  };
+  /* === 1. Полная раскладка за 1 штуку (Ср.чек/шт, Себ/шт, Лог/шт, Ком/шт, Маржа/шт) === */
+  const _origRenderUnitTab = window.renderUnitTab;
+  window.renderUnitTab = function () {
+    _origRenderUnitTab.apply(this, arguments);
+    if (window.unitState.sub === 'CALC') return;
+    const sec = document.getElementById('page-unit'); if (!sec) return;
+    const tbl = sec.querySelector('table'); if (!tbl) return;
+
+    const { rows } = window.buildUnitRows(window.unitState.sub);
+    const tot = rows.reduce((a, r) => { a.qS += r.qS; a.qR += r.qR; a.qN += r.netQty; a.rN += r.netRev; a.cN += r.cNet; a.l += r.log; a.cm += r.comm; a.m += r.margin; return a; }, { qS: 0, qR: 0, qN: 0, rN: 0, cN: 0, l: 0, cm: 0, m: 0 });
+    const tRet = tot.qS > 0 ? (tot.qR / tot.qS) * 100 : 0, tBuy = tot.qS > 0 ? (tot.qN / tot.qS) * 100 : 0;
+    const tAvg = tot.qN > 0 ? tot.rN / tot.qN : 0, tCostU = tot.qN > 0 ? tot.cN / tot.qN : 0, tLogU = tot.qN > 0 ? tot.l / tot.qN : 0, tCommU = tot.qN > 0 ? tot.cm / tot.qN : 0, tMargU = tot.qN > 0 ? tot.m / tot.qN : 0;
+    const tRent = tot.rN > 0 ? (tot.m / tot.rN) * 100 : 0;
+
+    const trs = rows.map(r => {
+      const commUnit = r.netQty > 0 ? r.comm / r.netQty : 0;
+      const margUnit = r.netQty > 0 ? r.margin / r.netQty : 0;
+      return `<tr>
+        <td>${window.esc(r.org)}</td><td>${window.esc(r.per)}</td><td class="bold">${window.esc(r.title)}</td>
+        <td class="num">${r.qS}</td><td class="num text-red">${r.qR}</td><td class="num bold">${r.netQty}</td>
+        <td class="num bold text-green">${r.buyoutPct.toFixed(1)}%</td><td class="num">${r.retPct.toFixed(1)}%</td>
+        <td class="num bold">${window.fmtR(r.netRev)}</td><td class="num bold" style="background:#f8fafc">${window.fmtR(r.avgCheck)}</td>
+        <td class="num">${window.fmtR(r.cNet)} (${r.costPct.toFixed(0)}%)</td><td class="num" style="background:#f8fafc">${window.fmtR(r.costUnit)}</td>
+        <td class="num">${window.fmtR(r.log)} (${r.logPct.toFixed(0)}%)</td><td class="num" style="background:#f8fafc">${window.fmtR(r.logUnit)}</td>
+        <td class="num">${window.fmtR(r.comm)} (${r.commPct.toFixed(0)}%)</td><td class="num" style="background:#f8fafc">${window.fmtR(commUnit)}</td>
+        <td class="num bold ${r.margin >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(r.margin)}</td>
+        <td class="num bold ${margUnit >= 0 ? 'text-green' : 'text-red'}" style="background:#f0fdf4">${window.fmtR(margUnit)}</td>
+        <td class="num"><span class="badge ${r.rentPct >= 25 ? 'badge-green' : (r.rentPct >= 10 ? 'badge-amber' : 'badge-red')}">${r.rentPct.toFixed(1)}%</span></td>
+      </tr>`;
+    }).join('');
+
+    tbl.innerHTML = `<thead>
+      <tr><th>Аккаунт</th><th>Период</th><th>Папка-модель</th><th class="num">Прод</th><th class="num">Возвр</th><th class="num">Чист</th><th class="num">Выкуп %</th><th class="num">%возв</th><th class="num">Выручка ₽</th><th class="num" style="background:#eef2ff">Ср.чек/шт</th><th class="num">Себест ₽</th><th class="num" style="background:#eef2ff">Себ/шт</th><th class="num">Логист ₽</th><th class="num" style="background:#eef2ff">Лог/шт</th><th class="num">Комис+Экв</th><th class="num" style="background:#eef2ff">Ком/шт</th><th class="num">Маржа ₽</th><th class="num" style="background:#dcfce7">Маржа/шт</th><th class="num">Рентаб</th></tr>
+      <tr style="background:#f1f5f9;font-weight:800"><td colspan="3">ИТОГО (${rows.length} папок)</td><td class="num">${tot.qS}</td><td class="num text-red">${tot.qR}</td><td class="num">${tot.qN}</td><td class="num text-green">${tBuy.toFixed(1)}%</td><td class="num">${tRet.toFixed(1)}%</td><td class="num">${window.fmtR(tot.rN)}</td><td class="num">${window.fmtR(tAvg)}</td><td class="num">${window.fmtR(tot.cN)}</td><td class="num">${window.fmtR(tCostU)}</td><td class="num">${window.fmtR(tot.l)}</td><td class="num">${window.fmtR(tLogU)}</td><td class="num">${window.fmtR(tot.cm)}</td><td class="num">${window.fmtR(tCommU)}</td><td class="num ${tot.m >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(tot.m)}</td><td class="num ${tMargU >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(tMargU)}</td><td class="num">${tRent.toFixed(1)}%</td></tr>
+    </thead><tbody>${trs || '<tr><td colspan="19">Нет данных за выбранный период</td></tr>'}</tbody>`;
+  };
+
+  /* === 2. Авто-отрисовка Сводки сразу после загрузки Google Облака при F5 === */
+  let _svodAutoPainted = false;
+  setInterval(() => {
+    if (!_svodAutoPainted && window.db && (window.db.reports || []).length > 0) {
+      _svodAutoPainted = true;
+      const yrSel = document.querySelector('#tab-svod select, #page-svod select, select');
+      if (yrSel) yrSel.dispatchEvent(new Event('change', { bubbles: true }));
+      if (typeof window.onPerChange === 'function') window.onPerChange();
+      if (typeof window.render === 'function') window.render();
+    }
+  }, 500);
 })();
