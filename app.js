@@ -705,9 +705,21 @@
     const box = document.getElementById('map-box'); if (!box) return;
     if (!mpBatch || !mpBatch.files.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
     const grp = {};
+    const orderItems = new Map();
+    for (const file of mpBatch.files.filter(file => file.unitType === 'items')) {
+      for (const item of file.items) {
+        const items = orderItems.get(item.orderKey) || new Map();
+        items.set(item.art, item);
+        orderItems.set(item.orderKey, items);
+      }
+    }
     mpBatch.files.forEach(f => {
       if (!grp[f.mp]) grp[f.mp] = { mp: f.mp, cnt: 0, rev: 0, ret: 0, com: 0, log: 0, ads: 0, cogs: 0, sQty: 0, rQty: 0, items: [] };
-      const g = grp[f.mp]; g.cnt++; g.rev += f.rev; g.ret += f.ret; g.com += f.com; g.log += f.log; g.ads += f.ads; g.cogs += f.cogs; g.sQty += f.sQty; g.rQty += f.rQty; g.items.push(...f.items);
+      const g = grp[f.mp]; g.cnt++; g.rev += f.rev; g.ret += f.ret; g.com += f.com; g.log += f.log; g.ads += f.ads; g.cogs += f.cogs; g.sQty += f.sQty; g.rQty += f.rQty; for (const item of f.items) {
+        const matches = f.unitType === 'services' ? orderItems.get(item.orderKey) : null;
+        const linked = matches?.size === 1 ? matches.values().next().value : null;
+        g.items.push(linked ? { ...item, art: linked.art, name: linked.name } : item);
+      }
     });
     box.classList.remove('hidden');
     box.innerHTML = `<div style="font-weight:700;margin-bottom:8px">📝 Черновик (${mpBatch.files.length} ф.) • ${window.esc(mpBatch.org)} • ${mpBatch.mo}.${mpBatch.yr}</div>` +
@@ -717,8 +729,9 @@
       if (window.db.locked?.[mpBatch.yr + '-' + mpBatch.mo]) return alert('Месяц закрыт!');
       Object.values(grp).forEach(g => {
         const bo = (g.sQty + g.rQty) > 0 ? Math.round((g.sQty / (g.sQty + g.rQty)) * 100) : 89;
-        window.db.reports.unshift({ id: 'r_' + Date.now() + '_' + g.mp, org: mpBatch.org, mp: g.mp, yr: mpBatch.yr, mo: mpBatch.mo, rev: g.rev, ret: g.ret, ads: g.ads, log: g.log, com: g.com, cogs: g.cogs, bo });
-        g.items.forEach(it => window.db.itemSales.push({ org: mpBatch.org, mp: g.mp, yr: mpBatch.yr, mo: mpBatch.mo, bc: it.bc, art: it.art, sQty: it.sQty, rQty: it.rQty, rev: it.rev, fee: it.fee }));
+        const reportId = 'r_' + Date.now() + '_' + g.mp;
+        window.db.reports.unshift({ id: reportId, per: mpBatch.yr + '-' + mpBatch.mo, org: mpBatch.org, mp: g.mp, yr: mpBatch.yr, mo: mpBatch.mo, rev: g.rev, ret: g.ret, ads: g.ads, log: g.log, com: g.com, cogs: g.cogs, bo });
+        g.items.forEach(it => window.db.itemSales.push({ ...it, repId: reportId, org: mpBatch.org, mp: g.mp, yr: mpBatch.yr, mo: mpBatch.mo, per: mpBatch.yr + '-' + mpBatch.mo }));
       });
       mpBatch = null; window.renderMpDraft(); window.save(true); window.render();
       alert('✅ Отчёты сохранены!');
@@ -1565,6 +1578,97 @@
     } catch (err) { alert('❌ Ошибка чтения выписки: ' + err.message); }
   };
   /* === Блок 3/3: Оба отчёта Яндекс Маркета + Тихое Облако без всплывающих окон === */
+
+  async function parseUnitReport(file, rate, skuIdx) {
+    const buffer = await file.arrayBuffer();
+    let text = new TextDecoder('utf-8').decode(buffer);
+    if (text.includes('\uFFFD')) text = new TextDecoder('windows-1251').decode(buffer);
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+    const headerIndex = lines.findIndex(line => /обоснование для оплаты|^"?id начисления|^"?id бизнес-аккаунта/i.test(line.trim()));
+    if (headerIndex < 0) return null;
+    const headerLine = lines[headerIndex];
+    const sep = headerLine.includes(';') ? ';' : '\t';
+    const headers = splitCsvLine(headerLine, sep).map(value => value.trim().toLowerCase());
+    const index = (prefix) => headers.findIndex(value => value.startsWith(prefix));
+    const wb = index('обоснование для оплаты') >= 0;
+    const ozon = index('группа услуг') >= 0 && index('сумма итого') >= 0;
+    const ymItems = index('ваш sku') >= 0 && index('статус товара') >= 0 && index('доставлено или возвращено') >= 0;
+    const ym = index('статус заказа') >= 0 && index('все услуги маркета за заказы') >= 0 && index('цена продажи (за шт.)') >= 0;
+    if (!wb && !ozon && !ym && !ymItems) return null;
+    const mp = wb ? 'WB' : ozon ? 'OZON' : 'YM';
+    const out = {fileName: file.name, mp, rev: 0, ret: 0, com: 0, log: 0, ads: 0, cogs: 0, sQty: 0, rQty: 0, items: []};
+    out.unitType = ymItems ? 'items' : ym ? 'services' : '';
+    const cols = new Map();
+    for (const line of lines.slice(headerIndex + 1)) {
+      if (!line.trim()) continue;
+      const row = splitCsvLine(line, sep);
+      const value = prefix => {
+        if (!cols.has(prefix)) cols.set(prefix, index(prefix));
+        return (row[cols.get(prefix)] || '').trim();
+      };
+      const amount = prefix => window.num(value(prefix).replace(/\s/g, ''));
+      let art = '', bc = '', name = '', sold = 0, returned = 0, rev = 0, refunds = 0, log = 0, com = 0, ads = 0;
+      if (wb) {
+        const reason = value('обоснование для оплаты').toLowerCase();
+        if (!reason) continue;
+        art = value('артикул поставщика');
+        bc = value('баркод');
+        name = value('название');
+        const qty = Math.abs(amount('кол-во'));
+        const sign = reason === 'продажа' ? 1 : reason === 'возврат' ? -1 : 0;
+        sold = sign > 0 ? qty : 0;
+        returned = sign < 0 ? qty : 0;
+        rev = sign * Math.abs(amount('вайлдберриз реализовал'));
+        refunds = sign < 0 ? -rev : 0;
+        log = amount('услуги по доставке товара') + amount('возмещение издержек по перемещению');
+        ads = amount('общая сумма штрафов') + amount('удержания');
+        com = sign * (Math.abs(amount('вайлдберриз реализовал')) - Math.abs(amount('к перечислению продавцу'))) + amount('хранение') + amount('услуга по обработке товара');
+      } else if (ozon) {
+        const group = value('группа услуг').toLowerCase();
+        const kind = value('тип начисления').toLowerCase();
+        if (!group || group === 'группа услуг') continue;
+        art = value('артикул');
+        const sku = value('sku');
+        bc = sku ? 'OZN' + sku : '';
+        name = value('название товара');
+        const qty = Math.abs(amount('количество'));
+        const total = amount('сумма итого');
+        if (group === 'продажи' || group === 'возвраты') {
+          rev = total;
+          sold = kind === 'выручка' ? qty : 0;
+          returned = kind === 'возврат выручки' ? qty : 0;
+          refunds = group === 'возвраты' ? -total : 0;
+        } else if (group.includes('продвиж') || group.includes('реклам')) ads = -total;
+        else if (group.includes('доставк') || /доставк|логистик|обработка возвратов|drop-off/.test(kind)) log = -total;
+        else com = -total;
+      } else if (ymItems) {
+        const status = value('статус товара').toLowerCase();
+        art = value('ваш sku');
+        name = value('название товара');
+        if (!art || !value('номер заказа')) continue;
+        const qty = Math.abs(amount('доставлено или возвращено'));
+        sold = status.includes('доставлен') ? qty : 0;
+        returned = status.includes('возврат') && !status.includes('невыкуп') ? qty : 0;
+        const price = amount('цена продажи (за шт.)');
+        rev = (sold - returned) * price;
+        refunds = returned * price;
+      } else {
+        const status = value('статус заказа').toLowerCase();
+        if (!status || !value('номер заказа')) continue;
+        for (const field of ['доставка покупателю', 'доставка (средняя миля)', 'экспресс-доставка', 'доставка из-за рубежа']) log += amount(field);
+        ads = amount('буст продаж');
+        com = amount('все услуги маркета за заказы') - log - ads;
+      }
+      if (!(sold || returned || rev || log || com || ads)) continue;
+      const meta = (art || bc) ? window.resolveMetaFast(skuIdx, bc, art, name) : null;
+      const cogs = meta && meta.usd > 0 ? (sold - returned) * meta.usd * rate : 0;
+      out.rev += rev; out.ret += refunds; out.sQty += sold; out.rQty += returned;
+      out.log += log; out.com += com; out.ads += ads; out.cogs += cogs;
+      out.items.push({bc, art, name, sQty: sold, rQty: returned, rev, fee: log + com + ads, log, com, ads, cogs, hasCost: !!(meta && meta.usd > 0), orderKey: (ym || ymItems) ? value('id магазинов') + '/' + value('номер заказа') : ''});
+    }
+    return out;
+  }
+
   const _origOnRepFile = window.onRepFile;
   window.onRepFile = async function (ev) {
     if (window.__skosReadOnly) return;
@@ -1576,6 +1680,8 @@
     if (!mpBatch || mpBatch.org !== org || mpBatch.yr !== yr || mpBatch.mo !== mo) mpBatch = { org, yr, mo, files: [] };
 
     for (const file of files) {
+      const exact = await parseUnitReport(file, rate, skuIdx);
+      if (exact) { mpBatch.files.push(exact); continue; }
       const buf = await file.arrayBuffer();
       let txt = new TextDecoder('utf-8').decode(buf);
       if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1251').decode(buf);
@@ -1694,4 +1800,134 @@
     if (typeof window.onPerChange === 'function') window.onPerChange();
     if (typeof window.render === 'function') window.render();
   };
+})();
+
+;(function () {
+  function installUnitReportView() {
+    const render = window.renderUnitTab;
+    if (!render) return;
+
+    window.buildUnitRows = function (mp) {
+      const {org, yr, mo, model} = window.unitState;
+      const period = row => row.per || row.period || (row.yr && row.mo ? `${row.yr}-${String(row.mo).padStart(2, '0')}` : '');
+      const reports = new Map((window.db.reports || []).map(row => [String(row.id), row]));
+      const catalog = window.buildSkuIndex();
+      const rows = new Map(), balances = new Map(), models = new Set();
+      const unassigned = 'Без распределения по моделям';
+      const blank = (name, per, title) => ({org:name, per, title, qS:0, qR:0, netQty:0, netRev:0, cNet:0, log:0, comm:0, missingCost:false});
+      const matches = (name, per) => /^\d{4}-\d{2}$/.test(per) && (org === 'ALL' || org === name) &&
+        (yr === 'ALL' || per.slice(0,4) === yr) && (mo === 'ALL' || per.slice(5) === mo);
+      const add = (row, values, sign = 1) => {
+        for (const field of ['netRev','cNet','log','comm']) row[field] += sign * values[field];
+      };
+      const values = (s, cost) => ({netRev:window.num(s.rev), cNet:cost, log:window.num(s.log),
+        comm:window.num(s.com ?? s.comm) + window.num(s.ads)});
+      const getRow = (name, per, title) => {
+        const key = JSON.stringify([name, per, title]);
+        if (!rows.has(key)) rows.set(key, blank(name, per, title));
+        models.add(title);
+        return rows.get(key);
+      };
+      for (const r of reports.values()) {
+        const per = period(r);
+        if (String(r.mp).toUpperCase() !== mp || !matches(r.org, per)) continue;
+        const key = JSON.stringify([r.org, per]);
+        if (!balances.has(key)) balances.set(key, blank(r.org, per, unassigned));
+        add(balances.get(key), values(r, window.num(r.cogs)));
+      }
+      for (const s of window.db.itemSales || []) {
+        const id = s.repId || s.rId || s.reportId;
+        const r = id ? reports.get(String(id)) : null;
+        if (id && !r) continue;
+        const name = r?.org || s.org || 'Без аккаунта';
+        const per = (r && period(r)) || period(s);
+        if (String(r?.mp || s.mp).toUpperCase() !== mp || !matches(name, per)) continue;
+        const returned = window.num(s.rQty ?? s.rq ?? s.retQty);
+        const sold = s.sQty != null ? window.num(s.sQty) : window.num(s.sold ?? s.q ?? s.qty) + returned;
+        const net = sold - returned;
+        const identified = s.art || s.bc || s.name;
+        const meta = identified ? window.resolveMetaFast(catalog, s.bc, s.art, s.name) : null;
+        const title = meta?.modelTitle || (identified || unassigned);
+        const usd = window.num(meta?.usd || s.usd);
+        const historical = window.num(s.cogs ?? s.cost);
+        const cost = usd > 0 ? net * usd * window.getRate(per) : historical;
+        const row = getRow(name, per, title);
+        row.qS += sold; row.qR += returned; row.netQty += net;
+        row.missingCost ||= net !== 0 && !(usd > 0 || s.hasCost || s.cost != null);
+        add(row, values(s, cost));
+        const remaining = balances.get(JSON.stringify([name, per]));
+        if (remaining) add(remaining, values(s, s.cogs == null ? cost : historical), -1);
+      }
+      for (const row of balances.values()) {
+        if (['netRev','cNet','log','comm'].some(field => Math.abs(row[field]) >= 0.005)) {
+          add(getRow(row.org,row.per,unassigned), row);
+        }
+      }
+      const divide = (a,b) => b > 0 ? a / b : 0;
+      const result = [...rows.values()].filter(r => model === 'ALL' || model === r.title).map(r => {
+        const attempts = Math.max(r.qS, r.qR);
+        const margin = r.netRev - r.cNet - r.log - r.comm;
+        return {...r, qS:attempts, margin, retPct:100*divide(r.qR,attempts),
+          buyoutPct:100*divide(Math.max(0,r.netQty),attempts), avgCheck:divide(r.netRev,r.netQty),
+          costPct:100*divide(r.cNet,r.netRev), costUnit:divide(r.cNet,r.netQty),
+          logPct:100*divide(r.log,r.netRev), logUnit:divide(r.log,r.netQty),
+          commPct:100*divide(r.comm,r.netRev), commUnit:divide(r.comm,r.netQty),
+          margUnit:divide(margin,r.netQty), rentPct:100*divide(margin,r.netRev)};
+      }).sort((a,b) => b.netRev - a.netRev);
+      window.unitHasIncompleteCosts = result.some(row => row.missingCost);
+      return {rows: result, models: [...models].sort()};
+    };
+
+    window.renderUnitTab = function () {
+      render.apply(this, arguments);
+      if (window.unitState.sub === 'CALC') return;
+      const table = document.querySelector('#page-unit table');
+      if (!table) return;
+      if (window.unitHasIncompleteCosts) {
+        const note = document.createElement('p');
+        note.textContent = 'В каталоге есть товары без себестоимости. Маржа предварительная.';
+        table.parentElement.after(note);
+      }
+      const periods = new Map();
+      for (const row of table.tBodies[0].rows) {
+        const per = row.cells[1]?.textContent;
+        if (!per) continue;
+        if (!periods.has(per)) periods.set(per, []);
+        periods.get(per).push(row);
+      }
+      const years = new Map();
+      const folders = document.createElement('div');
+      folders.style.marginTop = '12px';
+      const createFolder = (title, open) => {
+        const box = document.createElement('details');
+        const heading = document.createElement('summary');
+        heading.textContent = title;
+        box.open = open;
+        box.style.margin = '6px 0';
+        box.append(heading);
+        return box;
+      };
+      const monthLabel = new Intl.DateTimeFormat('ru-RU',{month:'long',timeZone:'UTC'});
+      for (const [per, lines] of [...periods].sort(([a],[b]) => b.localeCompare(a))) {
+        const year = per.slice(0,4);
+        if (!years.has(year)) {
+          years.set(year,createFolder(year,window.unitState.yr !== 'ALL'));
+          folders.append(years.get(year));
+        }
+        const month = createFolder(`${monthLabel.format(new Date(per+'-01T00:00:00Z'))} · ${lines.length}`,window.unitState.mo !== 'ALL');
+        const wrapper = document.createElement('div');
+        wrapper.style.overflowX = 'auto';
+        const monthTable = table.cloneNode(false);
+        const head = monthTable.createTHead();
+        head.append(table.tHead.rows[0].cloneNode(true));
+        monthTable.createTBody().append(...lines);
+        wrapper.append(monthTable);
+        month.append(wrapper);
+        years.get(year).append(month);
+      }
+      if (periods.size) table.parentElement.after(folders);
+    };
+  }
+
+  document.addEventListener('DOMContentLoaded', installUnitReportView);
 })();
