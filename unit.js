@@ -1,6 +1,6 @@
-/* === SKOS Finance 3.0 — Точная Юнит-экономика (WB / Ozon / ЯМ + 32 папки ШК) === */
+/* === SKOS Finance 3.0 — Точная Юнит-экономика (только чтение из базы сайта) === */
 (function () {
-  window.unitState = { sub: 'WB', org: 'ALL', yr: 'ALL', mo: 'ALL', model: 'ALL' };
+  window.unitState = { sub: 'WB', org: 'ALL', yr: '2026', mo: 'ALL', model: 'ALL' };
   window.unitCalcState = { mp: 'WB', model: '', price: 4500, buyout: 88, commPct: 37, acqPct: 1.5, logTo: 350, logBack: 50, pack: 65, taxPct: 6, drrPct: 5, targetMargin: 30 };
 
   function hidePages(keepId) {
@@ -52,7 +52,7 @@
   function getModelCode(str) {
     const up = String(str || '').toUpperCase().replace(/SKOS[\s\-_]+/g, 'SKOS-');
     const m = up.match(/SKOS-([A-ZА-Я]{1,5})/);
-    return m ? ('SKOS-' + m) : '';
+    return (m && m) ? ('SKOS-' + m) : '';
   }
 
   function buildFolderDict() {
@@ -111,11 +111,12 @@
       const rMp = String(r.mp || '').toUpperCase();
       if (rMp !== mpCode) return;
       const rPer = String(r.per || r.period || r.month || '');
+      if (!rPer || rPer.includes('undefined')) return;
       const k = `${r.org || ''}|||${rPer}`;
       const cur = repTotals.get(k) || { rev: 0, log: 0, comm: 0, retQty: 0 };
-      cur.rev += window.num(r.rev || r.netRev || 0);
-      cur.log += window.num(r.log || r.logistics || 0);
-      cur.comm += window.num(r.comm || r.commission || 0) + window.num(r.acq || 0) + window.num(r.ads || 0);
+      cur.rev += window.num(r.rev || 0);
+      cur.log += window.num(r.log || 0);
+      cur.comm += window.num(r.comm || 0) + window.num(r.ads || 0);
       cur.retQty += window.num(r.retQty || r.rq || 0);
       repTotals.set(k, cur);
     });
@@ -124,49 +125,46 @@
 
     (window.db?.itemSales || []).forEach(s => {
       const r = repMap.get(String(s.repId || s.rId || s.reportId || ''));
+      if (!r && s.repId) return; // пропускаем удалённые отчёты
       const mp = String(r ? r.mp : (s.mp || '')).toUpperCase();
       if (mp !== mpCode) return;
 
       const rOrg = r ? r.org : (s.org || 'ИП Каримов Артем');
-      const rPer = String(r ? (r.per || r.period || r.month || '') : (s.per || s.period || ''));
+      const rPer = String(r ? (r.per || '') : (s.per || ''));
+      if (!rPer || rPer.includes('undefined')) return;
+
       const mod = resolveModel(s);
       modelsSet.add(mod.title);
 
       if (org !== 'ALL' && rOrg !== org) return;
-      if (yr !== 'ALL' && rPer && !rPer.startsWith(yr)) return;
-      if (mo !== 'ALL' && rPer && rPer.slice(5, 7) !== mo) return;
+      if (yr !== 'ALL' && !rPer.startsWith(yr)) return;
+      if (mo !== 'ALL' && rPer.slice(5, 7) !== mo) return;
       if (model !== 'ALL' && mod.title !== model) return;
 
-      let qN = window.num(s.sold ?? s.q ?? s.qty ?? s.cnt ?? 0);
-      let qR = window.num(s.rq ?? s.retQty ?? s.qRet ?? s.retCnt ?? s.rQty ?? 0);
-      let qS = window.num(s.qSale ?? s.saleQty ?? s.soldAll ?? 0);
-      const revRaw = window.num(s.rev || 0);
-      const retRub = window.num(s.retRev ?? s.ret ?? s.retSum ?? 0);
+      const qN = Math.max(0, window.num(s.sold ?? s.q ?? s.qty ?? 0));
+      const qR = Math.max(0, window.num(s.rq ?? s.retQty ?? 0));
+      const netRev = window.num(s.rev || 0);
 
-      const isRetOp = String(s.type || s.op || s.oper || '').toLowerCase().includes('возвр') || qN < 0 || revRaw < 0;
-      if (isRetOp) {
-        qR += Math.abs(qN || qS || 1);
-        qN = 0; qS = 0;
-      } else {
-        if (qS > 0 && qN === 0) qN = Math.max(0, qS - qR);
-        if (qN > 0 && qS === 0) qS = qN + qR;
-      }
-
-      const netRev = isRetOp ? -Math.abs(revRaw) : (revRaw - retRub);
       const rt = repTotals.get(`${rOrg}|||${rPer}`);
       const share = (rt && rt.rev > 0 && netRev > 0) ? (netRev / rt.rev) : 0;
 
       const uUsd = codeToUsd.get(mod.key) || window.num(s.usd || 0);
       const cNet = uUsd > 0 ? (qN * uUsd * rate) : (qN > 0 ? window.num(s.cost || 0) : 0);
 
-      const sLog = window.num(s.log || s.logistics || 0);
-      const sComm = window.num(s.comm || s.commission || 0) + window.num(s.acq || 0) + window.num(s.ads || 0);
-      const log = sLog !== 0 ? sLog : (rt && rt.log > 0 ? rt.log * share : 0);
-      const comm = sComm !== 0 ? sComm : (rt && rt.comm > 0 ? rt.comm * share : 0);
+      const sLog = window.num(s.log || 0);
+      const sComm = window.num(s.comm || 0) + window.num(s.ads || 0);
+      const log = sLog > 0 ? sLog : (rt && rt.log > 0 ? rt.log * share : 0);
+      const comm = sComm > 0 ? sComm : (rt && rt.comm > 0 ? rt.comm * share : 0);
 
       const groupKey = `${rOrg}|||${rPer}|||${mod.title}`;
       const cur = map.get(groupKey) || { org: rOrg, per: rPer, title: mod.title, qS: 0, qR: 0, qN: 0, netRev: 0, cNet: 0, log: 0, comm: 0 };
-      cur.qS += qS; cur.qR += qR; cur.qN += qN; cur.netRev += netRev; cur.cNet += cNet; cur.log += log; cur.comm += comm;
+      cur.qN += qN;
+      cur.qR += qR;
+      cur.qS += (qN + qR);
+      cur.netRev += netRev;
+      cur.cNet += cNet;
+      cur.log += log;
+      cur.comm += comm;
       map.set(groupKey, cur);
     });
 
@@ -186,86 +184,6 @@
 
     return { rows, models: Array.from(modelsSet).sort() };
   };
-  window.importUnitCsvFiles = async function (files) {
-    if (!files || !files.length) return;
-    const parseNum = v => parseFloat(String(v ?? '0').replace(/\s+/g, '').replace(',', '.')) || 0;
-    const items = [];
-    let detectedMp = window.unitState.sub, repPer = '2026-01';
-    const ymOrderSku = new Map();
-
-    for (const f of files) {
-      let rows = [];
-      if (/\.xlsx?$/i.test(f.name) && window.XLSX) {
-        const wb = window.XLSX.read(await f.arrayBuffer(), { type: 'array' });
-        rows = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames], { header: 1, defval: '' }).map(r => r.map(c => String(c ?? '').trim()));
-      } else {
-        const buf = await f.arrayBuffer();
-        let text = new TextDecoder('utf-8').decode(buf);
-        if (!/Артикул|Предмет|Номер заказа|Тип начисления/i.test(text)) text = new TextDecoder('windows-1251').decode(buf);
-        const lines = text.split(/\r?\n/).filter(l => l.trim());
-        if (!lines.length) continue;
-        const first = lines.slice(0, 10).join('\n');
-        const sep = first.includes(';') ? ';' : (first.includes('\t') ? '\t' : ',');
-        rows = lines.map(l => l.split(sep).map(c => c.replace(/^"|"$/g, '').trim()));
-      }
-
-      const hIdx = rows.findIndex(r => r.some(c => /Артикул|Предмет|Номер заказа|Тип начисления/i.test(c)));
-      if (hIdx < 0) continue;
-      const hdr = rows[hIdx];
-      const col = name => hdr.findIndex(h => h.toLowerCase().includes(name.toLowerCase()));
-
-      if (hdr.some(h => /Тип начисления/i.test(h))) {
-        detectedMp = 'OZON';
-        const cGrp = col('Группа услуг'), cType = col('Тип начисления'), cArt = col('Артикул'), cQty = col('Количество'), cPrice = col('Цена продавца'), cSum = col('Сумма итого'), cDate = col('Дата начисления');
-        for (let i = hIdx + 1; i < rows.length; i++) {
-          const r = rows[i]; if (!r[cType]) continue;
-          const art = r[cArt] || 'ОБЩИЕ УСЛУГИ';
-          const dt = r[cDate] || ''; if (dt.length >= 10) repPer = dt.slice(6, 10) + '-' + dt.slice(3, 5);
-          const grp = r[cGrp] || '', typ = r[cType] || '', qty = parseNum(r[cQty]) || 1, sum = parseNum(r[cSum]);
-          if (grp === 'Продажи' && typ === 'Выручка') items.push({ mp: 'OZON', per: repPer, art, sold: qty, rq: 0, rev: parseNum(r[cPrice]) || sum, log: 0, comm: 0 });
-          else if (grp === 'Возвраты' && typ === 'Возврат выручки') items.push({ mp: 'OZON', per: repPer, art, sold: 0, rq: qty, rev: -Math.abs(parseNum(r[cPrice]) || sum), log: 0, comm: 0 });
-          else if (grp === 'Услуги доставки' || /Доставка|возврат|Логистика/i.test(typ)) items.push({ mp: 'OZON', per: repPer, art, sold: 0, rq: 0, rev: 0, log: Math.abs(sum), comm: 0 });
-          else if (sum !== 0) items.push({ mp: 'OZON', per: repPer, art, sold: 0, rq: 0, rev: 0, log: 0, comm: -sum });
-        }
-      } else if (hdr.some(h => /Обоснование для оплаты/i.test(h))) {
-        detectedMp = 'WB';
-        const cArt = col('Артикул поставщика'), cBc = col('Баркод'), cOb = col('Обоснование для оплаты'), cQty = col('Кол-во'), cRev = col('Вайлдберриз реализовал'), cComm = col('Вознаграждение Вайлдберриз'), cNds = col('НДС с Вознаграждения'), cAcq = col('Компенсация платёжных'), cLog = col('Услуги по доставке'), cStor = col('Хранение'), cHold = col('Удержания'), cFine = col('штрафов'), cDate = col('Дата продажи');
-        for (let i = hIdx + 1; i < rows.length; i++) {
-          const r = rows[i]; const ob = r[cOb] || ''; if (!ob) continue;
-          const dt = r[cDate] || ''; if (dt.length >= 7) repPer = dt.slice(0, 7);
-          const art = r[cArt] || '', bc = r[cBc] || '', qty = parseNum(r[cQty]), rev = parseNum(r[cRev]);
-          const comm = parseNum(r[cComm]) + parseNum(r[cNds]) + parseNum(r[cAcq]);
-          const log = parseNum(r[cLog]) + parseNum(r[cStor]) + parseNum(r[cHold]) + parseNum(r[cFine]);
-          if (ob === 'Продажа') items.push({ mp: 'WB', per: repPer, art, bc, sold: qty || 1, rq: 0, rev, log, comm });
-          else if (ob === 'Возврат') items.push({ mp: 'WB', per: repPer, art, bc, sold: 0, rq: qty || 1, rev: -Math.abs(rev), log, comm });
-          else if (log > 0 || comm !== 0) items.push({ mp: 'WB', per: repPer, art, bc, sold: 0, rq: 0, rev: 0, log, comm });
-        }
-      } else if (hdr.some(h => /Номер заказа/i.test(h))) {
-        detectedMp = 'YM';
-        const cOrd = col('Номер заказа'), cSku = col('Ваш SKU'), cStat = col('Статус товара'), cOrdStat = col('Статус заказа'), cPrice = col('Цена продажи'), cAllSrv = col('Все услуги Маркета'), cDeliv = col('Доставка покупателю'), cDate = col('Дата оформления');
-        for (let i = hIdx + 1; i < rows.length; i++) {
-          const r = rows[i]; const ord = r[cOrd]; if (!ord) continue;
-          const dt = r[cDate] || ''; if (dt.length >= 10) repPer = dt.slice(6, 10) + '-' + dt.slice(3, 5);
-          if (cSku >= 0 && r[cSku]) ymOrderSku.set(ord, r[cSku]);
-          const sku = (cSku >= 0 && r[cSku]) ? r[cSku] : (ymOrderSku.get(ord) || 'ЯМ Заказ');
-          const st = (cStat >= 0 ? r[cStat] : '') || (cOrdStat >= 0 ? r[cOrdStat] : '');
-          const price = parseNum(r[cPrice]), srv = cAllSrv >= 0 ? parseNum(r[cAllSrv]) : 0, log = cDeliv >= 0 ? parseNum(r[cDeliv]) : 0;
-          const comm = Math.max(0, srv - log);
-          if (/Доставлен/i.test(st)) items.push({ mp: 'YM', per: repPer, art: sku, sold: 1, rq: 0, rev: cAllSrv >= 0 ? 0 : price, log, comm });
-          else if (/Возврат|Невыкуп/i.test(st)) items.push({ mp: 'YM', per: repPer, art: sku, sold: 0, rq: 1, rev: 0, log, comm });
-        }
-      }
-    }
-    if (!items.length) return alert('Файл не распознан. Проверьте, что выбран отчёт WB, Ozon или Яндекс Маркета.');
-    const repId = 'unit_' + detectedMp + '_' + Date.now();
-    window.db.reports = (window.db.reports || []).filter(r => !(r.mp === detectedMp && r.per === repPer));
-    window.db.itemSales = (window.db.itemSales || []).filter(s => !(s.mp === detectedMp && s.per === repPer));
-    window.db.reports.push({ id: repId, mp: detectedMp, org: 'ИП Каримов Артем', per: repPer, rev: items.reduce((a, b) => a + b.rev, 0), log: items.reduce((a, b) => a + b.log, 0), comm: items.reduce((a, b) => a + b.comm, 0) });
-    items.forEach(it => window.db.itemSales.push(Object.assign({ repId, org: 'ИП Каримов Артем' }, it)));
-    window.unitState.sub = detectedMp;
-    if (typeof window.saveDb === 'function') window.saveDb();
-    window.renderUnitTab();
-  };
   window.renderUnitTab = function () {
     window.mountUnitNav();
     const sec = document.getElementById('page-unit'); if (!sec) return;
@@ -273,8 +191,7 @@
     const { codeToTitle, codeToUsd } = buildFolderDict();
 
     const nav = [['WB', '🟣 UNIT ВБ (факт)'], ['OZON', '🔵 UNIT Ozon (факт)'], ['YM', '🟡 UNIT ЯМ (факт)'], ['CALC', '🧮 Калькулятор цены (план)']]
-      .map(([k, t]) => `<button type="button" class="btn ${st.sub === k ? 'btn-primary' : ''}" style="display:inline-flex;align-items:center" onclick="unitState.sub='${k}';unitState.model='ALL';renderUnitTab()">${t}</button>`).join('') +
-      `<label class="btn" style="margin-left:auto;background:#ecfdf5;border-color:#10b981;color:#065f46;cursor:pointer">📥 Загрузить отчёт (CSV / Excel)<input type="file" multiple accept=".csv,.xlsx,.xls" style="display:none" onchange="importUnitCsvFiles(this.files)"></label>`;
+      .map(([k, t]) => `<button type="button" class="btn ${st.sub === k ? 'btn-primary' : ''}" style="display:inline-flex;align-items:center" onclick="unitState.sub='${k}';unitState.model='ALL';renderUnitTab()">${t}</button>`).join('');
 
     if (st.sub === 'CALC') {
       const modelEntries = Array.from(codeToTitle.entries()).sort((a, b) => String(a).localeCompare(String(b)));
