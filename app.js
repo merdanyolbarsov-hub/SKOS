@@ -1870,4 +1870,90 @@
   };
 
   setTimeout(window.mountUnitNav, 600);
+    /* === Финальный фикс ЮЭ: чистое переключение вкладок + точный расчёт по 32 папкам === */
+  window.mountUnitNav = function () {
+    const abcBtn = document.getElementById('nav-abc');
+    const abcSec = document.getElementById('tab-abc') || document.getElementById('sec-abc') || document.querySelector('[id$="-abc"]');
+    if (abcBtn && !document.getElementById('nav-unit')) {
+      const btn = document.createElement('button');
+      btn.id = 'nav-unit'; btn.type = 'button'; btn.className = 'nav-btn';
+      btn.textContent = '🧮 Юнит-экономика (WB / Ozon / ЯМ)';
+      btn.onclick = function () {
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const box = abcSec ? abcSec.parentElement : null;
+        if (box) Array.from(box.children).forEach(el => {
+          if (el.id === 'page-unit') el.style.display = 'block';
+          else if (!el.querySelector('#nav-svod') && el.tagName !== 'HEADER') el.style.display = 'none';
+        });
+        window.renderUnitTab();
+      };
+      abcBtn.insertAdjacentElement('afterend', btn);
+    }
+    if (abcSec && !document.getElementById('page-unit')) {
+      const sec = document.createElement('div');
+      sec.id = 'page-unit'; sec.style.display = 'none';
+      abcSec.insertAdjacentElement('afterend', sec);
+    }
+    document.querySelectorAll('.nav-btn:not(#nav-unit)').forEach(b => {
+      if (!b.dataset.uClean) {
+        b.dataset.uClean = '1';
+        b.addEventListener('click', () => {
+          document.getElementById('nav-unit')?.classList.remove('active');
+          const u = document.getElementById('page-unit'); if (u) u.style.display = 'none';
+          const box = abcSec ? abcSec.parentElement : null;
+          if (box) Array.from(box.children).forEach(el => { if (el.id !== 'page-unit') el.style.display = ''; });
+        }, true);
+      }
+    });
+  };
+
+  window.buildUnitRows = function (mpCode) {
+    const { org, yr, mo, model } = window.unitState;
+    const fNames = window.getFolderNames ? window.getFolderNames() : {};
+    const skuMap = new Map(), usdByFolder = new Map();
+    (window.db.skus || []).forEach(s => {
+      const a = String(s.art || '').trim().toLowerCase(), b = String(s.bc || '').trim().toLowerCase();
+      if (a) skuMap.set(a, s);
+      if (b) skuMap.set(b, s);
+      const fn = fNames[a] || s.name || s.art;
+      if (fn && window.num(s.usd) > 0 && !usdByFolder.has(fn)) usdByFolder.set(fn, window.num(s.usd));
+    });
+    const repMap = new Map();
+    (window.db.reports || []).forEach(r => repMap.set(String(r.id), r));
+
+    const map = new Map(), modelsSet = new Set();
+    (window.db.itemSales || []).forEach(s => {
+      const r = repMap.get(String(s.repId || s.rId || s.reportId || '')) || (window.db.reports || []).find(x => Object.values(s).map(String).includes(String(x.id)));
+      const mp = String(r ? r.mp : (s.mp || '')).toUpperCase();
+      if (mp !== mpCode) return;
+      const rOrg = r ? r.org : (s.org || 'Без юрлица');
+      const rPer = String(r ? (r.per || r.period || r.month || '') : (s.per || ''));
+      const title = window.getUnitFolderName(s.art || s.bc, s.name, fNames, skuMap);
+      modelsSet.add(title);
+      if (org !== 'ALL' && rOrg !== org) return;
+      if (yr !== 'ALL' && rPer && !rPer.startsWith(yr)) return;
+      if (mo !== 'ALL' && rPer && rPer.slice(5, 7) !== mo) return;
+      if (model !== 'ALL' && title !== model) return;
+
+      const rS = Math.max(0, window.num(s.rev || 0)), rR = window.num(s.ret || s.retRev || 0);
+      const cNet = window.num(s.cost || 0), log = window.num(s.log || 0), comm = window.num(s.comm || 0) + window.num(s.ads || 0);
+      const uUsd = usdByFolder.get(title) || 0, rate = window.getRate();
+      const qNet = window.num(s.q || s.qty || 0) || (uUsd > 0 && rate > 0 ? Math.round(cNet / (uUsd * rate)) : 0);
+      const qR = window.num(s.rq || s.retQty || 0);
+      const key = `${rOrg}|||${rPer}|||${title}`;
+      const cur = map.get(key) || { org: rOrg, per: rPer, title, qS: 0, qR: 0, rS: 0, rR: 0, cNet: 0, log: 0, comm: 0 };
+      cur.qS += qNet + qR; cur.qR += qR; cur.rS += rS; cur.rR += rR; cur.cNet += cNet; cur.log += log; cur.comm += comm;
+      map.set(key, cur);
+    });
+
+    const rows = Array.from(map.values()).map(x => {
+      const netQty = Math.max(0, x.qS - x.qR), retPct = x.qS > 0 ? (x.qR / x.qS) * 100 : 0, netRev = x.rS - x.rR, avgCheck = netQty > 0 ? netRev / netQty : 0;
+      const costPct = netRev > 0 ? (x.cNet / netRev) * 100 : 0, costUnit = netQty > 0 ? x.cNet / netQty : 0;
+      const logPct = netRev > 0 ? (x.log / netRev) * 100 : 0, logUnit = netQty > 0 ? x.log / netQty : 0, commPct = netRev > 0 ? (x.comm / netRev) * 100 : 0;
+      const margin = netRev - x.cNet - x.log - x.comm, rentPct = netRev > 0 ? (margin / netRev) * 100 : 0;
+      return Object.assign(x, { netQty, retPct, netRev, avgCheck, costPct, costUnit, logPct, logUnit, commPct, margin, rentPct });
+    }).sort((a, b) => b.netRev - a.netRev);
+    return { rows, models: Array.from(modelsSet).sort() };
+  };
 })();
