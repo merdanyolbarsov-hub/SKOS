@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
- <aside class="sidebar" id="site-sidebar">
+  <aside class="sidebar">
     <div>
       <div class="brand">
         <div class="brand-logo">S</div>
@@ -39,10 +39,6 @@
 
   <div class="main-wrap">
     <header class="topbar">
-      <button type="button" class="btn mobile-menu"
-        aria-controls="site-sidebar" aria-expanded="false">
-  Меню
-</button>
       <div style="font-size:13.5px;font-weight:700" id="crumb">SKOS / Сводка и 5 ИП + 1 ООО</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-primary" id="m-full" onclick="setMode('FULL')">🏢 Вся компания</button>
@@ -421,42 +417,6 @@
   
    <script src="app.js"></script>
   <script src="unit.js"></script>
-  <script>
-  (() => {
-    const menu = document.querySelector('.mobile-menu');
-    const sidebar = document.getElementById('site-sidebar');
-    const mobile = window.matchMedia('(max-width: 760px)');
-
-    function setMenu(open) {
-      sidebar.classList.toggle('is-open', open);
-      menu.setAttribute('aria-expanded', String(open));
-      menu.textContent = open ? 'Закрыть' : 'Меню';
-    }
-
-    function closeMenu() {
-      setMenu(false);
-      menu.focus();
-    }
-
-    menu.addEventListener('click', () => {
-      setMenu(menu.getAttribute('aria-expanded') === 'false');
-    });
-
-    sidebar.addEventListener('click', event => {
-      if (mobile.matches && event.target.closest('.nav-btn')) {
-        closeMenu();
-      }
-    });
-
-    document.addEventListener('keydown', event => {
-      if (event.key === 'Escape' && menu.getAttribute('aria-expanded') === 'true') {
-        closeMenu();
-      }
-    });
-
-    mobile.addEventListener('change', () => setMenu(false));
-  })();
-</script>
 </body>
 </html>
 
