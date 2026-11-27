@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owner() {
+      return request.auth != null && request.auth.uid == 'UDC6Md8PHcYH8VTw9ES9SxUNUxu2';
+    }
+    function member() {
+      return owner() || (request.auth != null && request.auth.uid == 'FYaAUNAouOPYpM84WH60DzZQwbr2');
+    }
+    function validVersion(id) {
+      return id.matches('SKOS_V_[0-9]{17}_[a-f0-9]{8}');
+    }
+    match /skosCloud/latest {
+      allow get: if member();
+      allow create, update: if owner()
+        && request.resource.data.keys().hasOnly(['title', 'date'])
+        && request.resource.data.title is string && validVersion(request.resource.data.title)
+        && request.resource.data.date == request.time
+        && getAfter(/databases/$(database)/documents/skosVersions/$(request.resource.data.title)).data.date == request.time;
+    }
+    match /skosVersions/{id} {
+      allow get, list: if member();
+      allow create: if owner() && validVersion(id)
+        && request.resource.data.keys().hasOnly(['date', 'chunks'])
+        && request.resource.data.date == request.time
+        && request.resource.data.chunks is int
+        && request.resource.data.chunks >= 1 && request.resource.data.chunks <= 13;
+      match /chunks/{chunk} {
+        allow get, list: if member();
+        allow create: if owner() && validVersion(id)
+          && chunk.matches('0[0-9]|1[0-2]')
+          && request.resource.data.keys().hasOnly(['bytes'])
+          && request.resource.data.bytes is bytes
+          && request.resource.data.bytes.size() > 0
+          && request.resource.data.bytes.size() <= 655360
+          && getAfter(/databases/$(database)/documents/skosVersions/$(id)).data.date == request.time;
+      }
+    }
+  }
+}
