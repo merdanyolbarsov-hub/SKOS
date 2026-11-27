@@ -1200,7 +1200,7 @@
     ['dds-wal', 'd-wal', 'tr-from', 'tr-to'].forEach(id => { const el = document.getElementById(id); if (!el) return; const cur = el.value; el.innerHTML = allWals.map(w => `<option value="${w.id}">${window.esc(w.name)} [${w.cur}]</option>`).join(''); if (cur) el.value = cur; });
   };
 
-  window.applyGuestRestrictions = () => { window.__skosReadOnly = true; if (!document.getElementById('ro-css')) { const st = document.createElement('style'); st.id = 'ro-css'; st.textContent = '#tab-set,#nav-set,input[type="file"],.btn-danger,.btn-success,form,.form-grid:has(input:not([type="checkbox"])){display:none!important}td .btn{display:none!important}'; document.head.appendChild(st); } };
+  window.applyGuestRestrictions = () => { window.__skosReadOnly = true; if (!document.getElementById('ro-css')) { const st = document.createElement('style'); st.id = 'ro-css'; st.textContent = '#tab-set,#nav-set,input[type="file"],.btn-danger,.btn-success,form:not([data-skos-login]),.form-grid:has(input:not([type="checkbox"])){display:none!important}td .btn{display:none!important}'; document.head.appendChild(st); } };
 
   window.addEventListener('DOMContentLoaded', () => {
     window.ensureStore();

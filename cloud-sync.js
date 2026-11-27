@@ -4,7 +4,7 @@
   const defaults = structuredClone(window.db);
   const gate = document.createElement('dialog');
   gate.style.cssText = 'max-width:min(420px,92vw);margin:auto;padding:24px;border:1px solid #cbd5e1;border-radius:14px';
-  gate.innerHTML = '<h2>SKOS Finance</h2><p role="status" style="margin:12px 0">Проверяем доступ…</p><form><label>Логин (почта)<input class="input" type="email" name="email" autocomplete="username" required></label><label>Пароль<input class="input" type="password" name="password" autocomplete="current-password" required></label><button type="submit" class="btn btn-primary" style="margin-top:12px" disabled>Войти</button></form>';
+  gate.innerHTML = '<h2>SKOS Finance</h2><p role="status" style="margin:12px 0">Проверяем доступ…</p><form data-skos-login><label>Логин (почта)<input class="input" type="email" name="email" autocomplete="username" required></label><label>Пароль<input class="input" type="password" name="password" autocomplete="current-password" required></label><button type="submit" class="btn btn-primary" style="margin-top:12px" disabled>Войти</button></form>';
   gate.addEventListener('cancel', event => event.preventDefault());
   document.body.append(gate);
   gate.showModal();
@@ -49,15 +49,18 @@
     window.onPerChange();
     window.tab(window.db.tab || 'dash');
   }
+  let firestore;
   async function request(path, body) {
-    const token = await user.getIdToken();
-    const result = await fetch(config.apiUrl.replace(/\/+$/, '') + path, {
-      method:body ? 'POST' : 'GET', cache:'no-store',
-      headers:{Authorization:'Bearer ' + token, ...(body ? {'Content-Type':'application/json'} : {})},
-      body: body ? JSON.stringify(body) : undefined
-    });
-    if (!result.ok) throw Object.assign(new Error('HTTP ' + result.status),{status:result.status});
-    return result.json();
+    try {
+      if (path === '/session') return await firestore.session();
+      if (path === '/latest') return await firestore.latest();
+      if (path === '/history') return await firestore.history();
+      if (path === '/publish') return await firestore.publish(body);
+      return await firestore.version(decodeURIComponent(path.slice('/version/'.length)));
+    } catch (error) {
+      if (error.code === 'permission-denied') error.status = 403;
+      throw error;
+    }
   }
   async function refresh() {
     if (role !== 'viewer' || archivedVersion || updating) return;
@@ -80,7 +83,7 @@
     } catch (error) {
       if (active !== session || archivedVersion) return;
       tell('Не удалось получить облачную базу.');
-      if (error.status === 401 && !gate.open) gate.showModal();
+      if ((error.status === 401 || error.status === 403) && !gate.open) gate.showModal();
     } finally {
       updating = false;
       returnToLatest.disabled = false;
@@ -168,13 +171,17 @@
   };
 
   async function setup() {
-    if (!config?.firebase?.apiKey || !config.apiUrl.startsWith('https://')) {
-      tell('Сервер входа SKOS ещё не подключён.');
+    if (!config?.firebase?.apiKey || !config.ownerUid || !config.viewerUid) {
+      tell('Подключение Firebase ещё не настроено.');
       return;
     }
     const base = 'https://www.gstatic.com/firebasejs/11.10.0/';
-    const [appSdk, authSdk] = await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-auth.js')]);
-    const auth = authSdk.getAuth(appSdk.initializeApp(config.firebase));
+    const [appSdk, authSdk, databaseSdk] = await Promise.all([
+      import(base+'firebase-app.js'), import(base+'firebase-auth.js'), import(base+'firebase-firestore.js')
+    ]);
+    const app = appSdk.initializeApp(config.firebase);
+    const auth = authSdk.getAuth(app);
+    firestore = window.makeSkosFirestore(databaseSdk, databaseSdk.getFirestore(app), config, () => user?.uid);
     await authSdk.setPersistence(auth,authSdk.browserLocalPersistence);
     form.onsubmit = async event => {
       event.preventDefault();
