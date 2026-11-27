@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SKOS — проверка Google Облака</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+body { display:block; height:auto; overflow:auto; }
+main { max-width:640px; margin:12vh auto; padding:16px; }
+.card > * + * { margin-top:14px; }
+</style>
+<script async src="https://accounts.google.com/gsi/client"></script>
+<script async src="https://apis.google.com/js/api.js"></script>
+</head>
+<body>
+<main><section class="card">
+<h1>Проверка Google Облака</h1>
+<p>Проверяем вход и права на таблицу SKOS_Cloud_Base. Эта страница не записывает данные.</p>
+<button class="btn btn-primary" id="login" disabled>Войти через Google</button>
+<p id="status" role="status">Загружаем сервисы Google…</p>
+</section></main>
+<script>
+(() => {
+  const id = '16qxluljVN3hrDeAwnyzezHigrX__bAvTuXWK2BXHGvQ';
+  const projectNumber = '95617577981';
+  const clientId = '95617577981-2em09pv3srnure0lksmunm0t2r17g7l8.apps.googleusercontent.com';
+  const developerKey = 'AIzaSyDx7zrsCwtVW25-rAgs0931LCWpC0kuolU';
+  const status = document.getElementById('status');
+  const login = document.getElementById('login');
+
+  async function checkAccess(token) {
+    const headers = {Authorization: 'Bearer ' + token};
+    const metadata = await fetch('https://www.googleapis.com/drive/v3/files/' + id +
+      '?fields=id,ownedByMe,capabilities(canEdit)', {headers});
+    if (metadata.status === 404 || metadata.status === 403) return false;
+    if (!metadata.ok) throw new Error('Google Drive вернул HTTP ' + metadata.status + '.');
+    const file = await metadata.json();
+    const sheet = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + id +
+      '?fields=sheets(properties(sheetId,title))', {headers});
+    if (!sheet.ok) throw new Error('Google Sheets вернул HTTP ' + sheet.status + '.');
+    const book = await sheet.json();
+    if (!book.sheets?.some(entry => entry.properties?.title === 'CLOUD_DB')) {
+      throw new Error('Лист CLOUD_DB не найден.');
+    }
+    status.textContent = file.ownedByMe && file.capabilities?.canEdit
+      ? 'Проверка прошла: владелец таблицы. Google Drive и Google Sheets доступны.'
+      : 'Проверка прошла: режим чтения. Google Drive и Google Sheets доступны.';
+    return true;
+  }
+
+  function selectFile(token) {
+    const picker = new google.picker.PickerBuilder()
+      .setAppId(projectNumber).setDeveloperKey(developerKey).setOAuthToken(token)
+      .setOrigin(location.origin).addView(google.picker.ViewId.SPREADSHEETS)
+      .setCallback(async data => {
+        if (data.action === google.picker.Action.CANCEL) {
+          status.textContent = 'Выбор таблицы отменён.';
+          return;
+        }
+        if (data.action !== google.picker.Action.PICKED) return;
+        if (data.docs?.[0]?.id !== id) {
+          status.textContent = 'Выберите таблицу SKOS_Cloud_Base.';
+          return;
+        }
+        try {
+          if (!await checkAccess(token)) status.textContent = 'У аккаунта нет доступа к таблице.';
+        } catch (error) { status.textContent = error.message; }
+      }).build();
+    picker.setVisible(true);
+  }
+
+  window.addEventListener('load', () => {
+    if (!window.gapi || !window.google?.accounts?.oauth2) {
+      status.textContent = 'Не удалось загрузить сервисы Google.';
+      return;
+    }
+    gapi.load('picker', {
+      timeout: 10000,
+      ontimeout: () => { status.textContent = 'Google Picker не загрузился.'; },
+      callback: () => {
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: 'https://www.googleapis.com/auth/drive.file',
+          error_callback: () => { status.textContent = 'Вход через Google не завершён.'; },
+          callback: async response => {
+            if (!response.access_token) {
+              status.textContent = 'Google не разрешил вход: ' + (response.error || 'нет доступа');
+              return;
+            }
+            status.textContent = 'Проверяем доступ к таблице…';
+            try {
+              if (!await checkAccess(response.access_token)) selectFile(response.access_token);
+            } catch (error) { status.textContent = error.message; }
+          }
+        });
+        login.onclick = () => client.requestAccessToken({prompt: ''});
+        login.disabled = false;
+        status.textContent = 'Войдите под тестовым аккаунтом.';
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>
