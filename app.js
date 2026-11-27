@@ -6,11 +6,7 @@
 
   window._CFG = {
     KEY: 'skos_v3_prod',
-    FMAP: 'skos_v3_folder_names',
-    URL: 'https://supabase.co',
-    KEY_API: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrdWR2bnp5cXJ4eGFsaWtjbWFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3NTEwNzYsImV4cCI6MjExMDMyNzA3Nn0.cgCy3KoqjKuJaI4gzG8_nIlv20JttvAg7UgwTVQ-qwE',
-    OWNER: 'Skos#9482!Tm',
-    VIEW: 'SkosView2026'
+    FMAP: 'skos_v3_folder_names'
   };
 
   window.esc = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -37,7 +33,7 @@
       { id: 'c5', name: 'Наличные USD Туркменистан', cur: 'USD' }, { id: 'c6', name: 'Касым Туркменистан USD', cur: 'USD' }
     ],
     skus: [], reports: [], itemSales: [], dds: [], ddsHashes: {}, ddsCats: [], taxes: [], expenses: [],
-    cloud: { url: window._CFG.URL, key: window._CFG.KEY_API, pin: window._CFG.OWNER }, erp: {}
+    erp: {}
   };
   /* === Часть 2/10: Турбо-ускоритель файлов, Индекс-поиск товаров и Справочники === */
   const DEFAULT_CATS = [
@@ -88,9 +84,22 @@
     if (autoHideMs) setTimeout(() => { if (el) el.style.display = 'none'; }, autoHideMs);
   };
 
+  const ymSkuKey = value => window.normStr(value).toLowerCase()
+    .replace(/ё/g, 'е').replace(/[хм]/g, letter => letter === 'х' ? 'x' : 'm')
+    .replace(/[\s_–—-]+/g, '');
+
+  function addCatalogCandidate(index, key, item) {
+    if (!key) return;
+    if (!index.has(key)) index.set(key, { first: item, count: 0, costs: new Set() });
+    const group = index.get(key);
+    group.count++;
+    group.costs.add(window.num(item.usd));
+  }
+
   // Мгновенный индекс 11 000+ ШК в памяти (Map)
   window.buildSkuIndex = function () {
     const byExact = new Map(), byClean = new Map(), byArt = new Map();
+    const byYmVariant = new Map(), byYmModel = new Map();
     const fNames = window.getFolderNames();
     (window.db.skus || []).forEach(s => {
       if (!s) return;
@@ -100,8 +109,16 @@
       if (bc && (!byExact.has(bc) || window.num(s.usd) > 0)) byExact.set(bc, s);
       if (kBc && (!byClean.has(kBc) || window.num(s.usd) > 0)) byClean.set(kBc, s);
       if (kArt && (!byArt.has(kArt) || window.num(s.usd) > 0)) byArt.set(kArt, s);
+      addCatalogCandidate(byYmModel, ymSkuKey(art), s);
+      if (art && s.col && !['—', 'Базовый'].includes(s.col) && s.siz && s.siz !== '—') {
+        addCatalogCandidate(byYmVariant, ymSkuKey(art + s.col + s.siz), s);
+      }
+      const explicitKeys = new Set([s.sku, s.offerId].map(ymSkuKey));
+      for (const key of explicitKeys) {
+        if (key !== ymSkuKey(art + (s.col || '') + (s.siz || ''))) addCatalogCandidate(byYmVariant, key, s);
+      }
     });
-    return { byExact, byClean, byArt, fNames };
+    return { byExact, byClean, byArt, fNames, byYmVariant, byYmModel };
   };
   /* === Часть 3/10: Сохранение, Облако Supabase, Кнопка «+» и Быстрый рендер === */
   window.cleanSkus = function () {
@@ -121,7 +138,7 @@
 
   let saveT = null;
   window.flushLocalSave = () => {
-    if (!window.db) return;
+    if (!window.db || window.__skosReadOnly) return;
     window.cleanSkus();
     try { localStorage.setItem(window._CFG.KEY, JSON.stringify(window.db)); } catch (e) {}
   };
@@ -163,90 +180,8 @@
     ? '<label>' + lbl + '</label>'
     : `<label style="display:flex;justify-content:space-between;align-items:center"><span>${lbl}</span><button type="button" class="btn" style="padding:0 6px;font-size:11px;line-height:1.3;background:#eff6ff;color:#1d4ed8;border-color:#93c5fd" onclick="quickAdd('${type}','${title}','${selId}')">+</button></label>`;
 
-  window.pushCloud = async function (manual) {
-    if (window.__skosReadOnly) return;
-    window.flushLocalSave();
-    const { URL: U, KEY_API: K, OWNER: P } = window._CFG;
-    const url = ((window.db.cloud?.url) || U).trim().replace(/\/$/, ''), key = ((window.db.cloud?.key) || K).trim(), pin = ((window.db.cloud?.pin) || P).trim();
-    window.showToastProgress('⏳ Сохранение в облако Supabase...');
-    try {
-      const skus = window.db.skus || [], sales = window.db.itemSales || [], sz = 4000;
-      const sc = Math.max(1, Math.ceil(skus.length / sz)), salc = Math.ceil(sales.length / sz);
-      const mainPayload = Object.assign({}, window.db, { skus: [], itemSales: [], ddsHashes: {}, skusChunks: sc, salesChunks: salc });
-      const hdrs = { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json', Prefer: 'return=minimal,resolution=merge-duplicates', 'x-skos-pin': pin };
-      const sendRow = async (id, payload) => { const r = await fetch(url + '/rest/v1/skos_cloud?on_conflict=id', { method: 'POST', headers: hdrs, body: JSON.stringify([{ id, payload, updated_at: new Date().toISOString() }]) }); if (!r.ok) throw new Error(id + ' (' + r.status + ')'); };
-      await sendRow('main', mainPayload);
-      for (let c = 0; c < sc; c++) { window.showToastProgress(`⏳ Выгрузка товаров: ${c + 1}/${sc}...`); await sendRow('skus_' + c, skus.slice(c * sz, (c + 1) * sz).map(s => ({ n: s.name, a: s.art, c: s.col, z: s.siz, b: s.bc, u: s.usd }))); }
-      for (let s = 0; s < salc; s++) { window.showToastProgress(`⏳ Выгрузка продаж: ${s + 1}/${salc}...`); await sendRow('sales_' + s, sales.slice(s * sz, (s + 1) * sz)); }
-      window.showToastProgress('✅ Облако синхронизировано!', 2500);
-      if (manual) alert('✅ Сохранено в облако!\n• ШК: ' + skus.length + ' шт.\n• Отчётов: ' + (window.db.reports || []).length);
-    } catch (e) { window.showToastProgress('❌ Ошибка облака', 3000); if (manual) alert('❌ Ошибка облака: ' + e.message); }
-  };
-  /* === Часть 4/10: Загрузка из Облака при F5, Бэкап и Навигация === */
-  window.pullCloud = async function (silent) {
-    const { URL: U, KEY_API: K, OWNER: P } = window._CFG;
-    const url = ((window.db.cloud?.url) || U).trim().replace(/\/$/, ''), key = ((window.db.cloud?.key) || K).trim(), pin = ((window.db.cloud?.pin) || P).trim();
-    const hdrs = { apikey: key, Authorization: 'Bearer ' + key, 'x-skos-pin': pin };
-    try {
-      const rMain = await fetch(url + '/rest/v1/skos_cloud?id=eq.main&select=payload', { headers: hdrs });
-      if (!rMain.ok) return;
-      const rows = await rMain.json();
-      if (!Array.isArray(rows) || !rows.length || !rows[0].payload) return;
-      const data = rows[0].payload;
-
-      const sc = Number(data.skusChunks || 0);
-      if (sc > 0 && (!Array.isArray(data.skus) || !data.skus.length)) {
-        const allSkus = [];
-        for (let c = 0; c < sc; c++) {
-          const rSku = await fetch(url + '/rest/v1/skos_cloud?id=eq.skus_' + c + '&select=payload', { headers: hdrs });
-          if (rSku.ok) {
-            const sRows = await rSku.json();
-            if (Array.isArray(sRows) && sRows[0] && Array.isArray(sRows[0].payload)) {
-              sRows[0].payload.forEach((it, i) => allSkus.push({
-                id: 's_' + c + '_' + i, name: it.n || it.name || it.a || 'Товар',
-                art: it.a || it.art || '', col: it.c || it.col || '—', siz: it.z || it.s || it.siz || '—',
-                bc: it.b || it.bc || it.barcode || '', usd: window.num(it.u !== undefined ? it.u : (it.usd || 0))
-              }));
-            }
-          }
-        }
-        if (allSkus.length) data.skus = allSkus;
-      }
-
-      const salc = Number(data.salesChunks || 0);
-      if (salc > 0 && (!Array.isArray(data.itemSales) || !data.itemSales.length)) {
-        const allSales = [];
-        for (let s = 0; s < salc; s++) {
-          const rSal = await fetch(url + '/rest/v1/skos_cloud?id=eq.sales_' + s + '&select=payload', { headers: hdrs });
-          if (rSal.ok) {
-            const slRows = await rSal.json();
-            if (Array.isArray(slRows) && slRows[0] && Array.isArray(slRows[0].payload)) allSales.push(...slRows[0].payload);
-          }
-        }
-        if (allSales.length) data.itemSales = allSales;
-      }
-
-      Object.assign(window.db, data, { tab: window.db.tab });
-      window.db.cloud = { url, key, pin };
-      window.ensureStore();
-      window.flushLocalSave();
-      window.onPerChange();
-      if (!silent) alert('✅ База успешно загружена из облака!');
-    } catch (e) { if (!silent) alert('❌ Ошибка чтения из облака: ' + e.message); }
-  };
-
-  window.syncCloud = manual => manual ? window.pushCloud(true) : window.pullCloud(true);
-  window.saveCloudCfg = () => {
-    const { URL: U, KEY_API: K, OWNER: P } = window._CFG;
-    window.db.cloud = {
-      url: (document.getElementById('sb-url')?.value || U).trim(),
-      key: (document.getElementById('sb-key')?.value || K).trim(),
-      pin: (document.getElementById('sb-pin')?.value || P).trim()
-    };
-    window.save(true); window.pushCloud(true);
-  };
-
   window.exportJson = () => {
+    if (window.__skosReadOnly) return;
     window.flushLocalSave();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify(window.db)], { type: 'application/json;charset=utf-8' }));
@@ -261,7 +196,6 @@
     r.onload = e => {
       try {
         Object.assign(window.db, JSON.parse(e.target.result), { tab: window.db.tab });
-        window.db.cloud = { url: window._CFG.URL, key: window._CFG.KEY_API, pin: window._CFG.OWNER };
         window.ensureStore(); window.flushLocalSave(); window.onPerChange();
         window.showToastProgress('✅ Бэкап загружен!', 2500);
         alert('✅ Бэкап загружен! Нажмите «☁️ Облако», чтобы сохранить его на сервере.');
@@ -517,24 +451,42 @@
     return { bc: bc || art || 'Неизвестный ШК', art: art || 'Без папки', modelTitle: name || art || bc || 'Товар', usd: 0, col: pCol, siz: pSiz };
   };
 
-  window.clearAbcData = function () {
-    if (window.__skosReadOnly || !window.db || !Array.isArray(window.db.itemSales)) return;
-    const yr = document.getElementById('abc-f-yr')?.value || 'ALL', mo = document.getElementById('abc-f-mo')?.value || 'ALL', mp = document.getElementById('abc-f-mp')?.value || 'ALL', org = document.getElementById('abc-f-org')?.value || 'ALL';
-    const isF = (yr !== 'ALL' || mo !== 'ALL' || mp !== 'ALL' || org !== 'ALL');
-    if (!confirm(isF ? 'Очистить записи ABC ТОЛЬКО по выбранному фильтру?' : 'Очистить ВСЮ историю продаж для ABC-анализа?')) return;
-    if (!isF) window.db.itemSales = [];
-    else window.db.itemSales = window.db.itemSales.filter(it => !((yr === 'ALL' || String(it.yr) === yr) && (mo === 'ALL' || String(it.mo) === mo) && (mp === 'ALL' || String(it.mp) === mp) && (org === 'ALL' || String(it.org) === org)));
-    window.save(true); window.renderAbcTab();
+  window.resolveMarketplaceMeta = function (idx, bc, sellerSku, name, reportedSize = '') {
+    const sku = window.normStr(sellerSku);
+    const barcode = window.normStr(bc);
+    const cleanBarcode = window.normKey(barcode).replace(/^0+/, '').replace(/^ozn/, '');
+    const exactBarcode = idx.byExact.get(barcode) || idx.byClean.get(cleanBarcode) || idx.byExact.get(sku);
+
+    const parts = sku.match(/^(SKOS-[A-ZА-Я0-9]+)(?:\s+|_)(.+)$/i);
+    const model = parts ? parts[1] : sku;
+    const suffix = parts?.[2] || '';
+    const sizeMatch = suffix.match(/(XXXL|XXL|XXS|XL|XS|[2-5]XL|[SMLХМ]|\d{2}(?:[-–]\d{2})?)$/i);
+    const size = reportedSize && reportedSize !== '0' && reportedSize !== '—' ? reportedSize : sizeMatch?.[1] || '';
+    const rawColor = sizeMatch ? suffix.slice(0, sizeMatch.index).trim() : suffix;
+    const color = rawColor.replace(/^ч[её]рные брюки$/i, 'чёрный');
+    const candidates = idx.byYmVariant.get(ymSkuKey(sku)) ||
+      (parts && color && size ? idx.byYmVariant.get(ymSkuKey(model + color + size)) : null);
+    const variant = exactBarcode || (candidates?.count === 1 ? candidates.first : null);
+    const modelCandidates = idx.byYmModel.get(ymSkuKey(variant?.art || model));
+    const knownModel = modelCandidates?.first;
+    const commonCost = group => group?.costs.size === 1 ? group.costs.values().next().value : 0;
+    const art = variant?.art || knownModel?.art || model || 'Без распределения по товарам';
+    const variantColor = variant?.col && !['—', 'Базовый'].includes(variant.col) ? variant.col : '';
+    return {
+      bc: variant?.bc || sku || 'Без ШК',
+      art,
+      modelTitle: idx.fNames[art] || variant?.name || knownModel?.name || name || art,
+      usd: variant ? window.num(variant.usd) || commonCost(modelCandidates)
+        : commonCost(candidates || modelCandidates),
+      col: variantColor || (color ? color[0].toUpperCase() + color.slice(1) : '—'),
+      siz: variant?.siz && variant.siz !== '—' ? variant.siz : (size || '—').replace('–', '-')
+    };
   };
 
   window.renderAbcTab = window.renderAbc = function () {
     const sec = document.getElementById('tab-abc');
     if (!sec || !window.db) return;
     const card = sec.querySelector('.card'), header = card?.querySelector('.card-header');
-    if (header && !document.getElementById('abc-clear-btn') && !window.__skosReadOnly) {
-      const b = document.createElement('button'); b.id = 'abc-clear-btn'; b.type = 'button'; b.className = 'btn btn-danger'; b.textContent = '🧹 Очистить ABC'; b.onclick = window.clearAbcData;
-      header.children[1]?.appendChild(b);
-    }
     if (header && !document.getElementById('skos-abc-filters')) {
       const fp = document.createElement('div'); fp.id = 'skos-abc-filters';
       fp.style.cssText = 'background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-bottom:12px;';
@@ -561,7 +513,9 @@
     let tS = 0, tR = 0, tRev = 0, tCog = 0, tFee = 0, tPr = 0;
 
     (window.db.itemSales || []).forEach(it => {
-      const meta = window.resolveMetaFast(skuIdx, it.bc, it.art, it.name);
+      const marketItem = it.source === 'marketplace-csv' || (it.mp === 'YM' && it.source !== 'sheets-2026');
+      const meta = marketItem ? window.resolveMarketplaceMeta(skuIdx, it.bc, it.art, it.name, it.size)
+        : window.resolveMetaFast(skuIdx, it.bc, it.art, it.name);
       const color = meta.col && meta.col !== '—' && meta.col !== 'Базовый' ? meta.col : it.color || it.col || meta.col;
       const size = meta.siz && meta.siz !== '—' ? meta.siz : it.size || it.siz || meta.siz;
       meta.col = String(color || '—').trim() || '—';
@@ -580,7 +534,9 @@
 
       const rate = window.getRate(it.yr + '-' + it.mo);
       const sq = window.num(it.sQty), rq = window.num(it.rQty), rev = window.num(it.rev), fee = window.num(it.fee);
-      const cog = it.source === 'sheets-2026' ? window.num(it.cogs) : Math.max(0, meta.usd * rate * (sq - rq)), pr = rev - fee - cog;
+      const cost = meta.usd * rate * (sq - rq);
+      const cog = it.source === 'sheets-2026' ? window.num(it.cogs) : it.mp === 'YM' && marketItem ? cost : Math.max(0, cost);
+      const pr = rev - fee - cog;
       tS += sq; tR += rq; tRev += rev; tCog += cog; tFee += fee; tPr += pr;
 
       let gk = meta.art, gTit = `${meta.art} — ${meta.modelTitle}`, gSub = `Папка: ${meta.art}`;
@@ -762,13 +718,33 @@
     return { fileName: file.name, mp: det.startsWith('YM') ? 'YM' : det, rev: Math.max(0, grossRev - ret), ret, com: Math.max(0, com), log: Math.max(0, log), ads: Math.max(0, ads), cogs: Math.max(0, cogs), sQty, rQty, items };
   }
   /* === Часть 8Б: Черновик отчётов, реестр (✏️/✕) и Каталог по 32 папкам === */
+  function reportsForPeriod(org, mp, yr, mo) {
+    return (window.db.reports || []).filter(report => report.org === org && report.mp === mp &&
+      String(report.yr) === String(yr) && String(report.mo).padStart(2, '0') === String(mo).padStart(2, '0'));
+  }
+
+  function newWbBarcodes(group) {
+    const index = window.buildSkuIndex();
+    const added = new Map(), ambiguous = new Set();
+    for (const item of group?.items || []) {
+      const bc = window.normStr(item.bc);
+      if (!/^\d{8,14}$/.test(bc) || index.byExact.has(bc)) continue;
+      const meta = window.resolveMarketplaceMeta(index, '', item.art, item.name, item.size);
+      if (!index.byArt.has(window.normKey(meta.art))) continue;
+      if (added.has(bc) && added.get(bc).art !== meta.art) ambiguous.add(bc);
+      added.set(bc, {bc, art:meta.art, name:meta.modelTitle, col:meta.col, siz:meta.siz, usd:meta.usd, isNew:true});
+    }
+    for (const bc of ambiguous) added.delete(bc);
+    return [...added.values()];
+  }
+
   window.renderMpDraft = function () {
     const box = document.getElementById('map-box'); if (!box) return;
     if (!mpBatch || !mpBatch.files.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
     const grp = {};
     const orderItems = new Map();
     for (const file of mpBatch.files.filter(file => file.unitType === 'items')) {
-      for (const item of file.items) {
+      for (const item of file.orderVariants || file.items) {
         const items = orderItems.get(item.orderKey) || new Map();
         items.set(item.art, item);
         orderItems.set(item.orderKey, items);
@@ -785,9 +761,17 @@
     });
     const marketTypes = new Set(mpBatch.files.filter(f => f.mp === 'YM').map(f => f.unitType).filter(Boolean));
     const missingMarketFile = marketTypes.size === 1;
+    const newBarcodes = newWbBarcodes(grp.WB);
+    const overlaps = Object.keys(grp).filter(mp => reportsForPeriod(mpBatch.org, mp, mpBatch.yr, mpBatch.mo).length);
+    const unknownCosts = Object.values(grp).flatMap(group => [...new Set(group.items
+      .filter(item => item.source === 'marketplace-csv' && (item.sQty || item.rQty) && !item.hasCost)
+      .map(item => item.art || item.bc))].map(sku => group.mp + ': ' + sku));
     box.classList.remove('hidden');
     box.innerHTML = `<div style="font-weight:700;margin-bottom:8px">📝 Черновик (${mpBatch.files.length} ф.) • ${window.esc(mpBatch.org)} • ${mpBatch.mo}.${mpBatch.yr}</div>` +
       Object.values(grp).map(g => `<div style="padding:8px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:6px;font-size:12px"><b>${g.mp}</b> (${g.cnt} ф.): Выручка <b>${window.fmtR(g.rev)}</b> | Возвраты <b class="text-red">${window.fmtR(g.ret)}</b> | Услуги МП <b>${window.fmtR(g.com + g.log + g.ads)}</b> | Себест. <b>${window.fmtR(g.cogs)}</b></div>`).join('') +
+      (newBarcodes.length ? `<p role="status">Новые штрихкоды в существующих папках: ${newBarcodes.length}.</p>` : '') +
+      (overlaps.length ? `<p role="status">В этом месяце уже есть записи для ${overlaps.join(', ')}. Проверьте периоды и ручные итоги перед сохранением.</p>` : '') +
+      (unknownCosts.length ? `<p role="status">Себестоимость не определена для товаров (${unknownCosts.length}): ${window.esc(unknownCosts.slice(0, 8).join(', '))}. Проверьте справочник перед сохранением.</p>` : '') +
       (missingMarketFile ? `<p role="status">Для Яндекс Маркета добавьте второй CSV за тот же период: ${marketTypes.has("items") ? "«Услуги и маржа по заказам»" : "«Транзакции по заказам и товарам»"}.</p>` : '') +
       `<div style="display:flex;gap:8px;margin-top:8px"><button type="button" class="btn btn-primary" id="btn-ok-mp"${missingMarketFile ? " disabled" : ""}>✅ Сохранить в учёт</button><button type="button" class="btn btn-danger" onclick="mpBatch=null;renderMpDraft()">🗑️ Очистить</button></div>`;
     document.getElementById('btn-ok-mp').onclick = () => {
@@ -797,6 +781,9 @@
       if (mpBatch.files.some(f => saved.has(f.source.hash))) {
         return alert('Один из файлов уже сохранён. Очистите черновик и добавьте только новые файлы.');
       }
+      if (overlaps.length && !confirm('За этот месяц уже есть данные по ' + overlaps.join(', ') +
+          '. Подтвердите, что новые файлы не дублируют сохранённые операции и ручные итоги.')) return;
+      window.db.skus.push(...newWbBarcodes(grp.WB));
       Object.values(grp).forEach(g => {
         const bo = (g.sQty + g.rQty) > 0 ? Math.round((g.sQty / (g.sQty + g.rQty)) * 100) : 89;
         const reportId = 'r_' + Date.now() + '_' + g.mp;
@@ -808,8 +795,16 @@
     };
   };
 
-  window.editReportRow = id => { const r = (window.db.reports || []).find(x => x.id === id); if (!r) return; const rev = prompt('Выручка (₽):', r.rev); if (rev === null) return; const ret = prompt('Возвраты (₽):', r.ret); if (ret === null) return; const ads = prompt('Реклама (₽):', r.ads); if (ads === null) return; const log = prompt('Логистика (₽):', r.log); if (log === null) return; const com = prompt('Комиссия (₽):', r.com); if (com === null) return; const cog = prompt('Себестоимость (₽):', r.cogs); if (cog === null) return; r.rev = window.num(rev); r.ret = window.num(ret); r.ads = window.num(ads); r.log = window.num(log); r.com = window.num(com); r.cogs = window.num(cog); window.save(true); window.renderRepTab(); };
-  window.saveMan = e => { e.preventDefault(); if (window.__skosReadOnly) return; window.db.reports.unshift({ id: 'r_' + Date.now(), org: document.getElementById('mn-org').value, mp: document.getElementById('mn-mp').value, yr: document.getElementById('mn-yr').value, mo: document.getElementById('mn-mo').value, rev: window.num(document.getElementById('mn-rev').value), ret: window.num(document.getElementById('mn-ret').value), ads: window.num(document.getElementById('mn-ads').value), log: window.num(document.getElementById('mn-log').value), com: window.num(document.getElementById('mn-com').value), cogs: window.num(document.getElementById('mn-cog').value), bo: window.num(document.getElementById('mn-bo').value) || 88 }); window.save(true); window.closeModals(); window.render(); };
+  window.editReportRow = id => { if (window.__skosReadOnly) return; const r = (window.db.reports || []).find(x => x.id === id); if (!r) return; if (window.db.locked?.[r.per || r.yr + '-' + r.mo]) return alert('Месяц закрыт!'); const rev = prompt('Выручка (₽):', r.rev); if (rev === null) return; const ret = prompt('Возвраты (₽):', r.ret); if (ret === null) return; const ads = prompt('Реклама (₽):', r.ads); if (ads === null) return; const log = prompt('Логистика (₽):', r.log); if (log === null) return; const com = prompt('Комиссия (₽):', r.com); if (com === null) return; const cog = prompt('Себестоимость (₽):', r.cogs); if (cog === null) return; r.rev = window.num(rev); r.ret = window.num(ret); r.ads = window.num(ads); r.log = window.num(log); r.com = window.num(com); r.cogs = window.num(cog); window.save(true); window.renderRepTab(); };
+  window.saveMan = e => {
+    e.preventDefault();
+    if (window.__skosReadOnly) return;
+    const get = id => document.getElementById('mn-' + id).value;
+    const [org, mp, yr, mo] = ['org', 'mp', 'yr', 'mo'].map(get);
+    if (window.db.locked?.[yr + '-' + mo]) return alert('Месяц закрыт!');
+    if (reportsForPeriod(org, mp, yr, mo).length &&
+        !confirm('За этот аккаунт, площадку и месяц уже есть отчёт. Добавить отдельный ручной итог?')) return;
+ window.db.reports.unshift({ id: 'r_' + Date.now(), org: document.getElementById('mn-org').value, mp: document.getElementById('mn-mp').value, yr: document.getElementById('mn-yr').value, mo: document.getElementById('mn-mo').value, rev: window.num(document.getElementById('mn-rev').value), ret: window.num(document.getElementById('mn-ret').value), ads: window.num(document.getElementById('mn-ads').value), log: window.num(document.getElementById('mn-log').value), com: window.num(document.getElementById('mn-com').value), cogs: window.num(document.getElementById('mn-cog').value), bo: window.num(document.getElementById('mn-bo').value) || 88 }); window.save(true); window.closeModals(); window.render(); };
   function mountReportUpload() {
     const draft = document.getElementById('map-box');
     if (!draft || document.getElementById('skos-report-upload')) return;
@@ -1207,71 +1202,38 @@
 
   window.applyGuestRestrictions = () => { window.__skosReadOnly = true; if (!document.getElementById('ro-css')) { const st = document.createElement('style'); st.id = 'ro-css'; st.textContent = '#tab-set,#nav-set,input[type="file"],.btn-danger,.btn-success,form,.form-grid:has(input:not([type="checkbox"])){display:none!important}td .btn{display:none!important}'; document.head.appendChild(st); } };
 
-  function showLoginGate() {
-    const { OWNER, VIEW } = window._CFG, role = sessionStorage.getItem('skos_auth_role');
-    if (role === 'owner') return; if (role === 'viewer') { window.applyGuestRestrictions(); return; }
-    const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.92);z-index:99999;display:flex;align-items:center;justify-content:center';
-    ov.innerHTML = '<div style="background:#fff;padding:24px;border-radius:14px;width:320px"><h3 style="margin-bottom:10px">🔐 SKOS Finance 3.0</h3><input id="lg-p" type="password" class="input" placeholder="Пароль доступа" style="margin-bottom:12px"><button id="lg-b" class="btn btn-primary" style="width:100%">Войти</button><div id="lg-e" style="color:#dc2626;font-size:12px;margin-top:6px;display:none">⛔ Неверный пароль</div></div>';
-    document.body.appendChild(ov);
-    const go = () => { const p = (document.getElementById('lg-p').value || '').trim(); if (p === OWNER) { sessionStorage.setItem('skos_auth_role', 'owner'); ov.remove(); } else if (p === VIEW) { sessionStorage.setItem('skos_auth_role', 'viewer'); ov.remove(); window.applyGuestRestrictions(); } else document.getElementById('lg-e').style.display = 'block'; };
-    document.getElementById('lg-b').onclick = go; document.getElementById('lg-p').onkeydown = e => { if (e.key === 'Enter') go(); };
-  }
-
   window.addEventListener('DOMContentLoaded', () => {
-    const s = localStorage.getItem(window._CFG.KEY); if (s) { try { Object.assign(window.db, JSON.parse(s)); } catch (e) {} }
     window.ensureStore();
     ['f-yr', 'up-yr', 'tx-yr', 'ex-yr', 'mn-yr'].forEach(id => { const el = document.getElementById(id); if (!el) return; let h = id === 'f-yr' ? '<option value="ALL">Все года (2020–2050)</option>' : ''; for (let y = 2020; y <= 2050; y++) h += `<option value="${y}"${y === 2026 ? ' selected' : ''}>${y}</option>`; el.innerHTML = h; });
-    const { URL: U, KEY_API: K, OWNER: P } = window._CFG;
-    if (document.getElementById('sb-url')) document.getElementById('sb-url').value = window.db.cloud?.url || U;
-    if (document.getElementById('sb-key')) document.getElementById('sb-key').value = window.db.cloud?.key || K;
-    if (document.getElementById('sb-pin')) document.getElementById('sb-pin').value = window.db.cloud?.pin || P;
     window.fillAllSelects();
     restoreSummaryFilters();
-    showLoginGate();
     window.tab('dash');
     window.onPerChange();
-    window.pullCloud(true);
   });
     /* === Финал (Часть 1/2): Google Облако, Бэкап и Шаблон ШК === */
-  const GOOGLE_CLOUD_URL = 'https://google.com';
-
   function getPickedFile(ev) {
     const fl = ev && ev.target && ev.target.files;
     return (fl && fl.length) ? Array.from(fl).shift() : null;
   }
 
-  window.pushCloud = async function (manual) {
-    if (window.__skosReadOnly) return;
-    window.flushLocalSave();
-    window.db.cloud = { url: GOOGLE_CLOUD_URL, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
-    window.showToastProgress('⏳ Сохранение в Google Облако...');
-    try {
-      await fetch(GOOGLE_CLOUD_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(window.db) });
-      window.showToastProgress('✅ Сохранено в Google Облако!', 2500);
-      if (manual) alert('✅ Сохранено в Google Облако!\n• ШК: ' + (window.db.skus || []).length + '\n• Отчётов: ' + (window.db.reports || []).length + '\n• ДДС: ' + (window.db.dds || []).length);
-    } catch (e) { if (manual) alert('❌ Ошибка Google Облака: ' + e.message); }
-  };
-
-  window.pullCloud = async function (silent) {
-    try {
-      const res = await fetch(GOOGLE_CLOUD_URL + '?t=' + Date.now());
-      const data = await res.json();
-      if (data && typeof data === 'object' && (Array.isArray(data.orgs) || Array.isArray(data.skus))) {
-        Object.assign(window.db, data, { tab: window.db.tab });
-        window.db.cloud = { url: GOOGLE_CLOUD_URL, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
-        window.ensureStore(); window.flushLocalSave(); window.onPerChange();
-        if (!silent) alert('✅ База загружена из Google Облака!');
-      }
-    } catch (e) { if (!silent) alert('❌ Ошибка чтения Google Облака: ' + e.message); }
-  };
-
   window.importJson = function (ev) {
+    if (window.__skosReadOnly) return;
     const f = getPickedFile(ev); if (!f) return; ev.target.value = '';
     const r = new FileReader();
     r.onload = function (e) {
       try {
-        Object.assign(window.db, JSON.parse(e.target.result), { tab: window.db.tab });
-        window.db.cloud = { url: GOOGLE_CLOUD_URL, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
+        const payload = JSON.parse(e.target.result);
+        const versioned = payload?.schema === 1 && payload.data;
+        const backup = versioned ? payload.data : payload;
+        if (!backup || !['orgs', 'skus', 'reports', 'itemSales', 'dds'].every(key => Array.isArray(backup[key]))) {
+          throw new Error('Выберите резервную копию SKOS.');
+        }
+        if (versioned && !confirm('Заменить локальные данные выбранной версией? Облако обновится только после публикации.')) return;
+        const {cloud, tab, ...data} = backup;
+        const next = {...window.db, ...data};
+        localStorage.setItem(window._CFG.KEY, JSON.stringify(next));
+        if (versioned) localStorage.setItem(window._CFG.FMAP, JSON.stringify(payload.folderNames || {}));
+        Object.assign(window.db, next);
         window.ensureStore(); window.flushLocalSave(); window.onPerChange();
         alert('✅ Бэкап загружен! Товаров (ШК): ' + (window.db.skus || []).length);
       } catch (err) { alert('❌ Ошибка файла: ' + err.message); }
@@ -1381,7 +1343,7 @@
   window.saveInitBalances = function () {
     if (!window.db.initBalances) window.db.initBalances = {};
     document.querySelectorAll('.skos-init-inp').forEach(inp => { window.db.initBalances[inp.dataset.wal] = window.num(inp.value); });
-    window.save(true); window.renderDdsTab(); window.pushCloud(false);
+    window.save(true); window.renderDdsTab();
     alert('✅ Начальные остатки на 01.01 сохранены и отправлены в Google Облако!');
   };
 
@@ -1507,41 +1469,6 @@
       const clr = box.querySelector('.btn-danger');
       if (clr) { clr.removeAttribute('onclick'); clr.onclick = window.resetMpDraft; }
     }
-  };
-
-  // 2. Быстрое Google Облако (сжатый пакет товаров)
-  window.pushCloud = async function (manual) {
-    if (window.__skosReadOnly) return;
-    window.flushLocalSave();
-    const gUrl = 'https://google.com';
-    window.db.cloud = { url: gUrl, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
-    window.showToastProgress('⏳ Сохранение в Google Облако...', 1800);
-    try {
-      const slimDb = Object.assign({}, window.db, {
-        ddsHashes: {},
-        skus: (window.db.skus || []).map(s => ({ n: s.name, a: s.art, b: s.bc, u: s.usd }))
-      });
-      await fetch(gUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(slimDb) });
-      window.showToastProgress('✅ Сохранено в Google Облако!', 1500);
-      if (manual) alert('✅ Сохранено в Google Облако!\n• ШК: ' + (window.db.skus || []).length + '\n• Отчётов: ' + (window.db.reports || []).length + '\n• ДДС: ' + (window.db.dds || []).length);
-    } catch (e) { if (manual) alert('❌ Ошибка Google Облака: ' + e.message); }
-  };
-
-  window.pullCloud = async function (silent) {
-    try {
-      const gUrl = 'https://google.com';
-      const res = await fetch(gUrl + '?t=' + Date.now());
-      const data = await res.json();
-      if (data && typeof data === 'object' && (Array.isArray(data.orgs) || Array.isArray(data.skus))) {
-        if (Array.isArray(data.skus)) {
-          data.skus = data.skus.map((s, i) => s.bc ? s : ({ id: 's_' + i, name: s.n || s.a || 'Товар', art: s.a || '', bc: s.b || '', col: '—', siz: '—', usd: window.num(s.u) }));
-        }
-        Object.assign(window.db, data, { tab: window.db.tab });
-        window.db.cloud = { url: gUrl, key: 'google-apps-script', pin: 'Skos#9482!Tm' };
-        window.ensureStore(); window.flushLocalSave(); window.onPerChange();
-        if (!silent) alert('✅ База загружена из Google Облака!');
-      }
-    } catch (e) { if (!silent) alert('❌ Ошибка чтения Google Облака: ' + e.message); }
   };
 
   // 3. Группировка журнала ДДС по сворачиваемым папкам (Год — Месяц) + фильтр
@@ -1684,7 +1611,7 @@
   };
   /* === Блок 3/3: Оба отчёта Яндекс Маркета + Тихое Облако без всплывающих окон === */
 
-  async function parseUnitReport(file, rate, skuIdx) {
+  async function parseUnitReport(file, rate, skuIdx, previouslySaved = new Set()) {
     const buffer = await file.arrayBuffer();
     let text = new TextDecoder('utf-8').decode(buffer);
     if (text.includes('\uFFFD')) text = new TextDecoder('windows-1251').decode(buffer);
@@ -1703,7 +1630,9 @@
     const mp = wb ? 'WB' : ozon ? 'OZON' : 'YM';
     const out = {fileName: file.name, mp, rev: 0, ret: 0, com: 0, log: 0, ads: 0, cogs: 0, sQty: 0, rQty: 0, items: []};
     out.unitType = ymItems ? 'items' : ym ? 'services' : '';
-    const cols = new Map();
+    if (ymItems) out.orderVariants = [];
+    const cols = new Map(), rowOccurrences = new Map();
+    let duplicates = 0;
     for (const line of lines.slice(headerIndex + 1)) {
       if (!line.trim()) continue;
       const row = splitCsvLine(line, sep);
@@ -1712,13 +1641,14 @@
         return (row[cols.get(prefix)] || '').trim();
       };
       const amount = prefix => window.num(value(prefix).replace(/\s/g, ''));
-      let art = '', bc = '', name = '', sold = 0, returned = 0, rev = 0, refunds = 0, log = 0, com = 0, ads = 0;
+      let art = '', bc = '', name = '', size = '', sold = 0, returned = 0, rev = 0, refunds = 0, log = 0, com = 0, ads = 0;
       if (wb) {
         const reason = value('обоснование для оплаты').toLowerCase();
         if (!reason) continue;
         art = value('артикул поставщика');
         bc = value('баркод');
         name = value('название');
+        size = value('размер');
         const qty = Math.abs(amount('кол-во'));
         const sign = reason === 'продажа' ? 1 : reason === 'возврат' ? -1 : 0;
         sold = sign > 0 ? qty : 0;
@@ -1764,13 +1694,28 @@
         ads = amount('буст продаж');
         com = amount('все услуги маркета за заказы') - log - ads;
       }
+      const orderKey = (ym || ymItems) ? value('id магазинов') + '/' + value('номер заказа') : '';
+      if (ymItems) out.orderVariants.push({orderKey, art, name});
       if (!(sold || returned || rev || log || com || ads)) continue;
-      const meta = (art || bc) ? window.resolveMetaFast(skuIdx, bc, art, name) : null;
+      const operation = wb ? value('srid') : ozon ? value('id начисления') : orderKey;
+      let importKey = '';
+      if (operation && operation !== '/') {
+        const normalizedRow = row.map(cell => cell.trim());
+        if (wb && headers[0] === '№') normalizedRow.shift();
+        const signature = JSON.stringify([mp, out.unitType, operation, normalizedRow]);
+        const occurrence = (rowOccurrences.get(signature) || 0) + 1;
+        rowOccurrences.set(signature, occurrence);
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(signature));
+        importKey = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('') + ':' + occurrence;
+        if (previouslySaved.has(importKey)) { duplicates++; continue; }
+      }
+      const meta = (art || bc) ? window.resolveMarketplaceMeta(skuIdx, bc, art, name, size) : null;
       const cogs = meta && meta.usd > 0 ? (sold - returned) * meta.usd * rate : 0;
       out.rev += rev; out.ret += refunds; out.sQty += sold; out.rQty += returned;
       out.log += log; out.com += com; out.ads += ads; out.cogs += cogs;
-      out.items.push({bc, art, name, sQty: sold, rQty: returned, rev, fee: log + com + ads, log, com, ads, cogs, hasCost: !!(meta && meta.usd > 0), orderKey: (ym || ymItems) ? value('id магазинов') + '/' + value('номер заказа') : ''});
+      out.items.push({bc, art, name, size, source: 'marketplace-csv', sQty: sold, rQty: returned, rev, fee: log + com + ads, log, com, ads, cogs, hasCost: !!(meta && meta.usd > 0), orderKey, importKey});
     }
+    out.duplicates = duplicates;
     return out;
   }
 
@@ -1834,7 +1779,11 @@
     if (mpBatch?.files.length && !samePeriod) return alert('Сохраните или очистите текущий черновик перед сменой аккаунта или периода.');
     const batch = samePeriod ? mpBatch : {org, yr, mo, files: []};
     const seen = savedReportSources(org, yr, mo);
+    const previousOperations = new Set((window.db.itemSales || []).filter(item => item.importKey &&
+      item.org === org && String(item.yr) === yr && String(item.mo).padStart(2, '0') === mo).map(item => item.importKey));
     const skipped = [], failed = [];
+    let skippedOperations = 0;
+    for (const file of batch.files) for (const item of file.items) if (item.importKey) previousOperations.add(item.importKey);
     for (const file of batch.files) seen.add(file.source.hash);
     readingMpFiles = true;
     try {
@@ -1845,13 +1794,16 @@
           const digest = await crypto.subtle.digest('SHA-256', bytes);
           const hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2,'0')).join('');
           if (seen.has(hash)) { skipped.push(file.name); continue; }
-          const parsed = await parseUnitReport(file, rate, skuIdx) || await streamParseMpFile(file, rate, skuIdx);
-          if (!parsed || !(parsed.items.length || parsed.rev || parsed.ret || parsed.log || parsed.com || parsed.ads)) {
+          const parsed = await parseUnitReport(file, rate, skuIdx, previousOperations) || await streamParseMpFile(file, rate, skuIdx);
+          skippedOperations += parsed?.duplicates || 0;
+          if (parsed?.duplicates && !parsed.items.length) { skipped.push(file.name); continue; }
+          if (!parsed || !(parsed.items.length || parsed.orderVariants?.length || parsed.rev || parsed.ret || parsed.log || parsed.com || parsed.ads)) {
             failed.push(file.name + ' — нет распознанных операций');
             continue;
           }
           parsed.source = {name: file.name, hash};
           batch.files.push(parsed);
+          for (const item of parsed.items) if (item.importKey) previousOperations.add(item.importKey);
           seen.add(hash);
         } catch {
           failed.push(file.name + ' — ошибка чтения');
@@ -1863,25 +1815,14 @@
       window.renderMpDraft();
     }
     const messages = [];
+    if (skippedOperations) messages.push('Повторные операции пропущены: ' + skippedOperations);
     if (skipped.length) messages.push('Повторы пропущены:\n' + skipped.join('\n'));
     if (failed.length) messages.push('Файлы не добавлены:\n' + failed.join('\n'));
     if (messages.length) alert(messages.join('\n\n'));
     else window.showToastProgress('Файлы добавлены в черновик', 1500);
   };
 
-  // Тихое автосохранение в Google Облако без всплывающих окон (алерт только при личном клике)
-  let _cloudClickAllowed = false;
-  document.addEventListener('click', function (ev) {
-    if (ev.target && ev.target.closest('button') && ev.target.closest('button').textContent.includes('Облако')) {
-      _cloudClickAllowed = true;
-      setTimeout(() => { _cloudClickAllowed = false; }, 1000);
-    }
-  }, true);
-
-  window.syncCloud = function (manual) {
-    return manual ? window.pushCloud(_cloudClickAllowed) : window.pullCloud(true);
-  };
-    /* === Фирменный логотип-фавикон SKOS во вкладке браузера === */
+  /* === Фирменный логотип-фавикон SKOS во вкладке браузера === */
   (function setSkosFavicon() {
     const svg = '<svg xmlns="http://w3.org" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#2563eb"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#ffffff" font-family="Arial,sans-serif" font-weight="900" font-size="38">S</text></svg>';
     let link = document.querySelector("link[rel*='icon']");
@@ -1966,7 +1907,10 @@
         const sold = s.sQty != null ? window.num(s.sQty) : window.num(s.sold ?? s.q ?? s.qty) + returned;
         const net = sold - returned;
         const identified = s.art || s.bc || s.name;
-        const meta = identified ? window.resolveMetaFast(catalog, s.bc, s.art, s.name) : null;
+        const marketItem = s.source === 'marketplace-csv' || (mp === 'YM' && s.source !== 'sheets-2026');
+        const meta = !identified ? null : marketItem
+          ? window.resolveMarketplaceMeta(catalog, s.bc, s.art, s.name, s.size)
+          : window.resolveMetaFast(catalog, s.bc, s.art, s.name);
         const title = meta?.modelTitle || (identified || unassigned);
         const usd = window.num(meta?.usd || s.usd);
         const historical = window.num(s.cogs ?? s.cost);
@@ -2072,7 +2016,7 @@
     const occupied = new Set([...reports, ...itemSales].map(keyOf));
     const existingSku = new Map(skus.map(s => [clean(s.bc), s]));
     const knownArticles = new Map(skus.filter(s => clean(s.name) && clean(s.art)).map(s => [norm(s.name), clean(s.art)]));
-    const addedReports = [], addedSales = [], addedSkus = [];
+    const addedReports = [], addedSales = [], addedSkus = [], enrichedSkus = new Map();
     let skipped = 0, unknownOrg = 0;
     for (const group of catalogOnly ? [] : payload.groups) {
       if (!group || !['WB','OZON','YM'].includes(group.mp) || !/^2026-(0[1-9]|1[0-2])$/.test(group.per) ||
@@ -2099,12 +2043,24 @@
       if (!clean(item?.bc) || !clean(item?.name) || !Number.isFinite(item.usd) || item.usd <= 0) {
         throw new Error('Пакет содержит некорректный товар.');
       }
-      if (existingSku.has(item.bc)) continue;
-      existingSku.set(item.bc,item);
-      addedSkus.push({bc:item.bc,name:item.name,art:knownArticles.get(norm(item.name)) || item.name,usd:item.usd});
+      const bc = clean(item.bc);
+      const previous = existingSku.get(bc);
+      const metadata = Object.fromEntries(['art', 'col', 'siz', 'sku'].map(key => [key, clean(item[key])])
+        .filter(([, value]) => value && value !== '—' && value !== 'Базовый'));
+      if (previous) {
+        const stored = enrichedSkus.get(bc) || previous;
+        const missing = Object.fromEntries(Object.entries(metadata).filter(([key]) =>
+          !clean(stored[key]) || ['—', 'Базовый'].includes(stored[key]) ||
+          (key === 'art' && stored.art === stored.name)));
+        if (Object.keys(missing).length) enrichedSkus.set(bc, {...stored, ...missing});
+        continue;
+      }
+      const added = {bc,name:item.name,art:knownArticles.get(norm(item.name)) || item.name,usd:item.usd,...metadata};
+      existingSku.set(bc,added);
+      addedSkus.push(added);
     }
-    return {next:{...data,reports:[...reports,...addedReports],itemSales:[...itemSales,...addedSales],skus:[...skus,...addedSkus]},
-      reports:addedReports.length,items:addedSales.length,skus:addedSkus.length,skipped,unknownOrg};
+    return {next:{...data,reports:[...reports,...addedReports],itemSales:[...itemSales,...addedSales],skus:[...skus,...addedSkus].map(item => enrichedSkus.get(clean(item.bc)) || item)},
+      reports:addedReports.length,items:addedSales.length,skus:addedSkus.length,enriched:enrichedSkus.size,skipped,unknownOrg};
   }
 
   function parseCatalogCsv(text) {
@@ -2133,11 +2089,15 @@
     const col=(...labels)=>header.findIndex(x=>labels.includes(x));
     const barcode=col('баркод','шк','barcode','bc'), name=col('название','наименование товара','name'), usd=col('себестоимость usd','себестоимость в usd','usd');
     if(Math.min(barcode,name,usd)<0)throw new Error('Нужны колонки «Баркод», «Название» и «Себестоимость USD».');
+    const art = col('артикул', 'артикул товара', 'артикул поставщика', 'art');
+    const color = col('цвет', 'color', 'col');
+    const size = col('размер', 'size', 'siz');
+    const sku = col('ваш sku', 'sku');
     const skus=cells.map((values,index)=>{
       const bc=(values[barcode]||'').trim(), title=(values[name]||'').trim();
       const cost=Number((values[usd]||'').replace(/\s/g,'').replace(',','.'));
       if(!bc||!title||!Number.isFinite(cost)||cost<=0)throw new Error('Проверь данные в строке '+(index+2)+'.');
-      return {bc,name:title,usd:cost};
+      return {bc,name:title,usd:cost,art:values[art],col:values[color],siz:values[size],sku:values[sku]};
     });
     if(!skus.length)throw new Error('В CSV нет товаров.');
     return {format:'skos-sheets-initial-2026-v1',groups:[],skus};
@@ -2190,9 +2150,10 @@
         }
         const result = plan(window.db, payload, catalogOnly);
         const message = `Новые отчёты: ${result.reports}. Строки по моделям: ${result.items}. Новые баркоды: ${result.skus}. Пропущено групп с данными или закрытым месяцем: ${result.skipped}. Не найдено юрлиц для групп: ${result.unknownOrg}.`;
-        const preview = catalogOnly ? 'Новые баркоды: ' + result.skus + '. Себестоимость существующих баркодов сохраняется.' : message;
+        const preview = (catalogOnly ? 'Новые баркоды: ' + result.skus + '.' : message) +
+          ' Заполнены недостающие поля справочника: ' + result.enriched + '.';
         status.textContent = preview;
-        if (!(result.reports || result.skus) || !confirm(preview + '\n\nДобавить эти данные в локальную базу SKOS?')) return;
+        if (!(result.reports || result.skus || result.enriched) || !confirm(preview + '\n\nДобавить эти данные в локальную базу SKOS?')) return;
         localStorage.setItem(window._CFG.KEY, JSON.stringify(result.next));
         Object.assign(window.db,result.next);
         status.textContent = 'Стартовые данные сохранены. ' + preview;

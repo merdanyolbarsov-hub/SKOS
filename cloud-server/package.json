@@ -1,0 +1,9 @@
+{
+  "name": "skos-cloud",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=22"},
+  "scripts": {"start": "node server.js"},
+  "dependencies": {"firebase-admin": "^13.6.0", "google-auth-library": "^10.5.0"}
+}

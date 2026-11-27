@@ -44,7 +44,7 @@
         <button class="btn btn-primary" id="m-full" onclick="setMode('FULL')">🏢 Вся компания</button>
         <button class="btn" id="m-mp" onclick="setMode('MP')">🛒 Только МП</button>
         <button class="btn btn-amber" id="lock-btn" onclick="toggleLock()">🔓 Открыт</button>
-        <button class="btn btn-success" onclick="syncCloud(true)">☁️ Облако</button>
+        <button class="btn btn-success" id="skos-cloud-button" onclick="syncCloud(true)">☁️ Облако</button>
         <button class="btn" onclick="exportJson()">💾 Бэкап</button>
         <label class="btn" style="cursor:pointer">📂 Загрузить<input type="file" accept=".json" style="display:none" onchange="importJson(event)"></label>
       </div>
@@ -287,13 +287,9 @@
         </div>
 
         <div class="card">
-          <div class="card-header"><div class="card-title">☁️ Облачная синхронизация для команды (Supabase)</div></div>
-          <div class="form-grid">
-            <div><label>Supabase Project URL</label><input type="text" id="sb-url" class="input" placeholder="https://supabase.co"></div>
-            <div><label>Supabase Anon Public Key</label><input type="password" id="sb-key" class="input" placeholder="eyJhbGci..."></div>
-            <div><label>Пароль (ПИН) команды</label><input type="text" id="sb-pin" class="input" value="2026"></div>
-            <div><button class="btn btn-success" style="width:100%" onclick="saveCloudCfg()">Сохранить и синхронизировать</button></div>
-          </div>
+          <div class="card-header"><div class="card-title">☁️ Google Облако</div></div>
+          <p id="skos-cloud-settings" role="status">Проверяем подключение…</p>
+
         </div>
       </section>
     </main>
@@ -418,6 +414,8 @@
    <script src="app.js"></script>
   <script src="unit.js"></script>
   <script src="directory-folders.js"></script>
+  <script src="cloud-config.js" defer></script>
+  <script src="cloud-sync.js" defer></script>
 </body>
 </html>
 
