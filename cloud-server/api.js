@@ -85,11 +85,10 @@ export function makeHandler({verify, store, origin, owners, viewers}) {
       if (req.method === 'GET' && path === '/latest') return send(200,await store.latest());
       if (req.method === 'GET' && path.startsWith('/version/')) {
         const title = path.slice('/version/'.length);
-        if (role === 'viewer' && title !== (await store.latest())?.title) return send(403,{error:'latest_only'});
         const version = await store.version(title);
         return send(version ? 200 : 404,version || {error:'not_found'});
       }
-      if (req.method === 'GET' && path === '/history' && role === 'owner') return send(200,await store.history());
+      if (req.method === 'GET' && path === '/history') return send(200,await store.history());
       if (req.method === 'POST' && path === '/publish') {
         if (role !== 'owner') return send(403,{error:'read_only'});
         if (Number(req.headers['content-length']) > maxBytes) return send(413,{error:'too_large'});

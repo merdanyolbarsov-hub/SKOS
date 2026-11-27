@@ -1,6 +1,7 @@
 (() => {
   'use strict';
   const config = window.skosCloudConfig;
+  const defaults = structuredClone(window.db);
   const gate = document.createElement('dialog');
   gate.style.cssText = 'max-width:min(420px,92vw);margin:auto;padding:24px;border:1px solid #cbd5e1;border-radius:14px';
   gate.innerHTML = '<h2>SKOS Finance</h2><p role="status" style="margin:12px 0">Проверяем доступ…</p><form><label>Логин (почта)<input class="input" type="email" name="email" autocomplete="username" required></label><label>Пароль<input class="input" type="password" name="password" autocomplete="current-password" required></label><button type="submit" class="btn btn-primary" style="margin-top:12px" disabled>Войти</button></form>';
@@ -15,7 +16,8 @@
   const settings = document.getElementById('skos-cloud-settings');
   const logout = document.createElement('button');
   const history = document.createElement('button');
-  for (const button of [logout, history]) {
+  const returnToLatest = document.createElement('button');
+  for (const button of [logout, history, returnToLatest]) {
     button.className = 'btn';
     button.type = 'button';
     button.hidden = true;
@@ -25,7 +27,7 @@
   history.textContent = 'Версии облака';
   cloud.disabled = true;
 
-  let user, role, timer, currentVersion, session = 0, updating = false, publishing = false;
+  let user, role, timer, currentVersion, archivedVersion, session = 0, updating = false, publishing = false;
   const tell = text => {
     message.textContent = text;
     settings.textContent = text;
@@ -34,6 +36,11 @@
   const format = date => new Date(date).toLocaleString('ru-RU');
   function apply(payload, owner) {
     const {cloud, tab, ...data} = payload.data;
+    if (!owner) {
+      const selectedTab = window.db.tab;
+      for (const key of Object.keys(window.db)) delete window.db[key];
+      Object.assign(window.db, structuredClone(defaults), {tab:selectedTab});
+    }
     Object.assign(window.db, data);
     if (owner) localStorage.setItem(window._CFG.FMAP, JSON.stringify(payload.folderNames));
     else window.getFolderNames = () => payload.folderNames;
@@ -53,26 +60,31 @@
     return result.json();
   }
   async function refresh() {
-    if (role !== 'viewer' || updating) return;
+    if (role !== 'viewer' || archivedVersion || updating) return;
     const active = session;
     updating = true;
     try {
       const latest = await request('/latest');
-      if (active !== session) return;
+      if (active !== session || archivedVersion) return;
       if (!latest) { tell('Владелец ещё не опубликовал базу.'); return; }
       if (latest.id !== currentVersion) {
         const version = await request('/version/' + encodeURIComponent(latest.title));
-        if (active !== session) return;
+        if (active !== session || archivedVersion) return;
         apply(version.snapshot, false);
         currentVersion = latest.id;
       }
       tell('Данные обновлены ' + format(latest.date));
       if (gate.open) gate.close();
+      returnToLatest.hidden = true;
+      returnToLatest.disabled = false;
     } catch (error) {
-      if (active !== session) return;
+      if (active !== session || archivedVersion) return;
       tell('Не удалось получить облачную базу.');
       if (error.status === 401 && !gate.open) gate.showModal();
-    } finally { updating = false; }
+    } finally {
+      updating = false;
+      returnToLatest.disabled = false;
+    }
   }
 
   window.syncCloud = async () => {
@@ -95,10 +107,20 @@
     window.showToastProgress(notice, 3500);
   };
 
+  returnToLatest.onclick = () => {
+    archivedVersion = '';
+    currentVersion = '';
+    returnToLatest.disabled = true;
+    refresh();
+  };
+
   history.onclick = async () => {
+    const active = session;
+    const viewer = role === 'viewer';
     history.disabled = true;
     try {
       const versions = await request('/history');
+      if (active !== session) return;
       if (!versions.length) { tell('Сохранённых версий пока нет.'); return; }
       const dialog = document.createElement('dialog');
       dialog.style.cssText = gate.style.cssText;
@@ -108,21 +130,36 @@
         const date = title.slice(7,24).replace(/^(....)(..)(..)(..)(..)(..)(...)$/, '$1-$2-$3T$4:$5:$6.$7Z');
         select.add(new Option(format(date),title));
       }
-      const [download, close] = dialog.querySelectorAll('button');
+      const [open, close] = dialog.querySelectorAll('button');
+      if (viewer) open.textContent = 'Открыть для просмотра';
       close.onclick = () => dialog.close();
       dialog.onclose = () => dialog.remove();
-      download.onclick = async () => {
-        download.disabled = true;
+      open.onclick = async () => {
+        open.disabled = true;
+        const title = select.value;
+        const previousArchive = archivedVersion;
+        if (viewer) archivedVersion = title;
         try {
-          const {snapshot} = await request('/version/' + encodeURIComponent(select.value));
+          const {snapshot, date} = await request('/version/' + encodeURIComponent(title));
+          if (active !== session) return;
+          if (viewer) {
+            apply(snapshot, false);
+            returnToLatest.textContent = 'Архив ' + format(date) + ' · к последней версии';
+            returnToLatest.hidden = false;
+            dialog.close();
+            return;
+          }
           const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot)],{type:'application/json'}));
           const link = document.createElement('a');
           link.href = url;
-          link.download = select.value + '.json';
+          link.download = title + '.json';
           link.click();
           setTimeout(() => URL.revokeObjectURL(url),1000);
-        } catch { dialog.querySelector('[role=status]').textContent = 'Не удалось скачать версию.'; }
-        finally { download.disabled = false; }
+        } catch {
+          if (active !== session) return;
+          if (viewer) archivedVersion = previousArchive;
+          dialog.querySelector('[role=status]').textContent = 'Не удалось открыть версию.';
+        } finally { open.disabled = false; }
       };
       document.body.append(dialog);
       dialog.showModal();
@@ -157,6 +194,9 @@
       role = null;
       user = account;
       currentVersion = '';
+      archivedVersion = '';
+      returnToLatest.hidden = true;
+      returnToLatest.disabled = false;
       window.__skosReadOnly = true;
       cloud.disabled = true;
       history.hidden = true;
@@ -186,6 +226,7 @@
         } else if (result.role === 'viewer') {
           role = 'viewer';
           window.applyGuestRestrictions();
+          history.hidden = false;
           await refresh();
           if (active === session) timer = setInterval(refresh,10000);
         }
