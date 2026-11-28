@@ -41,7 +41,7 @@
     }
     for (const row of Array.isArray(base) ? base : []) add(row);
     for (const folder of store.customDictFolders) {
-      if (window.directoryPurpose(folder) !== key || !Array.isArray(store[folder.key])) continue;
+      if (store.dictFolderSettings?.[folder.id]?.removed || window.directoryPurpose(folder) !== key || !Array.isArray(store[folder.key])) continue;
       for (const row of store[folder.key]) add(row, folder.title);
     }
     return [...entries.values()];
@@ -87,15 +87,6 @@
   function editFolder(store, folder) {
     if (window.__skosReadOnly) return;
     const duplicate = name => sections(store).some(item => item.id !== folder?.id && norm(item.label) === norm(name));
-    if (folder && !folder.custom) {
-      const name = prompt('Название папки:', folder.label)?.trim();
-      if (!name || name === folder.label) return;
-      if (duplicate(name)) { alert('Папка с таким названием уже существует.'); return; }
-      folderSettings(store, folder).label = name;
-      saveFolders();
-      return;
-    }
-
     const dialog = document.createElement('dialog');
     dialog.style.cssText = 'width:min(520px,92vw);margin:auto;padding:20px;border:1px solid #cbd5e1;border-radius:14px';
     dialog.innerHTML = '<form><h3>Настройки папки</h3><label>Название<input class="input" name="name" required></label><label>Где показывать записи<select class="select" name="usage"></select></label><p role="status" style="color:#b91c1c"></p><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button type="button" class="btn">Отмена</button><button type="submit" class="btn btn-primary">Сохранить</button></div></form>';
@@ -104,7 +95,13 @@
     const usageField = form.elements.namedItem('usage');
     for (const [value,label] of destinations) usageField.add(new Option(label,value));
     nameField.value = folder?.label || '';
-    usageField.value = folder ? window.directoryPurpose(folder.custom) : '';
+    if (folder && !folder.custom) {
+      if (folder.id === 'sku') usageField.add(new Option('Товары → Каталог', 'sku'));
+      usageField.value = folder.key || 'sku';
+      usageField.disabled = true;
+    } else {
+      usageField.value = folder ? window.directoryPurpose(folder.custom) : '';
+    }
     form.querySelector('button[type=button]').onclick = () => dialog.close();
     dialog.onclose = () => dialog.remove();
     form.onsubmit = event => {
@@ -114,7 +111,8 @@
         form.querySelector('[role=status]').textContent = 'Укажите уникальное название папки.';
         return;
       }
-      if (folder) Object.assign(folder.custom, {title:name,usage});
+      if (folder?.custom) Object.assign(folder.custom, {title:name,usage});
+      else if (folder) folderSettings(store, folder).label = name;
       else {
         const id = 'cust_' + crypto.randomUUID();
         store[id] = [];
@@ -135,14 +133,10 @@
 
   function removeFolder(store, folder) {
     if (window.__skosReadOnly) return;
-    if (folder.custom) {
-      const length = records(store, folder).length;
-      if (!confirm('Удалить папку «' + folder.label + '»? Записей в папке: ' + length + '.')) return;
-      store.customDictFolders = store.customDictFolders.filter(item => item.id !== folder.id);
-      delete store[folder.key];
-    } else {
-      folderSettings(store, folder).hidden = true;
-    }
+    if (!confirm('Удалить папку «' + folder.label + '» из списка? Её можно будет восстановить вместе с записями.')) return;
+    const settings = folderSettings(store, folder);
+    settings.hidden = true;
+    settings.removed = true;
     saveFolders();
   }
 
@@ -156,12 +150,12 @@
         ${visible.map(folder => `<div style="border:1px solid #cbd5e1;border-radius:10px;background:#f8fafc;padding:10px">
           <button type="button" class="btn" data-open-folder="${esc(folder.id)}" style="width:100%;text-align:left;white-space:normal;min-height:46px">📁 ${esc(folder.label)} (${folder.count ?? records(store,folder).filter(row=>!row.arch).length})</button>
           ${readOnly ? '' : `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
-            <button type="button" class="btn" data-rename-folder="${esc(folder.id)}">${folder.custom ? 'Настроить' : 'Переименовать'}</button>
-            <button type="button" class="btn ${folder.custom ? 'btn-danger' : ''}" data-remove-folder="${esc(folder.id)}">${folder.custom ? 'Удалить' : 'Скрыть'}</button>
+            <button type="button" class="btn" data-rename-folder="${esc(folder.id)}">Настроить</button>
+            <button type="button" class="btn btn-danger" data-remove-folder="${esc(folder.id)}">Удалить</button>
           </div>`}
         </div>`).join('')}
       </div>
-      ${!readOnly && hidden.length ? `<details style="margin-top:12px"><summary>Скрытые папки (${hidden.length})</summary>
+      ${!readOnly && hidden.length ? `<details style="margin-top:12px"><summary>Удалённые папки (${hidden.length})</summary>
         ${hidden.map(folder => `<div style="margin-top:8px">${esc(folder.label)} <button type="button" class="btn" data-restore-folder="${esc(folder.id)}">Восстановить</button></div>`).join('')}
       </details>` : ''}</section>`;
     const byId = new Map(all.map(folder => [folder.id,folder]));
@@ -175,7 +169,9 @@
     for (const button of target.querySelectorAll('[data-rename-folder]')) button.onclick = () => editFolder(store, byId.get(button.dataset.renameFolder));
     for (const button of target.querySelectorAll('[data-remove-folder]')) button.onclick = () => removeFolder(store, byId.get(button.dataset.removeFolder));
     for (const button of target.querySelectorAll('[data-restore-folder]')) button.onclick = () => {
-      folderSettings(store, byId.get(button.dataset.restoreFolder)).hidden = false;
+      const settings = folderSettings(store, byId.get(button.dataset.restoreFolder));
+      settings.hidden = false;
+      delete settings.removed;
       saveFolders();
     };
   }
