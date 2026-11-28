@@ -260,3 +260,19 @@ tbody tr:hover > td { background-color: #e8ede9; }
   dialog { max-width: calc(100vw - 20px); max-height: 90dvh; overflow: auto; }
   .modal-box { max-height: 90dvh; }
 }
+
+.ladder-controls, .ladder-markets, .row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.ladder-controls { max-width: 100%; gap: 10px; }
+.ladder-market { min-height: 38px; border-radius: 8px; font-size: 13px; }
+.ladder-market[data-ladder-market="WB"] { background: #8f207b; border-color: #8f207b; color: #fff; }
+.ladder-market[data-ladder-market="OZON"] { background: #0754da; border-color: #0754da; color: #fff; font-size: 15px; }
+.ladder-market[data-ladder-market="YM"] { background: #ffda37; border-color: #d1ad23; color: #231c09; }
+.ladder-market[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px #354f69; }
+.ladder-market[aria-pressed="true"]::after { content: " ✓"; }
+.ladder-account { display: grid; gap: 3px; min-width: 0; width: min(100%, 230px); font-size: 11px; }
+.ladder-account .select { min-height: 38px; }
+.bom-editor { width: min(94vw, 520px); margin: auto; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
+.bom-editor > p { margin: 7px 0 12px; }
+.bom-editor form { display: grid; gap: 10px; }
+.ladder-ya { font-size: 16px; font-weight: 850; }
+.ladder-revenue-share { margin-bottom: 4px; color: #405571; font-size: 11px; font-weight: 650; }

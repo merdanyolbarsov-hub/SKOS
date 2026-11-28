@@ -10,7 +10,7 @@
     #skos-startup strong{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:10px;background:#172638;color:#f6f4ef;font-size:24px}
     #skos-startup progress{display:block;margin:14px auto 0;width:190px;height:7px;accent-color:#46647e}
   </style>
-  <link rel="stylesheet" href="style.css?v=20261128-10" />
+  <link rel="stylesheet" href="style.css?v=20261128-12" />
 </head>
 <body>
   <div id="skos-startup" role="status">
@@ -323,7 +323,7 @@
   </div>
 
   <div id="m-man" class="modal-bg hidden"><div class="modal-box">
-    <div class="card-header"><div class="card-title">✍️ Внести итоги площадки вручную</div><button class="btn" onclick="closeModals()">✕</button></div>
+    <div class="card-header"><div class="card-title">✍️ Внести итоги площадки вручную</div><button class="btn" onclick="closeModals()">Закрыть</button></div>
     <form onsubmit="saveMan(event)" class="form-grid">
       <div><label>Юрлицо</label><select id="mn-org" class="select"></select></div>
       <div><label>Площадка</label><select id="mn-mp" class="select"><option value="WB">Wildberries</option><option value="OZON">Ozon</option><option value="YM">Яндекс Маркет</option></select></div>
@@ -341,7 +341,7 @@
   </div></div>
 
   <div id="m-trf" class="modal-bg hidden"><div class="modal-box">
-    <div class="card-header"><div class="card-title">🔄 Перевод / Конвертация валют</div><button class="btn" onclick="closeModals()">✕</button></div>
+    <div class="card-header"><div class="card-title">🔄 Перевод / Конвертация валют</div><button class="btn" onclick="closeModals()">Закрыть</button></div>
     <form onsubmit="saveTransfer(event)" class="form-grid">
       <div><label>Дата</label><input type="date" id="tr-date" class="input" required></div>
       <div><label>Откуда (Списать)</label><select id="tr-from" class="select"></select></div>
@@ -438,10 +438,10 @@
     })();
   </script>
   
-   <script src="app.js?v=20261128-9"></script>
+   <script src="app.js?v=20261128-12"></script>
   <script src="unit.js?v=20261128-5"></script>
   <script src="directory-folders.js"></script>
-  <script src="production-batches.js?v=20261128-9"></script>
+  <script src="production-batches.js?v=20261128-12"></script>
   <script src="inventory-workbook.js?v=20261128-9"></script>
   <script src="contractor-reconciliation.js?v=20261128-11"></script>
   <script src="financial-reports.js?v=20261128-2"></script>
