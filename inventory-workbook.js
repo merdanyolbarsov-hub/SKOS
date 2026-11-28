@@ -1,0 +1,156 @@
+(() => {
+  'use strict';
+  const renderExisting = window.renderStkTab;
+  const esc = window.esc;
+  const num = window.num;
+  const money = window.fmtU;
+  const tabs = [
+    ['sum','Свод'], ['mat','Материалы и остатки'], ['inc','Приход материалов'],
+    ['ord','Пошив и техкарты'], ['mov','Списание / НЗП'],
+    ['fg','Готовый товар и брак'], ['cost','Себестоимость']
+  ];
+  let month = '', year = '', edited = '';
+
+  const names = values => [...new Set(values.map(value=>String(value || '').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b, 'ru'));
+  const period = date => String(date || '').slice(0,7);
+  const table = (heads,rows) => `<div style="overflow-x:auto"><table><thead><tr>${heads.map(head=>`<th>${esc(head)}</th>`).join('')}</tr></thead><tbody>${rows.join('') || `<tr><td colspan="${heads.length}">Нет записей.</td></tr>`}</tbody></table></div>`;
+  const cells = values => '<tr>' + values.map(value=>'<td>'+esc(value)+'</td>').join('') + '</tr>';
+  const monthField = () => `<label>Месяц <input class="input" type="month" data-stock-month value="${esc(month)}" style="width:auto"></label> <button type="button" class="btn" data-all-months>Все месяцы</button>`;
+
+  function materialNames(store) {
+    return names([...store.materials.map(row=>row.name),
+      ...window.directoryRows('stockInputs').filter(row=>!row.arch).map(row=>row.name)]);
+  }
+
+  function renderMovements(store) {
+    const rows = store.orders.flatMap(order => (order.lines || []).map(line => ({
+      date:order.date, completed:order.doneDate, product:order.product, material:line.matName,
+      qty:num(line.usedQty), price:num(line.priceUsd), status:order.status, note:order.comment
+    }))).filter(row=>!month || period(row.date)===month || period(row.completed)===month)
+      .sort((a,b)=>String(b.date || '').localeCompare(String(a.date || '')))
+      .map(row=>cells([period(row.date),row.date,row.qty,money(row.price),money(row.qty*row.price),
+        row.material,row.product,row.note || '',row.completed || '—',row.status==='DONE'?'Списано':'В работе']));
+    return `<p style="margin:8px 0">Строки формируются из заказов в разделе «Пошив и техкарты». Списание выполняется при завершении заказа.</p>
+      <div style="margin:10px 0">${monthField()}</div>${table(['Месяц','Дата','Количество','Цена USD','Итого USD',
+        'Материал','Товар','Комментарий','Дата изготовления','Статус'],rows)}`;
+  }
+
+  function costForm(store, current) {
+    const materialOptions = materialNames(store);
+    if (current?.material && !materialOptions.includes(current.material)) materialOptions.push(current.material);
+    const modelOptions = window.getModelsOptions(current?.product || '');
+    return `<form class="form-grid" id="stock-cost-form" style="margin:12px 0">
+      <label>Дата<input name="date" type="date" class="input" required value="${esc(current?.date || window.today())}"></label>
+      <label>Материал / услуга<select name="material" class="select" required><option value="">Выберите</option>
+        ${materialOptions.map(name=>`<option value="${esc(name)}"${name===current?.material?' selected':''}>${esc(name)}</option>`).join('')}</select></label>
+      <label>Товар<select name="product" class="select" required>${modelOptions}</select></label>
+      <label>Количество<input name="qty" type="number" min="0.000001" step="any" class="input" required value="${esc(current?.qty ?? '')}"></label>
+      <label>Цена за ед., USD<input name="price" type="number" min="0" step="any" class="input" required value="${esc(current?.price ?? '')}"></label>
+      <label>Комментарий<input name="note" class="input" value="${esc(current?.note || '')}"></label>
+      <button class="btn btn-primary" type="submit">${current?'Сохранить':'Добавить строку'}</button>
+      ${current?'<button class="btn" type="button" data-cancel-cost>Отмена</button>':''}</form>`;
+  }
+
+  function renderCosts(store) {
+    const list = store.inventoryCosts || [];
+    const selected = list.find(row=>row.id===edited);
+    const rows = list.filter(row=>!month || period(row.date)===month).sort((a,b)=>b.date.localeCompare(a.date));
+    const groups = new Map();
+    for (const row of rows) groups.set(row.product, (groups.get(row.product) || 0) + num(row.qty)*num(row.price));
+    const writable = !window.__skosReadOnly;
+    return `<p style="margin:8px 0">Добавляйте материалы и услуги из связанной папки справочника. Журнал считает состав себестоимости и не меняет стоимость штрихкодов или остатки склада.</p>
+      <div style="margin:10px 0">${monthField()}</div>
+      ${writable?costForm(store, selected):''}
+      ${table(['Месяц','Дата','Количество','Цена USD','Итого USD','Материал / услуга','Товар','Комментарий',
+          ...(writable?['Действия']:[])],rows.map(row=>{
+        const output = cells([period(row.date),row.date,row.qty,money(row.price),money(num(row.qty)*num(row.price)),row.material,row.product,row.note]);
+        return writable?output.replace('</tr>',`<td><button type="button" class="btn" data-edit-stock-cost="${esc(row.id)}">Редактировать</button>
+          <button type="button" class="btn btn-danger" data-delete-stock-cost="${esc(row.id)}">Удалить</button></td></tr>`):output;
+      }))}
+      <h3 style="margin:16px 0 8px">Свод по моделям</h3>${table(['Товар','Итого USD'],[...groups].map(([name,total])=>cells([name,money(total)]))) }`;
+  }
+
+  function renderMonthly(store) {
+    if (!year) year = window.today().slice(0,4);
+    const months = Array.from({length:12},(_,i)=>year+'-'+String(i+1).padStart(2,'0'));
+    const rows = [
+      ['Приход материалов',store.matIn,entry=>entry.date,entry=>num(entry.totalUsd) || num(entry.qty)*num(entry.priceUsd)],
+      ['Передано в пошив (по заказам)',store.orders,entry=>entry.date,entry=>num(entry.totalUsd)],
+      ['Завершённые заказы (по техкарте)',store.orders.filter(entry=>entry.status==='DONE'),entry=>entry.doneDate,entry=>num(entry.totalUsd)],
+      ['Готовые товары (внесённые остатки)',store.fgStocks,entry=>entry.month,entry=>num(entry.lockedUsd) || (num(entry.ruQty)+num(entry.tmQty)+num(entry.wayQty))*num(entry.unitUsd)],
+      ['Брак',store.defects,entry=>entry.date,entry=>num(entry.qty)*num(entry.unitUsd)]
+    ].map(([label,list,date,amount])=>{
+      const sums=new Map();
+      for (const entry of list) {const key=period(date(entry));sums.set(key,(sums.get(key)||0)+amount(entry));}
+      return cells([label,...months.map(key=>money(sums.get(key)||0))]);
+    });
+    return `<div class="card" style="margin-top:12px"><div class="card-header"><div class="card-title">Движение по месяцам, USD</div>
+      <label>Год <input type="number" class="input" data-stock-year min="2000" max="2100" value="${esc(year)}" style="width:100px"></label></div>
+      ${table(['Операция',...months.map(key=>key.slice(5))],rows)}</div>`;
+  }
+
+  window.renderStkTab = function () {
+    const target = document.getElementById('tab-stk');
+    if (!target) return;
+    const store = window.ensureStore(), sub = store.stkSub || 'sum';
+    if (sub==='mov' || sub==='cost') {
+      target.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🏭 Запасы, Брак и Фурнитура</div></div>
+        <div data-stock-tabs style="display:flex;flex-wrap:wrap;gap:6px"></div>${sub==='mov'?renderMovements(store):renderCosts(store)}</div>`;
+    } else {
+      renderExisting.apply(this,arguments);
+      target.querySelector('.card-header + div')?.setAttribute('data-stock-tabs','');
+      if (sub==='sum') target.insertAdjacentHTML('beforeend',renderMonthly(store));
+    }
+
+    const navigation = target.querySelector('[data-stock-tabs]');
+    if (!navigation) return;
+    navigation.innerHTML = tabs.map(([id,label])=>`<button type="button" class="btn ${id===sub?'btn-primary':''}" data-inventory-tab="${id}">${esc(label)}</button>`).join('');
+    for (const button of navigation.querySelectorAll('button')) button.onclick=()=>{
+      edited='';
+      window.p4StkSub(button.dataset.inventoryTab);
+    };
+    const dateFilter=target.querySelector('[data-stock-month]');
+    if (dateFilter) {
+      dateFilter.onchange=()=>{month=dateFilter.value;window.renderStkTab();};
+      target.querySelector('[data-all-months]').onclick=()=>{month='';window.renderStkTab();};
+    }
+    const yearFilter=target.querySelector('[data-stock-year]');
+    if (yearFilter) yearFilter.onchange=()=>{if(yearFilter.checkValidity()){year=yearFilter.value;window.renderStkTab();}};
+
+    const newMaterial=target.querySelector('#sm-nm');
+    if (newMaterial) {
+      const suggestions=document.createElement('datalist');
+      suggestions.id='stock-material-suggestions';
+      const registered = new Set(store.materials.map(row=>row.name.toLocaleLowerCase('ru')));
+      suggestions.append(...materialNames(store).filter(name=>!registered.has(name.toLocaleLowerCase('ru'))).map(name=>new Option(name,name)));
+      newMaterial.after(suggestions);
+      newMaterial.setAttribute('list',suggestions.id);
+    }
+    const form=target.querySelector('#stock-cost-form');
+    if (!form || window.__skosReadOnly) return;
+    const save=()=>{edited='';window.save(true);window.renderStkTab();};
+    form.onsubmit=event=>{
+      event.preventDefault();
+      if (window.__skosReadOnly) return;
+      const values=Object.fromEntries(new FormData(form));
+      const row={id:edited || crypto.randomUUID(),date:values.date,product:values.product,material:values.material,
+        qty:Number(values.qty),price:Number(values.price),note:values.note.trim()};
+      if (!row.date || !row.product || !row.material || !Number.isFinite(row.qty) || row.qty<=0 ||
+        !Number.isFinite(row.price) || row.price<0) return;
+      store.inventoryCosts ||= [];
+      const index=store.inventoryCosts.findIndex(item=>item.id===row.id);
+      if (index<0) store.inventoryCosts.unshift(row); else store.inventoryCosts[index]=row;
+      save();
+    };
+    target.querySelector('[data-cancel-cost]')?.addEventListener('click',()=>{edited='';window.renderStkTab();});
+    for (const button of target.querySelectorAll('[data-edit-stock-cost]')) button.onclick=()=>{
+      if (window.__skosReadOnly) return;
+      edited=button.dataset.editStockCost;window.renderStkTab();
+    };
+    for (const button of target.querySelectorAll('[data-delete-stock-cost]')) button.onclick=()=>{
+      if (window.__skosReadOnly || !confirm('Удалить эту строку журнала себестоимости?')) return;
+      store.inventoryCosts=store.inventoryCosts.filter(row=>row.id!==button.dataset.deleteStockCost);
+      save();
+    };
+  };
+})();

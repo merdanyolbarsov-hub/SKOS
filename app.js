@@ -936,8 +936,8 @@
   window.p4EditFg = idx => { const f = window.ensureStore().fgStocks[idx]; if (!f) return; const ru = prompt('Склад РФ шт:', f.ruQty); if (ru !== null) f.ruQty = window.num(ru); const tm = prompt('Склад ТМ шт:', f.tmQty); if (tm !== null) f.tmQty = window.num(tm); const way = prompt('В пути шт:', f.wayQty); if (way !== null) f.wayQty = window.num(way); const u = prompt('Цена $:', f.unitUsd); if (u !== null) f.unitUsd = window.num(u); f.lockedUsd = (f.ruQty + f.tmQty + f.wayQty) * f.unitUsd; window.save(true); window.renderStkTab(); };
   window.p4EditDef = idx => { const d = window.ensureStore().defects[idx]; if (!d) return; const q = prompt('Количество брака:', d.qty); if (q !== null) d.qty = window.num(q); const u = prompt('Цена $:', d.unitUsd); if (u !== null) d.unitUsd = window.num(u); const r = prompt('Причина:', d.reason); if (r !== null) d.reason = r.trim(); window.save(true); window.renderStkTab(); };
 
-  window.p4MatAdd = () => { const e = window.ensureStore(), nm = document.getElementById('sm-nm').value.trim(); if (!nm) return alert('Введите название!'); e.materials.unshift({ name: nm, cat: document.getElementById('sm-cat').value, unit: document.getElementById('sm-un').value, initQty: window.num(document.getElementById('sm-q').value), initUsd: window.num(document.getElementById('sm-u').value) }); window.save(true); window.renderStkTab(); };
-  window.p4MatInAdd = () => { const e = window.ensureStore(), m = document.getElementById('si-m').value, q = window.num(document.getElementById('si-q').value), p = window.num(document.getElementById('si-p').value); if (!m || q <= 0) return alert('Выберите сырьё и кол-во!'); e.matIn.unshift({ date: document.getElementById('si-d').value || window.today(), matName: m, supplier: document.getElementById('si-s').value, qty: q, priceUsd: p, totalUsd: q * p }); window.save(true); window.renderStkTab(); };
+  window.p4MatAdd = () => { if (window.__skosReadOnly) return; const e = window.ensureStore(), nm = document.getElementById('sm-nm').value.trim(); if (!nm) return alert('Введите название!'); if (e.materials.some(item => window.normStr(item.name).toLocaleLowerCase('ru') === nm.toLocaleLowerCase('ru'))) return alert('Материал с таким названием уже существует. Добавьте приход или измените его карточку.'); e.materials.unshift({ name: nm, cat: document.getElementById('sm-cat').value, unit: document.getElementById('sm-un').value, initQty: window.num(document.getElementById('sm-q').value), initUsd: window.num(document.getElementById('sm-u').value) }); window.save(true); window.renderStkTab(); };
+  window.p4MatInAdd = () => { if (window.__skosReadOnly) return; const e = window.ensureStore(), m = document.getElementById('si-m').value, q = window.num(document.getElementById('si-q').value), p = window.num(document.getElementById('si-p').value); if (!m || q <= 0) return alert('Выберите сырьё и кол-во!'); e.matIn.unshift({ date: document.getElementById('si-d').value || window.today(), matName: m, supplier: document.getElementById('si-s').value, qty: q, priceUsd: p, totalUsd: q * p, comment: document.getElementById('si-note')?.value.trim() || '' }); window.save(true); window.renderStkTab(); };
   window.p4OrderAdd = () => { const e = window.ensureStore(), pr = document.getElementById('so-p').value, q = window.num(document.getElementById('so-q').value); if (!pr || q <= 0) return alert('Выберите модель и кол-во!'); const rec = e.bom.find(b => b.product === pr); let tot = 0; const lines = (rec?.items || []).map(it => { const u = window.num(it.norm) * q; tot += u * window.num(it.priceUsd); return { matName: it.matName, usedQty: u, priceUsd: window.num(it.priceUsd) }; }); e.orders.unshift({ date: document.getElementById('so-d').value || window.today(), doneDate: '', status: 'WIP', product: pr, qty: q, totalUsd: tot, comment: document.getElementById('so-c').value.trim(), lines }); window.save(true); window.renderStkTab(); };
   window.p4OrderDone = i => { const o = window.ensureStore().orders[i]; if (o && confirm('Завершить пошив и списать сырьё?')) { o.status = 'DONE'; o.doneDate = window.today(); window.save(true); window.renderStkTab(); } };
   window.p4BomAdd = () => { const e = window.ensureStore(), pr = document.getElementById('sb-p').value, m = document.getElementById('sb-m').value, n = window.num(document.getElementById('sb-n').value), p = window.num(document.getElementById('sb-pr').value); if (!pr || !m || n <= 0) return alert('Заполните модель, материал и норму!'); let rec = e.bom.find(b => b.product === pr); if (!rec) { rec = { product: pr, items: [] }; e.bom.unshift(rec); } rec.items.push({ matName: m, norm: n, priceUsd: p }); window.save(true); window.renderStkTab(); };
@@ -962,9 +962,9 @@
       body = `<div class="form-grid" style="margin-bottom:10px"><div><label>Название</label><input id="sm-nm" class="input"></div><div>${window.withPlusBtn('Категория', 'dictMatCats', 'Категория сырья', 'sm-cat')}<select id="sm-cat" class="select">${window.getDictOptions(window.directoryRows('dictMatCats'))}</select></div><div>${window.withPlusBtn('Ед. изм.', 'dictUnits', 'Ед. измерения', 'sm-un')}<select id="sm-un" class="select">${window.getDictOptions(window.directoryRows('dictUnits'))}</select></div><div><label>Нач. ост.</label><input id="sm-q" type="number" class="input" value="0"></div><div><label>Сумма $</label><input id="sm-u" type="number" step="0.01" class="input" value="0"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4MatAdd()">+ Сырьё</button></div></div>
         <table><thead><tr><th>Материал</th><th>Кат.</th><th class="num">Остаток</th><th class="num">Сумма $</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     } else if (sub === 'inc') {
-      const rows = e.matIn.map((x, i) => `<tr><td>${window.esc(x.date)}</td><td class="bold">${window.esc(x.matName)}</td><td>${window.esc(x.supplier)}</td><td class="num">${x.qty}</td><td class="num bold">${window.fmtU(x.totalUsd)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4EditMatIn(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('matIn',${i})">✕</button></td></tr>`).join('');
-      body = `<div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="si-d" type="date" class="input" value="${window.today()}"></div><div>${window.withPlusBtn('Сырьё', 'materials', 'Материал', 'si-m')}<select id="si-m" class="select">${matOpts}</select></div><div>${window.withPlusBtn('Поставщик', 'dictSuppliers', 'Поставщик сырья', 'si-s')}<select id="si-s" class="select">${window.getDictOptions(window.directoryRows('dictSuppliers'))}</select></div><div><label>Шт</label><input id="si-q" type="number" class="input"></div><div><label>Цена $</label><input id="si-p" type="number" step="0.01" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4MatInAdd()">+ Приход</button></div></div>
-        <table><thead><tr><th>Дата</th><th>Сырьё</th><th>Поставщик</th><th class="num">Шт</th><th class="num">Итого $</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+      const rows = e.matIn.map((x, i) => `<tr><td>${window.esc(x.date)}</td><td class="bold">${window.esc(x.matName)}</td><td>${window.esc(x.supplier)}</td><td class="num">${x.qty}</td><td class="num bold">${window.fmtU(x.totalUsd)}</td><td>${window.esc(x.comment || '')}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4EditMatIn(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('matIn',${i})">✕</button></td></tr>`).join('');
+      body = `<div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="si-d" type="date" class="input" value="${window.today()}"></div><div>${window.withPlusBtn('Сырьё', 'materials', 'Материал', 'si-m')}<select id="si-m" class="select">${matOpts}</select></div><div>${window.withPlusBtn('Поставщик', 'dictSuppliers', 'Поставщик сырья', 'si-s')}<select id="si-s" class="select">${window.getDictOptions(window.directoryRows('dictSuppliers'))}</select></div><div><label>Количество</label><input id="si-q" type="number" step="any" min="0" class="input"></div><div><label>Цена $</label><input id="si-p" type="number" step="0.01" class="input"></div><div><label>Комментарий</label><input id="si-note" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4MatInAdd()">+ Приход</button></div></div>
+        <table><thead><tr><th>Дата</th><th>Сырьё</th><th>Поставщик</th><th class="num">Кол-во</th><th class="num">Итого $</th><th>Комментарий</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     }
     /* === Часть 10Б-2: Пошив/Техкарты, ГП и Брак === */
     else if (sub === 'ord') {
@@ -2051,7 +2051,7 @@
       }
     }
     for (const item of payload.skus) {
-      if (!clean(item?.bc) || !clean(item?.name) || !Number.isFinite(item.usd) || item.usd <= 0) {
+      if (!clean(item?.bc) || !clean(item?.name) || !Number.isFinite(item.usd) || (catalogOnly ? item.usd < 0 : item.usd <= 0)) {
         throw new Error('Пакет содержит некорректный товар.');
       }
       const bc = clean(item.bc);
@@ -2066,7 +2066,7 @@
         if (Object.keys(missing).length) enrichedSkus.set(bc, {...stored, ...missing});
         continue;
       }
-      const added = {bc,name:item.name,art:knownArticles.get(norm(item.name)) || item.name,usd:item.usd,...metadata};
+      const added = {bc,name:item.name,art:knownArticles.get(norm(item.name)) || item.name,usd:item.usd,isNew:item.usd === 0,...metadata};
       existingSku.set(bc,added);
       addedSkus.push(added);
     }
@@ -2100,14 +2100,14 @@
     const col=(...labels)=>header.findIndex(x=>labels.includes(x));
     const barcode=col('баркод','шк','barcode','bc'), name=col('название','наименование товара','name'), usd=col('себестоимость usd','себестоимость в usd','usd');
     if(Math.min(barcode,name,usd)<0)throw new Error('Нужны колонки «Баркод», «Название» и «Себестоимость USD».');
-    const art = col('артикул', 'артикул товара', 'артикул поставщика', 'art');
+    const art = col('артикул', 'артикул продавца', 'артикул товара', 'артикул поставщика', 'art');
     const color = col('цвет', 'color', 'col');
     const size = col('размер', 'size', 'siz');
     const sku = col('ваш sku', 'sku');
     const skus=cells.map((values,index)=>{
       const bc=(values[barcode]||'').trim(), title=(values[name]||'').trim();
       const cost=Number((values[usd]||'').replace(/\s/g,'').replace(',','.'));
-      if(!bc||!title||!Number.isFinite(cost)||cost<=0)throw new Error('Проверь данные в строке '+(index+2)+'.');
+      if(!bc||!title||!Number.isFinite(cost)||cost<0)throw new Error('Проверьте штрихкод, название и себестоимость в строке '+(index+2)+'.');
       return {bc,name:title,usd:cost,art:values[art],col:values[color],siz:values[size],sku:values[sku]};
     });
     if(!skus.length)throw new Error('В CSV нет товаров.');
@@ -2133,7 +2133,12 @@
       templateButton.style.marginInlineStart = '8px';
       templateButton.textContent = 'Скачать шаблон CSV с примером';
       templateButton.onclick = () => {
-        const blob = new Blob(["﻿Баркод;Название;Себестоимость USD\r\n2000000000015;Футболка белая размер M;4.50\r\n2000000000022;Футболка чёрная размер L;4.80\r\n"], {type:'text/csv;charset=utf-8'});
+        const csv = [
+          'Артикул продавца;Баркод;Название;Цвет;Размер;Себестоимость USD;Ваш SKU',
+          'SKOS-EXAMPLE;2000000000015;Футболка пример;Белый;M;4,50;SKOS-EXAMPLE белый M',
+          'SKOS-EXAMPLE;2000000000022;Футболка пример;Чёрный;L;4,80;SKOS-EXAMPLE чёрный L'
+        ].join('\r\n');
+        const blob = new Blob(['\uFEFF', csv, '\r\n'], {type:'text/csv;charset=utf-8'});
         const link = document.createElement('a');
         const url = URL.createObjectURL(blob);
         link.href = url;
