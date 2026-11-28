@@ -118,7 +118,7 @@
         if (key !== ymSkuKey(art + (s.col || '') + (s.siz || ''))) addCatalogCandidate(byYmVariant, key, s);
       }
     });
-    return { byExact, byClean, byArt, fNames, byYmVariant, byYmModel };
+    return { byExact, byClean, byArt, fNames, byYmVariant, byYmModel, ymLinks:window.db.erp?.ymArticleLinks || {} };
   };
   /* === Часть 3/10: Сохранение, Облако Supabase, Кнопка «+» и Быстрый рендер === */
   window.cleanSkus = function () {
@@ -507,22 +507,26 @@
     return { bc: bc || art || 'Неизвестный ШК', art: art || 'Без папки', modelTitle: name || art || bc || 'Товар', usd: 0, col: pCol, siz: pSiz };
   };
 
-  window.resolveMarketplaceMeta = function (idx, bc, sellerSku, name, reportedSize = '') {
+  window.resolveMarketplaceMeta = function (idx, bc, sellerSku, name, reportedSize = '', marketplace = '') {
     const sku = window.normStr(sellerSku);
     const barcode = window.normStr(bc);
     const cleanBarcode = window.normKey(barcode).replace(/^0+/, '').replace(/^ozn/, '');
     const exactBarcode = idx.byExact.get(barcode) || idx.byClean.get(cleanBarcode) || idx.byExact.get(sku);
 
     const parts = sku.match(/^(SKOS-[A-ZА-Я0-9]+)(?:\s+|_)(.+)$/i);
-    const model = parts ? parts[1] : sku;
-    const suffix = parts?.[2] || '';
+    const savedFolder = marketplace === 'YM' && Object.hasOwn(idx.ymLinks || {},ymSkuKey(sku)) ? idx.ymLinks[ymSkuKey(sku)]?.article : '';
+    const prefix = !parts && marketplace === 'YM' && !idx.byYmModel.has(ymSkuKey(sku))
+      ? sku.match(/^(SKOS-[A-Z0-9]+)(?=[а-яё])/iu)?.[1] : '';
+    const model = savedFolder || parts?.[1] || prefix || sku;
+    const suffix = parts?.[2] || (prefix ? sku.slice(prefix.length) : '');
     const sizeMatch = suffix.match(/(XXXL|XXL|XXS|XL|XS|[2-5]XL|[SMLХМ]|\d{2}(?:[-–]\d{2})?)$/i);
     const size = reportedSize && reportedSize !== '0' && reportedSize !== '—' ? reportedSize : sizeMatch?.[1] || '';
     const rawColor = sizeMatch ? suffix.slice(0, sizeMatch.index).trim() : suffix;
     const color = rawColor.replace(/^ч[её]рные брюки$/i, 'чёрный');
     const candidates = idx.byYmVariant.get(ymSkuKey(sku)) ||
       (parts && color && size ? idx.byYmVariant.get(ymSkuKey(model + color + size)) : null);
-    const variant = exactBarcode || (candidates?.count === 1 ? candidates.first : null);
+    const candidate = exactBarcode || (candidates?.count === 1 ? candidates.first : null);
+    const variant = !savedFolder || ymSkuKey(candidate?.art) === ymSkuKey(savedFolder) ? candidate : null;
     const modelCandidates = idx.byYmModel.get(ymSkuKey(variant?.art || model));
     const knownModel = modelCandidates?.first;
     const commonCost = group => group?.costs.size === 1 ? group.costs.values().next().value : 0;
@@ -531,9 +535,10 @@
     return {
       bc: variant?.bc || sku || 'Без ШК',
       art,
+      knownFolder: Boolean(variant || knownModel),
       modelTitle: idx.fNames[art] || variant?.name || knownModel?.name || name || art,
       usd: variant ? window.num(variant.usd) || commonCost(modelCandidates)
-        : commonCost(candidates || modelCandidates),
+        : commonCost(savedFolder ? modelCandidates : candidates || modelCandidates),
       col: variantColor || (color ? color[0].toUpperCase() + color.slice(1) : '—'),
       siz: variant?.siz && variant.siz !== '—' ? variant.siz : (size || '—').replace('–', '-')
     };
@@ -570,7 +575,9 @@
 
     (window.db.itemSales || []).forEach(it => {
       const marketItem = it.source === 'marketplace-csv' || (it.mp === 'YM' && it.source !== 'sheets-2026');
-      const meta = marketItem ? window.resolveMarketplaceMeta(skuIdx, it.bc, it.art, it.name, it.size)
+      const omitted = it.mp === 'YM' && it.omitFromProducts;
+      const meta = omitted ? {art:'Общие суммы без привязки к товару',modelTitle:'',bc:'',col:'—',siz:'—',usd:0}
+        : marketItem ? window.resolveMarketplaceMeta(skuIdx, it.bc, it.art, it.name, it.size, it.mp)
         : window.resolveMetaFast(skuIdx, it.bc, it.art, it.name);
       const color = meta.col && meta.col !== '—' && meta.col !== 'Базовый' ? meta.col : it.color || it.col || meta.col;
       const size = meta.siz && meta.siz !== '—' ? meta.siz : it.size || it.siz || meta.siz;
@@ -595,15 +602,18 @@
       const pr = rev - fee - cog;
       tS += sq; tR += rq; tRev += rev; tCog += cog; tFee += fee; tPr += pr;
 
-      let gk = meta.art, gTit = `${meta.art} — ${meta.modelTitle}`, gSub = `Папка: ${meta.art}`;
-      if (mode === 'COLOR') { gk = meta.art + '||' + meta.col; gTit = `${meta.modelTitle} (${meta.col})`; gSub = `Арт: ${meta.art} • Цвет: ${meta.col}`; }
-      else if (mode === 'SIZE') { gk = meta.art + '||' + meta.siz; gTit = `${meta.modelTitle} • Разм. ${meta.siz}`; gSub = `Арт: ${meta.art} • Размер: ${meta.siz}`; }
-      else if (mode === 'SKU') { gk = meta.bc; gTit = `${meta.modelTitle} (${meta.bc})`; gSub = `${meta.art} • ${meta.col} • ${meta.siz}`; }
+      const unlinked = omitted || !(it.art || it.bc || it.name);
+      let gk = unlinked ? 'Общие суммы без привязки к товару' : meta.art, gTit = unlinked ? 'Общие суммы без привязки к товару'
+        : meta.art === meta.modelTitle ? meta.art : `${meta.art} — ${meta.modelTitle}`;
+      let gSub = unlinked ? 'Услуги, корректировки и строки без выбранной папки' : `Папка: ${meta.art}`;
+      if (!unlinked && mode === 'COLOR') { gk = meta.art + '||' + meta.col; gTit = `${meta.modelTitle} (${meta.col})`; gSub = `Арт: ${meta.art} • Цвет: ${meta.col}`; }
+      else if (!unlinked && mode === 'SIZE') { gk = meta.art + '||' + meta.siz; gTit = `${meta.modelTitle} • Разм. ${meta.siz}`; gSub = `Арт: ${meta.art} • Размер: ${meta.siz}`; }
+      else if (!unlinked && mode === 'SKU') { gk = meta.bc; gTit = `${meta.modelTitle} (${meta.bc})`; gSub = `${meta.art} • ${meta.col} • ${meta.siz}`; }
 
       if (!groups[gk]) groups[gk] = { tit: gTit, sub: gSub, sq: 0, rq: 0, rev: 0, cog: 0, pr: 0 };
       const g = groups[gk];
       g.sq += sq; g.rq += rq; g.rev += rev; g.cog += cog; g.pr += pr;
-      if (mode === 'MODEL') {
+      if (mode === 'MODEL' && !unlinked) {
         g.variants ||= new Map();
         const key = JSON.stringify([meta.col, meta.siz]);
         const variant = g.variants.get(key) || {color: meta.col, size: meta.siz, sq: 0, rq: 0, rev: 0, cog: 0, pr: 0};
@@ -824,6 +834,7 @@
     const box = document.getElementById('map-box'); if (!box) return;
     if (!mpBatch || !mpBatch.files.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
     const grp = {};
+    const catalog = window.buildSkuIndex();
     const orderItems = new Map();
     for (const file of mpBatch.files.filter(file => file.unitType === 'items')) {
       for (const item of file.orderVariants || file.items) {
@@ -838,12 +849,36 @@
       g.sources.push(f.source); g.cnt++; g.rev += f.rev; g.ret += f.ret; g.com += f.com; g.log += f.log; g.ads += f.ads; g.cogs += f.cogs; g.sQty += f.sQty; g.rQty += f.rQty; for (const item of f.items) {
         const matches = f.unitType === 'services' ? orderItems.get(item.orderKey) : null;
         const linked = matches?.size === 1 ? matches.values().next().value : null;
-        g.items.push(linked ? { ...item, art: linked.art, name: linked.name } : item);
+        const matchedModels = matches?.size > 1
+          ? [...matches.values()].map(entry=>window.resolveMarketplaceMeta(catalog,'',entry.art,entry.name,'','YM')) : [];
+        const shared = matchedModels.length && matchedModels.every(meta=>meta.knownFolder && meta.art===matchedModels[0].art)
+          ? matchedModels[0] : null;
+        g.items.push(linked ? {...item,art:linked.art,name:linked.name} :
+          shared ? {...item,art:shared.art,name:shared.modelTitle} : item);
       }
     });
     const marketTypes = new Set(mpBatch.files.filter(f => f.mp === 'YM').map(f => f.unitType).filter(Boolean));
     const missingMarketFile = marketTypes.size === 1;
     const newBarcodes = newWbBarcodes(grp.WB);
+    const ymProducts = new Map();
+    for (const item of grp.YM?.items || []) {
+      if (item.art && (item.sQty || item.rQty)) ymProducts.set(item.art,window.resolveMarketplaceMeta(catalog,item.bc,item.art,item.name,item.size,'YM'));
+    }
+    const unresolvedYm = [...ymProducts].filter(([,meta])=>!meta.knownFolder);
+    const folderOptions = [...new Set((window.db.skus || []).map(item=>item.art).filter(Boolean))].sort();
+    const ymReview = unresolvedYm.length ? `<details open><summary>Яндекс Маркет · выберите папки (${unresolvedYm.length})</summary>
+      <p>Для новой папки сначала добавьте товар с реальным ШК через справочник, затем загрузите файлы снова. «Оставить отдельно» сохраняет операцию. «Убрать из списка товаров» сохраняет сумму в общих итогах.</p>
+      ${unresolvedYm.map(([sku],index)=>`<label style="display:block;margin:6px 0">${window.esc(sku)} <select class="select" data-ym-review="${index}">
+        <option value="">— Выберите действие —</option><option value="keep">Оставить отдельно</option><option value="hide">Убрать из списка товаров</option>
+        ${folderOptions.map((folder,i)=>`<option value="folder:${i}">${window.esc(folder)}</option>`).join('')}</select></label>`).join('')}</details>` : '';
+    const ymTotals = (grp.YM?.items || []).reduce((total,item)=>{
+      if (item.sQty) {
+        total.gross += item.rev;
+        total.points += item.ymPoints || 0;
+        total.cash += item.ymCash || 0;
+      }
+      return total;
+    },{gross:0,points:0,cash:0});
     const overlaps = Object.keys(grp).filter(mp => reportsForPeriod(mpBatch.org, mp, mpBatch.yr, mpBatch.mo).length);
     const unknownCosts = Object.values(grp).flatMap(group => [...new Set(group.items
       .filter(item => item.source === 'marketplace-csv' && (item.sQty || item.rQty) && !item.hasCost)
@@ -851,6 +886,11 @@
     box.classList.remove('hidden');
     box.innerHTML = `<div style="font-weight:700;margin-bottom:8px">📝 Черновик (${mpBatch.files.length} ф.) • ${window.esc(mpBatch.org)} • ${mpBatch.mo}.${mpBatch.yr}</div>` +
       Object.values(grp).map(g => `<div style="padding:8px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:6px;font-size:12px"><b>${g.mp}</b> (${g.cnt} ф.): Выручка <b>${window.fmtR(g.rev)}</b> | Возвраты <b class="text-red">${window.fmtR(g.ret)}</b> | Услуги МП <b>${window.fmtR(g.com + g.log + g.ads)}</b> | Себест. <b>${window.fmtR(g.cogs)}</b></div>`).join('') +
+      (grp.YM ? `<p>Баллы за скидки Маркета и Плюса по доставленным строкам: ${window.fmtR(ymTotals.points)}. Цена продажи по доставленным: ${window.fmtR(ymTotals.gross)}.
+        Денежные платежи по CSV: ${window.fmtR(ymTotals.cash)}.
+        ${Math.abs(ymTotals.gross-ymTotals.cash-ymTotals.points)<0.01 ? 'Суммы сходятся. Баллы отдельно в выручку не прибавляются.' :
+          'Цена, деньги и баллы расходятся. Сверьте компенсации и статусы со сводом Маркета.'}</p>` : '') +
+      ymReview +
       (newBarcodes.length ? `<p role="status">Новые штрихкоды в существующих папках: ${newBarcodes.length}.</p>` : '') +
       (overlaps.length ? `<p role="status">В этом месяце уже есть записи для ${overlaps.join(', ')}. Проверьте периоды и ручные итоги перед сохранением.</p>` : '') +
       (unknownCosts.length ? `<p role="status">Себестоимость не определена для товаров (${unknownCosts.length}): ${window.esc(unknownCosts.slice(0, 8).join(', '))}. Проверьте справочник перед сохранением.</p>` : '') +
@@ -865,6 +905,31 @@
       }
       if (overlaps.length && !confirm('За этот месяц уже есть данные по ' + overlaps.join(', ') +
           '. Подтвердите, что новые файлы не дублируют сохранённые операции и ручные итоги.')) return;
+      if (window.__skosReadOnly) return;
+      const choices = [...box.querySelectorAll('[data-ym-review]')].map(select=>select.value);
+      if (choices.some(choice=>!choice)) return alert('Выберите действие для каждого неизвестного SKU Яндекс Маркета.');
+      const links = new Map([...ymProducts].filter(([,meta])=>meta.knownFolder).map(([sku,meta])=>[ymSkuKey(sku),{sku,article:meta.art}]));
+      const excluded = new Set();
+      unresolvedYm.forEach(([sku],index)=>{
+        const choice = choices[index];
+        if (choice === 'hide') excluded.add(ymSkuKey(sku));
+        if (choice.startsWith('folder:')) links.set(ymSkuKey(sku),{sku,article:folderOptions[Number(choice.slice(7))]});
+      });
+      if (links.size) {
+        const store = window.ensureStore();
+        store.ymArticleLinks = Object.fromEntries([...Object.entries(store.ymArticleLinks || {}),...links]);
+      }
+      if (grp.YM) {
+        const index = window.buildSkuIndex();
+        grp.YM.cogs = 0;
+        for (const item of grp.YM.items) {
+          const meta = window.resolveMarketplaceMeta(index,item.bc,item.art,item.name,item.size,'YM');
+          item.omitFromProducts = excluded.has(ymSkuKey(item.art));
+          item.cogs = (item.sQty-item.rQty)*meta.usd*window.getRate(mpBatch.yr+'-'+mpBatch.mo);
+          item.hasCost = meta.usd > 0;
+          grp.YM.cogs += item.cogs;
+        }
+      }
       window.db.skus.push(...newWbBarcodes(grp.WB));
       Object.values(grp).forEach(g => {
         const bo = (g.sQty + g.rQty) > 0 ? Math.round((g.sQty / (g.sQty + g.rQty)) * 100) : 89;
@@ -930,10 +995,16 @@
 
     const q = (filterQ !== undefined ? filterQ : (document.getElementById('sku-q')?.value || '')).trim().toLowerCase();
     const rate = window.getRate(), fNames = window.getFolderNames(), folders = Object.create(null);
+    const ymAliases = new Map();
+    for (const link of Object.values(window.db.erp?.ymArticleLinks || {})) {
+      if (!link?.article || !link.sku) continue;
+      if (!ymAliases.has(link.article)) ymAliases.set(link.article,[]);
+      ymAliases.get(link.article).push(link.sku);
+    }
     (window.db.skus || []).forEach(s => {
       const fKey = window.normStr(s.art) || 'Без артикула';
       if (!folders[fKey]) folders[fKey] = { key: fKey, title: fNames[fKey] || s.name || fKey, items: [] };
-      if (!q || s.bc.toLowerCase().includes(q) || fKey.toLowerCase().includes(q) || (s.name || '').toLowerCase().includes(q)) folders[fKey].items.push(s);
+      if (!q || s.bc.toLowerCase().includes(q) || fKey.toLowerCase().includes(q) || (s.name || '').toLowerCase().includes(q) || ymAliases.get(fKey)?.some(sku=>sku.toLowerCase().includes(q))) folders[fKey].items.push(s);
     });
 
     const keys = Object.keys(folders).filter(k => folders[k].items.length > 0).sort();
@@ -947,7 +1018,7 @@
       (keys.length ? keys.map(k => {
         const f = folders[k], prices = f.items.map(x => window.num(x.usd)).filter(x => x > 0), pBadge = prices.length ? window.fmtU(prices[0]) : '0,00 $';
         const rows = f.items.slice(0, 200).map(s => `<tr class="${!(s.usd > 0) ? 'row-new-sku' : ''}"><td style="font-family:monospace;font-weight:700">${window.esc(s.bc)}</td><td>${window.esc(s.name || '—')}${s.arch ? ' <span class="badge badge-amber">В архиве</span>' : ''}</td><td class="num bold">${window.fmtU(s.usd)}</td><td class="num" style="color:#64748b">${window.fmtR(s.usd * rate)}</td><td style="text-align:right;white-space:nowrap">${window.__skosReadOnly ? '' : `<button class="btn" style="padding:3px 7px" onclick="openEditSkuModal('${s.id}')">✏️</button> <button type="button" class="btn" data-archive-sku="${window.esc(s.bc)}">${s.arch ? 'Восстановить' : 'В архив'}</button> <button class="btn btn-danger" onclick="deleteSingleSku('${s.id}')">✕</button>`}</td></tr>`).join('');
-        return `<details data-sku-folder="${window.esc(f.key)}" ${q || expandedFolders.has(f.key) ? 'open' : ''} style="border:1px solid #cbd5e1;border-radius:10px;margin-bottom:8px;background:#fff"><summary style="cursor:pointer;padding:9px 12px;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="display:flex;align-items:center;gap:8px"><span>📁</span><b>${window.esc(f.key)}</b><span style="color:#475569">— ${window.esc(f.title)}</span><span class="badge badge-blue">${f.items.length} ШК</span></div><div style="display:flex;align-items:center;gap:6px" onclick="event.preventDefault()"><span class="badge badge-green">${pBadge}</span>${window.__skosReadOnly ? '' : `<button class="btn" style="padding:3px 8px;font-size:11.5px" onclick="openEditFolderModal('${encodeURIComponent(f.key)}')">✏️ Папка</button><button class="btn btn-danger" onclick="deleteWholeFolder('${encodeURIComponent(f.key)}')">✕</button>`}</div></summary><div style="padding:8px 12px;overflow-x:auto"><table><thead><tr><th>ШК</th><th>Название</th><th class="num">Себест. $</th><th class="num">Себест. ₽</th><th style="text-align:right">Действия</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+        return `<details data-sku-folder="${window.esc(f.key)}" ${q || expandedFolders.has(f.key) ? 'open' : ''} style="border:1px solid #cbd5e1;border-radius:10px;margin-bottom:8px;background:#fff"><summary style="cursor:pointer;padding:9px 12px;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div style="display:flex;align-items:center;gap:8px"><span>📁</span><b>${window.esc(f.key)}</b><span style="color:#475569">— ${window.esc(f.title)}</span><span class="badge badge-blue">${f.items.length} ШК</span></div><div style="display:flex;align-items:center;gap:6px" onclick="event.preventDefault()"><span class="badge badge-green">${pBadge}</span>${window.__skosReadOnly ? '' : `<button class="btn" style="padding:3px 8px;font-size:11.5px" onclick="openEditFolderModal('${encodeURIComponent(f.key)}')">✏️ Папка</button><button class="btn btn-danger" onclick="deleteWholeFolder('${encodeURIComponent(f.key)}')">✕</button>`}</div></summary><div style="padding:8px 12px;overflow-x:auto"><table><thead><tr><th>ШК</th><th>Название</th><th class="num">Себест. $</th><th class="num">Себест. ₽</th><th style="text-align:right">Действия</th></tr></thead><tbody>${rows}</tbody></table>${ymAliases.has(f.key) ? `<details style="margin-top:8px"><summary>SKU Яндекс Маркета (${ymAliases.get(f.key).length})</summary><p>${window.esc(ymAliases.get(f.key).join(', '))}</p></details>` : ''}</div></details>`;
       }).join('') : '<div style="padding:16px;text-align:center;color:#64748b">Ничего не найдено</div>');
     for (const button of wrap.querySelectorAll('[data-archive-sku]')) button.onclick = () => {
       if (window.__skosReadOnly) return;
@@ -968,7 +1039,7 @@
     const m = document.createElement('div'); m.className = 'modal-bg';
     m.innerHTML = `<div class="modal-box"><h3 style="font-size:16px;font-weight:800">✏️ Папка (${items.length} ШК)</h3><div style="display:grid;gap:8px;margin-top:10px"><div><label>Код папки</label><input id="p-fa" class="input" value="${window.esc(fKey)}"></div><div><label>Название модели</label><input id="p-fn" class="input" value="${window.esc(curTit)}"></div><div><label>Себест. ($)</label><input id="p-fu" type="number" step="0.01" class="input" value="${curUsd}"></div></div><div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button><button class="btn btn-primary" id="p-fs">💾 Сохранить</button></div></div>`;
     document.body.appendChild(m);
-    document.getElementById('p-fs').onclick = () => { const na = window.normStr(document.getElementById('p-fa').value) || fKey, nn = window.normStr(document.getElementById('p-fn').value) || curTit, nu = window.num(document.getElementById('p-fu').value); window.setFolderName(na, nn); items.forEach(s => { s.art = na; s.name = nn; s.usd = nu; s.isNew = nu === 0; }); window.recalcReportsCogs(); m.remove(); window.save(true); window.renderSkuTab(); };
+    document.getElementById('p-fs').onclick = () => { const na = window.normStr(document.getElementById('p-fa').value) || fKey, nn = window.normStr(document.getElementById('p-fn').value) || curTit, nu = window.num(document.getElementById('p-fu').value); window.setFolderName(na, nn); for (const link of Object.values(window.db.erp?.ymArticleLinks || {})) { if (link?.article === fKey) link.article = na; } items.forEach(s => { s.art = na; s.name = nn; s.usd = nu; s.isNew = nu === 0; }); window.recalcReportsCogs(); m.remove(); window.save(true); window.renderSkuTab(); };
   };
   window.deleteWholeFolder = enc => { const fKey = decodeURIComponent(enc), cnt = (window.db.skus || []).filter(s => (window.normStr(s.art) || 'Без артикула') === fKey).length; if (cnt && confirm('Удалить папку «' + fKey + '» (' + cnt + ' ШК)?')) { window.db.skus = window.db.skus.filter(s => (window.normStr(s.art) || 'Без артикула') !== fKey); window.save(true); window.renderSkuTab(); } };
   window.openEditSkuModal = id => { const s = (window.db.skus || []).find(x => x.id === id); if (!s) return; const m = document.createElement('div'); m.className = 'modal-bg'; m.innerHTML = `<div class="modal-box"><h3 style="font-size:16px;font-weight:800">✏️ Редактировать ШК</h3><div style="display:grid;gap:8px;margin-top:10px"><div><label>ШК</label><input id="e-bc" class="input" value="${window.esc(s.bc)}"></div><div><label>Артикул (папка)</label><input id="e-ar" class="input" value="${window.esc(s.art)}"></div><div><label>Название</label><input id="e-nm" class="input" value="${window.esc(s.name)}"></div><div><label>Себест. ($)</label><input id="e-us" type="number" step="0.01" class="input" value="${s.usd || 0}"></div></div><div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button><button class="btn btn-primary" id="e-sv">💾 Сохранить</button></div></div>`; document.body.appendChild(m); document.getElementById('e-sv').onclick = () => { const nb = window.normStr(document.getElementById('e-bc').value); if (!nb) return alert('Введите ШК!'); s.bc = nb; s.art = window.normStr(document.getElementById('e-ar').value) || 'Без артикула'; s.name = window.normStr(document.getElementById('e-nm').value) || s.art; s.usd = window.num(document.getElementById('e-us').value); s.isNew = s.usd === 0; window.recalcReportsCogs(); m.remove(); window.save(true); window.renderSkuTab(); }; };
@@ -1844,6 +1915,7 @@
     const out = {fileName: file.name, mp, rev: 0, ret: 0, com: 0, log: 0, ads: 0, cogs: 0, sQty: 0, rQty: 0, items: []};
     out.unitType = ymItems ? 'items' : ym ? 'services' : '';
     if (ymItems) out.orderVariants = [];
+    const ymCashColumns = ymItems ? headers.flatMap((label,i)=>label==='сумма платежа'?[i]:[]) : [];
     const cols = new Map(), rowOccurrences = new Map();
     let duplicates = 0;
     for (const line of lines.slice(headerIndex + 1)) {
@@ -1854,6 +1926,7 @@
         return (row[cols.get(prefix)] || '').trim();
       };
       const amount = prefix => window.num(value(prefix).replace(/\s/g, ''));
+      let ymPoints = 0, ymCash = 0;
       let art = '', bc = '', name = '', size = '', sold = 0, returned = 0, rev = 0, refunds = 0, log = 0, com = 0, ads = 0;
       if (wb) {
         const reason = value('обоснование для оплаты').toLowerCase();
@@ -1900,6 +1973,10 @@
         const price = amount('цена продажи (за шт.)');
         rev = (sold - returned) * price;
         refunds = returned * price;
+        if (sold) {
+          ymPoints = amount('сумма баллов');
+          ymCash = ymCashColumns.reduce((sum,i)=>sum + window.num((row[i] || '').replace(/\s/g,'')),0);
+        }
       } else {
         const status = value('статус заказа').toLowerCase();
         if (!status || !value('номер заказа')) continue;
@@ -1922,11 +1999,11 @@
         importKey = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('') + ':' + occurrence;
         if (previouslySaved.has(importKey)) { duplicates++; continue; }
       }
-      const meta = (art || bc) ? window.resolveMarketplaceMeta(skuIdx, bc, art, name, size) : null;
+      const meta = (art || bc) ? window.resolveMarketplaceMeta(skuIdx, bc, art, name, size, mp) : null;
       const cogs = meta && meta.usd > 0 ? (sold - returned) * meta.usd * rate : 0;
       out.rev += rev; out.ret += refunds; out.sQty += sold; out.rQty += returned;
       out.log += log; out.com += com; out.ads += ads; out.cogs += cogs;
-      out.items.push({bc, art, name, size, source: 'marketplace-csv', sQty: sold, rQty: returned, rev, fee: log + com + ads, log, com, ads, cogs, hasCost: !!(meta && meta.usd > 0), orderKey, importKey});
+      out.items.push({bc, art, name, size, source: 'marketplace-csv', sQty: sold, rQty: returned, rev, fee: log + com + ads, log, com, ads, cogs, hasCost: !!(meta && meta.usd > 0), orderKey, importKey, ...(ymItems ? {ymPoints,ymCash} : {})});
     }
     out.duplicates = duplicates;
     return out;
@@ -2087,7 +2164,7 @@
       const reports = new Map((window.db.reports || []).map(row => [String(row.id), row]));
       const catalog = window.buildSkuIndex();
       const rows = new Map(), balances = new Map(), models = new Set();
-      const unassigned = 'Без распределения по моделям';
+      const unassigned = 'Общие суммы без привязки к товару';
       const blank = (name, per, title) => ({org:name, per, title, qS:0, qR:0, netQty:0, netRev:0, cNet:0, log:0, comm:0, missingCost:false});
       const matches = (name, per) => /^\d{4}-\d{2}$/.test(per) && (org === 'ALL' || org === name) &&
         (yr === 'ALL' || per.slice(0,4) === yr) && (mo === 'ALL' || per.slice(5) === mo);
@@ -2119,10 +2196,10 @@
         const returned = window.num(s.rQty ?? s.rq ?? s.retQty);
         const sold = s.sQty != null ? window.num(s.sQty) : window.num(s.sold ?? s.q ?? s.qty) + returned;
         const net = sold - returned;
-        const identified = s.art || s.bc || s.name;
+        const identified = !s.omitFromProducts && (s.art || s.bc || s.name);
         const marketItem = s.source === 'marketplace-csv' || (mp === 'YM' && s.source !== 'sheets-2026');
         const meta = !identified ? null : marketItem
-          ? window.resolveMarketplaceMeta(catalog, s.bc, s.art, s.name, s.size)
+          ? window.resolveMarketplaceMeta(catalog, s.bc, s.art, s.name, s.size, mp)
           : window.resolveMetaFast(catalog, s.bc, s.art, s.name);
         const title = meta?.modelTitle || (identified || unassigned);
         const usd = window.num(meta?.usd || s.usd);

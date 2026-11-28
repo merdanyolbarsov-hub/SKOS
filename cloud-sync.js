@@ -37,7 +37,7 @@
   cloud.disabled = true;
 
   let ownerWork, ownerLatest, ownerCloudReady;
-  let user, role, timer, currentVersion, archivedVersion, session = 0, updating = false, publishing = false;
+  let user, role, timer, stopWatching, currentVersion, archivedVersion, session = 0, updating = false, publishing = false;
   const tell = text => {
     message.textContent = text;
     settings.textContent = text;
@@ -68,7 +68,8 @@
     window.ensureStore();
     window.fillAllSelects();
     window.onPerChange();
-    window.tab(window.db.tab || 'dash');
+    if (document.getElementById('nav-unit')?.classList.contains('active')) window.renderUnitTab();
+    else window.tab(window.db.tab || 'dash');
   }
   function ownerMode(editable) {
     if (editable) {
@@ -118,8 +119,13 @@
       throw error;
     }
   }
-  async function refresh() {
-    if (role !== 'viewer' || archivedVersion || updating) return;
+  let pendingVersion = '';
+  async function refresh(versionId = '') {
+    if (role !== 'viewer' || archivedVersion) return;
+    if (updating) {
+      if (versionId && versionId !== currentVersion) pendingVersion = versionId;
+      return;
+    }
     const active = session;
     updating = true;
     try {
@@ -144,6 +150,9 @@
     } finally {
       updating = false;
       returnToLatest.disabled = false;
+      const queued = pendingVersion;
+      pendingVersion = '';
+      if (queued && queued !== currentVersion) refresh(queued);
     }
   }
 
@@ -286,6 +295,9 @@
     authSdk.onAuthStateChanged(auth, async account => {
       const active = ++session;
       clearInterval(timer);
+      stopWatching?.();
+      stopWatching = undefined;
+      pendingVersion = '';
       role = null;
       ownerLatest = ownerWork = null;
       ownerCloudReady = false;
@@ -357,7 +369,12 @@
           window.applyGuestRestrictions();
           history.hidden = false;
           await refresh();
-          if (active === session) timer = setInterval(refresh,10000);
+          if (active === session) {
+            timer = setInterval(refresh,10000);
+            stopWatching = firestore.watchLatest?.(id => {
+              if (active === session && id !== currentVersion) refresh(id);
+            });
+          }
         }
         if (active === session) logout.hidden = false;
       } catch {

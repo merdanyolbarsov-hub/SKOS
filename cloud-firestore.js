@@ -47,6 +47,11 @@
         return {role};
       },
       latest,
+      watchLatest(onChange) {
+        return sdk.onSnapshot(pointer, {includeMetadataChanges:true}, snapshot => {
+          if (!snapshot.metadata.fromCache) onChange(snapshot.exists() ? snapshot.data().title : '');
+        }, () => {});
+      },
       async history() {
         const result = await sdk.getDocsFromServer(sdk.query(versions, sdk.orderBy('date', 'desc')));
         return result.docs.map(doc => doc.id).filter(title => versionPattern.test(title));
