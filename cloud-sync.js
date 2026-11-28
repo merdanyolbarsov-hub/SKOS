@@ -7,12 +7,20 @@
   gate.innerHTML = '<h2>SKOS Finance</h2><p role="status" style="margin:12px 0">Проверяем доступ…</p><form data-skos-login><label>Логин (почта)<input class="input" type="email" name="email" autocomplete="username" required></label><label>Пароль<input class="input" type="password" name="password" autocomplete="current-password" required></label><button type="submit" class="btn btn-primary" style="margin-top:12px" disabled>Войти</button></form>';
   gate.addEventListener('cancel', event => event.preventDefault());
   document.body.append(gate);
+  const startup = document.getElementById('skos-startup');
+  const startupMessage = startup.querySelector('[data-startup-message]');
   const appContent = [...document.querySelectorAll('.sidebar, .main-wrap')];
-  const setAppReady = ready => appContent.forEach(element => {
-    element.inert = !ready;
-    element.style.visibility = ready ? '' : 'hidden';
-  });
-  const showLogin = () => { if (!gate.open) gate.showModal(); };
+  const setAppReady = ready => {
+    startup.hidden = ready || gate.open;
+    appContent.forEach(element => {
+      element.inert = !ready;
+      element.style.visibility = ready ? '' : 'hidden';
+    });
+  };
+  const showLogin = () => {
+    startup.hidden = true;
+    if (!gate.open) gate.showModal();
+  };
   setAppReady(false);
   window.__skosReadOnly = true;
   const message = gate.querySelector('[role=status]');
@@ -40,6 +48,7 @@
   let user, role, timer, stopWatching, currentVersion, archivedVersion, session = 0, updating = false, publishing = false;
   const tell = text => {
     message.textContent = text;
+    if (!startup.hidden) startupMessage.textContent = text;
     settings.textContent = text;
     cloud.title = text;
   };

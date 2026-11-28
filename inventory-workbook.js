@@ -23,14 +23,22 @@
   }
 
   function renderMovements(store) {
-    const rows = store.orders.flatMap(order => (order.lines || []).map(line => ({
-      date:order.date, completed:order.doneDate, product:order.product, material:line.matName,
-      qty:num(line.usedQty), price:num(line.priceUsd), status:order.status, note:order.comment
-    }))).filter(row=>!month || period(row.date)===month || period(row.completed)===month)
+    const rows = store.orders.flatMap(order => {
+      if (order.production && (!order.production.legacy || order.production.issues.length)) {
+        return order.production.issues.flatMap(issue=>issue.materials.map(line=>({
+          date:issue.date,product:order.product,material:line.matName,qty:num(line.usedQty),
+          price:num(line.priceUsd),status:'Выдано в пошив',note:order.comment
+        })));
+      }
+      return (order.lines || []).map(line=>({
+        date:order.date, completed:order.doneDate, product:order.product, material:line.matName,
+        qty:num(line.usedQty), price:num(line.priceUsd), status:order.status==='DONE'?'Списано':'В работе', note:order.comment
+      }));
+    }).filter(row=>!month || period(row.date)===month || period(row.completed)===month)
       .sort((a,b)=>String(b.date || '').localeCompare(String(a.date || '')))
-      .map(row=>cells([period(row.date),row.date,row.qty,money(row.price),money(row.qty*row.price),
-        row.material,row.product,row.note || '',row.completed || '—',row.status==='DONE'?'Списано':'В работе']));
-    return `<p style="margin:8px 0">Строки формируются из заказов в разделе «Пошив и техкарты». Списание выполняется при завершении заказа.</p>
+      .map(row=>cells([period(row.date),row.date,quantity(row.qty),money(row.price),money(row.qty*row.price),
+        row.material,row.product,row.note || '',row.completed || '—',row.status]));
+    return `<p style="margin:8px 0">Здесь видна выдача сырья по партиям и списание по завершённым заказам старого формата.</p>
       <div style="margin:10px 0">${monthField()}</div>${table(['Месяц','Дата','Количество','Цена USD','Итого USD',
         'Материал','Товар','Комментарий','Дата изготовления','Статус'],rows)}`;
   }
@@ -97,13 +105,32 @@
       <h3 style="margin:16px 0 8px">Свод по моделям</h3>${table(['Товар','Итого USD'],[...groups].map(([name,total])=>cells([name,money(total)]))) }`;
   }
 
+  function finishedBatches(store) {
+    return store.orders.flatMap((order,orderIndex)=>(order.production?.releases || []).map((batch,batchIndex)=>({...batch,product:order.product,orderIndex,batchIndex})));
+  }
+
+  function renderFinishedBatches(store) {
+    const batches=finishedBatches(store).sort((a,b)=>b.date.localeCompare(a.date));
+    const editable=!window.__skosReadOnly;
+    return `<h3 style="margin:16px 0 8px">Готовая продукция из пошива</h3>
+      <p>Партии уже учтены в запасах. При отгрузке уточняйте фактический остаток в строке партии.</p>
+      ${table(['Дата выпуска','Модель','Выпущено, шт.','Остаток, шт.','Склад выпуска','Себестоимость за шт., USD','Стоимость остатка, USD',...(editable?['Действия']:[])],batches.map(batch=>{
+        const cost=(batch.materialUsd+batch.serviceUsd)/batch.qty;
+        const left=batch.remainingQty ?? batch.qty;
+        const row=cells([batch.date,batch.product,quantity(batch.qty),quantity(left),'ТМ',money(cost),money(cost*left)]);
+        return editable?row.replace('</tr>',`<td><button class="btn" type="button" onclick="editProductionRemainder(${batch.orderIndex},${batch.batchIndex})">Уточнить остаток</button></td></tr>`):row;
+      }))}`;
+  }
+
   function renderMonthly(store) {
     if (!year) year = window.today().slice(0,4);
     const months = Array.from({length:12},(_,i)=>year+'-'+String(i+1).padStart(2,'0'));
     const rows = [
       ['Приход материалов',store.matIn,entry=>entry.date,entry=>num(entry.totalUsd) || num(entry.qty)*num(entry.priceUsd)],
-      ['Передано в пошив (по заказам)',store.orders,entry=>entry.date,entry=>num(entry.totalUsd)],
-      ['Завершённые заказы (по техкарте)',store.orders.filter(entry=>entry.status==='DONE'),entry=>entry.doneDate,entry=>num(entry.totalUsd)],
+      ['Передано в пошив',store.orders.flatMap(order=>order.production && (!order.production.legacy || order.production.issues.length)
+        ? order.production.issues : [{date:order.date,materialUsd:order.totalUsd}]),entry=>entry.date,entry=>num(entry.materialUsd)],
+      ['Завершённые заказы (по техкарте)',store.orders.filter(entry=>entry.status==='DONE' && !entry.production?.releases.length),entry=>entry.doneDate,entry=>num(entry.totalUsd)],
+      ['Выпуск по партиям',finishedBatches(store),entry=>entry.date,entry=>entry.materialUsd+entry.serviceUsd],
       ['Готовые товары (внесённые остатки)',store.fgStocks,entry=>entry.month,entry=>num(entry.lockedUsd) || (num(entry.ruQty)+num(entry.tmQty)+num(entry.wayQty))*num(entry.unitUsd)],
       ['Брак',store.defects,entry=>entry.date,entry=>num(entry.qty)*num(entry.unitUsd)]
     ].map(([label,list,date,amount])=>{
@@ -126,6 +153,7 @@
     } else {
       renderExisting.apply(this,arguments);
       target.querySelector('.card-header + div')?.setAttribute('data-stock-tabs','');
+      if (sub==='fg') target.firstElementChild?.insertAdjacentHTML('beforeend',renderFinishedBatches(store));
       if (sub==='sum') target.insertAdjacentHTML('beforeend',renderMonthly(store));
       if (['sum','mat','inc'].includes(sub)) target.firstElementChild?.insertAdjacentHTML('beforeend',renderBalances());
     }

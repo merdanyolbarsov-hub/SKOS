@@ -4,9 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SKOS Finance 3.0 — Управленческий учёт</title>
-  <link rel="stylesheet" href="style.css?v=20261128-8" />
+  <style>
+    #skos-startup:not([hidden]){position:fixed;inset:0;z-index:1000;display:grid;place-items:center;background:#eae8e2;color:#182637;font:16px system-ui,sans-serif;text-align:center}
+    #skos-startup h1{font-size:24px;margin:12px 0}
+    #skos-startup strong{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:10px;background:#172638;color:#f6f4ef;font-size:24px}
+    #skos-startup progress{display:block;margin:14px auto 0;width:190px;height:7px;accent-color:#46647e}
+  </style>
+  <link rel="stylesheet" href="style.css?v=20261128-9" />
 </head>
 <body>
+  <div id="skos-startup" role="status">
+    <div><strong aria-hidden="true">S</strong><h1>SKOS Finance 3.0</h1><p data-startup-message>Проверяем доступ…</p><progress aria-label="Загрузка SKOS"></progress></div>
+  </div>
   <aside class="sidebar">
     <div>
       <div class="brand">
@@ -423,15 +432,16 @@
     })();
   </script>
   
-   <script src="app.js?v=20261128-8"></script>
+   <script src="app.js?v=20261128-9"></script>
   <script src="unit.js?v=20261128-5"></script>
   <script src="directory-folders.js"></script>
-  <script src="inventory-workbook.js?v=20261128-5"></script>
+  <script src="production-batches.js?v=20261128-9"></script>
+  <script src="inventory-workbook.js?v=20261128-9"></script>
   <script src="contractor-reconciliation.js?v=20261128-5"></script>
   <script src="financial-reports.js?v=20261128-2"></script>
   <script src="cloud-config.js" defer></script>
   <script src="cloud-firestore.js?v=20261128-7" defer></script>
-  <script src="cloud-sync.js?v=20261128-8" defer></script>
+  <script src="cloud-sync.js?v=20261128-9" defer></script>
 </body>
 </html>
 

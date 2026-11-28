@@ -322,6 +322,24 @@
       row.usd -= qty * average;
     };
     for (const order of e.orders) {
+      if (order.production && (!order.production.legacy || order.production.issues.length)) {
+        const issued = window.productionTotals(order.production).issued;
+        for (const issue of order.production.issues) {
+          for (const line of issue.materials) {
+            const row = map.get(line.matName);
+            if (!row) continue;
+            row.orderQty += line.usedQty;
+            row.qty -= line.usedQty;
+            row.usd -= line.usedQty * line.priceUsd;
+          }
+        }
+        for (const line of order.production.recipe || order.lines || []) {
+          if (line.service) continue;
+          const row = map.get(line.matName);
+          if (row) row.plannedQty += (line.norm ?? window.num(line.usedQty)/window.num(order.qty)) * (order.qty-issued);
+        }
+        continue;
+      }
       for (const line of order?.lines || []) {
         const row = map.get(line.matName);
         if (!row) continue;
@@ -341,7 +359,13 @@
     }
     let rawUsd = 0, wipUsd = 0, fgUsd = 0;
     const matRows = Array.from(map.values()).map(m => { if (m.usd > 0) rawUsd += m.usd; m.avg = m.qty > 0 ? m.usd / m.qty : 0; return m; });
-    e.orders.forEach(o => { if (o && o.status === 'WIP') wipUsd += window.num(o.totalUsd); });
+    for (const order of e.orders) {
+      if (order.production && (!order.production.legacy || order.production.issues.length)) {
+        const totals = window.productionTotals(order.production);
+        wipUsd += totals.wipUsd;
+        fgUsd += totals.finishedUsd;
+      } else if (order.status === 'WIP') wipUsd += window.num(order.totalUsd);
+    }
     e.fgStocks.forEach(f => { fgUsd += window.num(f.lockedUsd) || ((window.num(f.ruQty) + window.num(f.tmQty) + window.num(f.wayQty)) * window.num(f.unitUsd)); });
     return { matRows, rawUsd, wipUsd, fgUsd, totalUsd: rawUsd + wipUsd + fgUsd };
   };
@@ -1105,7 +1129,8 @@
   window.getDictOptions = (arr, sel) => (arr || []).filter(x => x && !x.arch).map(x => `<option value="${window.esc(x.name)}"${x.name === sel ? ' selected' : ''}>${window.esc(x.name)}</option>`).join('');
 
   window.p4StkSub = s => { window.ensureStore().stkSub = s; window.save(); window.renderStkTab(); };
-  window.p4DelRow = (key, idx) => { const e = window.ensureStore(); if (key === 'materials' && e.materials[idx] && (e.matIn.some(r => r.matName === e.materials[idx].name) ||
+  window.p4DelRow = (key, idx) => { const e = window.ensureStore(); if (key === 'orders' && e.orders[idx]?.production?.issues.length) return alert('Заказ содержит складские движения.');
+    if (key === 'materials' && e.materials[idx] && (e.matIn.some(r => r.matName === e.materials[idx].name) ||
       e.orders.some(r => r.lines?.some(line => line.matName === e.materials[idx].name)) ||
       e.bom.some(r => r.items?.some(line => line.matName === e.materials[idx].name)) ||
       (e.materialDefects || []).some(r => r.material === e.materials[idx].name))) return alert('Материал используется в складских записях.');
@@ -1117,24 +1142,45 @@
       const store = window.ensureStore();
       const rename = row => { if (row.matName === m.name) row.matName = name; };
       store.matIn.forEach(rename);
-      store.orders.forEach(order => order.lines?.forEach(rename));
+      store.orders.forEach(order => {
+        order.lines?.forEach(rename);
+        order.production?.recipe?.forEach(rename);
+        order.production?.issues.forEach(issue=>issue.materials.forEach(rename));
+      });
       store.bom.forEach(card => card.items?.forEach(rename));
       (store.materialDefects || []).forEach(row => { if (row.material === m.name) row.material = name; });
       m.name = name;
     } const q = prompt('Начальный остаток:', m.initQty); if (q !== null) m.initQty = window.num(q); const u = prompt('Начальная сумма $:', m.initUsd); if (u !== null) m.initUsd = window.num(u); window.save(true); window.renderStkTab(); };
   window.p4EditMatIn = idx => { const x = window.ensureStore().matIn[idx]; if (!x) return; const q = prompt('Количество:', x.qty); if (q !== null) x.qty = window.num(q); const p = prompt('Цена $:', x.priceUsd); if (p !== null) x.priceUsd = window.num(p); x.totalUsd = x.qty * x.priceUsd; window.save(true); window.renderStkTab(); };
-  window.p4EditOrder = idx => { const o = window.ensureStore().orders[idx]; if (!o) return; const q = prompt('Количество шт:', o.qty); if (q !== null) o.qty = window.num(q); const u = prompt('Сумма $:', o.totalUsd); if (u !== null) o.totalUsd = window.num(u); window.save(true); window.renderStkTab(); };
+  window.p4EditOrder = index => {
+    const order = window.ensureStore().orders[index];
+    if (window.__skosReadOnly || !order || order.production?.issues.length) return;
+    const q = prompt('Количество шт:',order.qty);
+    if (q === null) return;
+    const qty = window.num(q);
+    if (!Number.isSafeInteger(qty) || qty<=0) return alert('Укажите целое положительное количество.');
+    if (order.production && !order.production.legacy) {
+      for (const line of order.lines || []) line.usedQty = line.usedQty/window.num(order.qty)*qty;
+      order.totalUsd = (order.lines || []).reduce((sum,line)=>sum+line.usedQty*line.priceUsd,0);
+    } else {
+      const total = prompt('Сумма $:',order.totalUsd);
+      if (total !== null) order.totalUsd=window.num(total);
+    }
+    order.qty=qty;
+    window.save(true);
+    window.renderStkTab();
+  };
   window.p4EditBom = idx => { const b = window.ensureStore().bom[idx]; if (!b) return; const str = (b.items || []).map(it => it.matName + ':' + it.norm + ':' + it.priceUsd).join('; '); const res = prompt('Состав (Материал:Норма:Цена$ через ;):', str); if (res !== null) { b.items = res.split(';').map(p => p.trim()).filter(Boolean).map(p => { const [mn, nr, pr] = p.split(':'); return { matName: (mn || '').trim(), norm: window.num(nr), priceUsd: window.num(pr) }; }); window.save(true); window.renderStkTab(); } };
   window.p4EditFg = idx => { const f = window.ensureStore().fgStocks[idx]; if (!f) return; const ru = prompt('Склад РФ шт:', f.ruQty); if (ru !== null) f.ruQty = window.num(ru); const tm = prompt('Склад ТМ шт:', f.tmQty); if (tm !== null) f.tmQty = window.num(tm); const way = prompt('В пути шт:', f.wayQty); if (way !== null) f.wayQty = window.num(way); const u = prompt('Цена $:', f.unitUsd); if (u !== null) f.unitUsd = window.num(u); f.lockedUsd = (f.ruQty + f.tmQty + f.wayQty) * f.unitUsd; window.save(true); window.renderStkTab(); };
   window.p4EditDef = idx => { const d = window.ensureStore().defects[idx]; if (!d) return; const q = prompt('Количество брака:', d.qty); if (q !== null) d.qty = window.num(q); const u = prompt('Цена $:', d.unitUsd); if (u !== null) d.unitUsd = window.num(u); const r = prompt('Причина:', d.reason); if (r !== null) d.reason = r.trim(); window.save(true); window.renderStkTab(); };
 
   window.p4MatAdd = () => { if (window.__skosReadOnly) return; const e = window.ensureStore(), nm = document.getElementById('sm-nm').value.trim(); if (!nm) return alert('Введите название!'); if (e.materials.some(item => window.normStr(item.name).toLocaleLowerCase('ru') === nm.toLocaleLowerCase('ru'))) return alert('Материал с таким названием уже существует. Добавьте приход или измените его карточку.'); e.materials.unshift({ name: nm, cat: document.getElementById('sm-cat').value, unit: document.getElementById('sm-un').value, initQty: window.num(document.getElementById('sm-q').value), initUsd: window.num(document.getElementById('sm-u').value) }); window.save(true); window.renderStkTab(); };
   window.p4MatInAdd = () => { if (window.__skosReadOnly) return; const e = window.ensureStore(), m = document.getElementById('si-m').value, q = window.num(document.getElementById('si-q').value), p = window.num(document.getElementById('si-p').value); if (!m || q <= 0) return alert('Выберите сырьё и кол-во!'); e.matIn.unshift({ date: document.getElementById('si-d').value || window.today(), matName: m, supplier: document.getElementById('si-s').value, qty: q, priceUsd: p, totalUsd: q * p, comment: document.getElementById('si-note')?.value.trim() || '' }); window.save(true); window.renderStkTab(); };
-  window.p4OrderAdd = () => { const e = window.ensureStore(), pr = document.getElementById('so-p').value, q = window.num(document.getElementById('so-q').value); if (!pr || q <= 0) return alert('Выберите модель и кол-во!'); const rec = e.bom.find(b => b.product === pr); let tot = 0; const lines = (rec?.items || []).map(it => { const u = window.num(it.norm) * q; tot += u * window.num(it.priceUsd); return { matName: it.matName, usedQty: u, priceUsd: window.num(it.priceUsd) }; }); e.orders.unshift({ date: document.getElementById('so-d').value || window.today(), doneDate: '', status: 'WIP', product: pr, qty: q, totalUsd: tot, comment: document.getElementById('so-c').value.trim(), lines }); window.save(true); window.renderStkTab(); };
+  window.p4OrderAdd = () => { const e = window.ensureStore(), pr = document.getElementById('so-p').value, q = window.num(document.getElementById('so-q').value); if (window.__skosReadOnly || !pr || !Number.isSafeInteger(q) || q <= 0) return alert('Выберите модель и целое количество!'); const rec = e.bom.find(b => b.product === pr); let tot = 0; const lines = (rec?.items || []).map(it => { const u = window.num(it.norm) * q; tot += u * window.num(it.priceUsd); return { matName: it.matName, usedQty: u, priceUsd: window.num(it.priceUsd) }; }); e.orders.unshift({ date: document.getElementById('so-d').value || window.today(), doneDate: '', status: 'WIP', product: pr, qty: q, totalUsd: tot, comment: document.getElementById('so-c').value.trim(), lines, production:{issues:[],releases:[]} }); window.save(true); window.renderStkTab(); };
   window.p4OrderDone = index => {
     if (window.__skosReadOnly) return;
     const order = window.ensureStore().orders[index];
-    if (order?.status !== 'WIP') return;
+    if (order?.status !== 'WIP' || (order.production && (!order.production.legacy || order.production.issues.length || order.production.paused))) return;
     const lines = order.lines?.length ? order.lines : (window.ensureStore().bom.find(card => card.product === order.product)?.items || [])
       .map(item => ({matName:item.matName,usedQty:window.num(item.norm)*window.num(order.qty),priceUsd:window.num(item.priceUsd)}));
     const available = new Map(window.calcStockStats().matRows.map(row => [row.name, row.qty]));
@@ -1181,7 +1227,19 @@
     }
     /* === Часть 10Б-2: Пошив/Техкарты, ГП и Брак === */
     else if (sub === 'ord') {
-      const oRows = e.orders.map((o, i) => `<tr><td>${window.esc(o.date)}</td><td class="bold">${window.esc(o.product)}</td><td class="num">${o.qty}</td><td class="num">${window.fmtU(o.totalUsd)}</td><td class="num" style="white-space:nowrap">${o.status === 'DONE' ? '<span class="badge badge-green">Готово</span>' : `<input type="date" class="input" id="stock-done-date-${i}" aria-label="Дата завершения" value="${window.esc(window.today())}" style="width:auto"> <button class="btn btn-success" onclick="p4OrderDone(${i})">✅ Завершить</button>`} <button class="btn" onclick="p4EditOrder(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('orders',${i})">✕</button></td></tr>`).join('');
+      const oRows = e.orders.map((o, i) => {
+        const legacy = !o.production || (o.production.legacy && !o.production.issues.length);
+        const editable = !window.__skosReadOnly && !o.production?.issues.length;
+        const oldFinish = legacy && editable && o.status === 'WIP' && !o.production?.paused
+          ? `<input type="date" class="input" id="stock-done-date-${i}" aria-label="Дата завершения" value="${window.esc(window.today())}" style="width:auto">
+            <button class="btn btn-success" onclick="p4OrderDone(${i})">✅ Завершить</button>` : '';
+        return `<tr><td>${window.esc(o.date)}</td><td class="bold">${window.esc(o.product)}</td>
+          <td class="num">${o.qty}</td><td class="num">${window.fmtU(o.totalUsd)}</td><td>
+          ${o.status==='DONE'?'<span class="badge badge-green">Готово</span>':''}
+          ${window.productionActions(o,i)} ${oldFinish}
+          ${editable?`<button class="btn" onclick="p4EditOrder(${i})">✏️</button>
+          <button class="btn btn-danger" onclick="p4DelRow('orders',${i})">✕</button>`:''}</td></tr>`;
+      }).join('');
       const bRows = e.bom.map((b, i) => { const tot = (b.items || []).reduce((s, it) => s + window.num(it.norm) * window.num(it.priceUsd), 0); return `<tr><td class="bold">${window.esc(b.product)}</td><td>${(b.items || []).map(it => window.esc(it.matName) + ' (' + it.norm + ')').join(', ')}</td><td class="num bold">${window.fmtU(tot)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4EditBom(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('bom',${i})">✕</button></td></tr>`; }).join('');
       body = `<div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="so-d" type="date" class="input" value="${window.today()}"></div><div>${window.withPlusBtn('Модель', 'models', 'Модель', 'so-p')}<select id="so-p" class="select">${window.getModelsOptions()}</select></div><div><label>Шт</label><input id="so-q" type="number" class="input"></div><div><label>Коммент</label><input id="so-c" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4OrderAdd()">+ В пошив</button></div></div>
         <table style="margin-bottom:12px"><thead><tr><th>Дата</th><th>Модель</th><th class="num">Шт</th><th class="num">Сумма $</th><th></th></tr></thead><tbody>${oRows}</tbody></table>
