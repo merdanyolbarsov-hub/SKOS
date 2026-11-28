@@ -42,7 +42,7 @@
   window.renderContractorReconciliation = function (target) {
     const store = window.ensureStore();
     const parties = window.directoryRows('contractors');
-    const years = [...new Set([window.today().slice(0,4),...store.contractorOps.map(o=>String(o.date).slice(0,4))])]
+    const years = [...new Set([...Array.from({length:31}, (_, index)=>String(2020+index)),window.today().slice(0,4),...store.contractorOps.map(o=>String(o.date).slice(0,4))])]
       .filter(year=>/^\d{4}$/.test(year)).sort().reverse();
     const names = [...new Set([...parties.map(p=>p.name),...store.contractorOps.map(o=>o.ctr)])].filter(Boolean).sort();
     if (!years.includes(filters.year)) filters.year='ALL';
