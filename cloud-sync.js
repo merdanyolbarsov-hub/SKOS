@@ -92,7 +92,7 @@
       tell('Последняя версия облака ' + format(ownerLatest.date));
     }
   }
-  working.onclick = () => {
+  function openOwnerDraft() {
     if (role !== 'owner' || !ownerWork || publishing) return;
     const draft = ownerWork;
     ownerWork = null;
@@ -103,7 +103,8 @@
     returnToLatest.textContent = 'Открыть последнюю облачную версию';
     returnToLatest.hidden = !ownerLatest;
     tell('Открыт локальный черновик. Кнопка «Облако» публикует его как новую версию.');
-  };
+  }
+  working.onclick = openOwnerDraft;
   let firestore;
   async function request(path, body) {
     try {
@@ -334,8 +335,9 @@
           }
           role = 'owner';
           if (ownerLatest) {
-            showOwnerLatest();
-            if (!ownerWork) {
+            if (ownerWork) openOwnerDraft();
+            else {
+              showOwnerLatest();
               const baseline = await signature(capture());
               if (active !== session) return;
               localStorage.setItem(signatureKey,baseline);

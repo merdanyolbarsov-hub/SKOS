@@ -254,6 +254,29 @@
     }
   }
 
+  window.loadViewFilter = (key, fallback) => {
+    try { return JSON.parse(localStorage.getItem('skos_view_' + key)) ?? fallback; }
+    catch { return fallback; }
+  };
+  window.saveViewFilter = (key,value) => {
+    try { localStorage.setItem('skos_view_' + key,JSON.stringify(value)); } catch {}
+  };
+  const boundFilters = new WeakSet();
+  function bindViewFilters(controls) {
+    let restored = false;
+    for (const select of controls) {
+      if (!select || boundFilters.has(select)) continue;
+      boundFilters.add(select);
+      const value = window.loadViewFilter(select.id,select.value);
+      if (value !== select.value && Array.from(select.options).some(option=>option.value===value)) {
+        select.value = value;
+        restored = true;
+      }
+      select.addEventListener('change',()=>window.saveViewFilter(select.id,select.value),true);
+    }
+    return restored;
+  }
+
   let rafQueued = false;
   window.render = () => {
     if (rafQueued) return;
@@ -597,6 +620,12 @@
       if (color.name && !color.arch) colsSet.add(color.name);
     }
     fillSel('abc-f-art', 'Все артикулы', artsSet); fillSel('abc-f-col', 'Все цвета', colsSet); fillSel('abc-f-siz', 'Все размеры', sizsSet);
+    const abcFilters = ['abc-mode','abc-f-yr','abc-f-mo','abc-f-org','abc-f-mp','abc-f-art','abc-f-col','abc-f-siz'];
+    if (bindViewFilters(abcFilters.map(id=>document.getElementById(id)))) {
+      window.renderAbcTab();
+      return;
+    }
+
 
     const list = Object.values(groups).sort((a, b) => b.pr - a.pr);
     const posP = list.reduce((a, x) => a + Math.max(0, x.pr), 0);
@@ -1245,12 +1274,14 @@
     return {full, months, passed, monthly, remaining: Math.max(0, full - monthly * passed)};
   };
   let editedAsset = null;
-  let assetSearch = '', assetStatus = 'all';
+  let assetSearch = window.loadViewFilter('assetSearch',''), assetStatus = window.loadViewFilter('assetStatus','all');
   window.p4FilterAssets = () => {
     const panel = document.getElementById('fixed-assets-panel');
     if (!panel) return;
     assetSearch = panel.querySelector('[name=assetSearch]').value;
     assetStatus = panel.querySelector('[name=assetStatus]').value;
+    window.saveViewFilter('assetSearch',assetSearch);
+    window.saveViewFilter('assetStatus',assetStatus);
     const term = assetSearch.trim().toLocaleLowerCase('ru');
     let shown = 0;
     for (const row of panel.querySelectorAll('[data-asset-status]')) {
@@ -1327,7 +1358,7 @@
           <button type="submit" class="btn btn-primary">${activeEdit?'Сохранить изменения':'+ Добавить ОС'}</button>
           ${activeEdit?'<button type="button" class="btn" onclick="p4OsCancel()">Отмена</button>':''}
         </form>`}
-        <div class="form-grid" style="margin:10px 0">
+        <div class="form-grid" data-view-filters style="margin:10px 0">
           <label>Поиск по ОС<input type="search" class="input" name="assetSearch" value="${window.esc(assetSearch)}" oninput="p4FilterAssets()"></label>
           <label>Статус<select class="select" name="assetStatus" onchange="p4FilterAssets()">
             <option value="all">Все</option><option value="active">Активные</option><option value="archived">Архив</option>
@@ -1381,7 +1412,7 @@
     ['dds-wal', 'd-wal', 'tr-from', 'tr-to'].forEach(id => { const el = document.getElementById(id); if (!el) return; const cur = el.value; el.innerHTML = allWals.map(w => `<option value="${w.id}">${window.esc(w.name)} [${w.cur}]</option>`).join(''); if (cur) el.value = cur; });
   };
 
-  window.applyGuestRestrictions = () => { window.__skosReadOnly = true; if (!document.getElementById('ro-css')) { const st = document.createElement('style'); st.id = 'ro-css'; st.textContent = '#tab-set,#nav-set,input[type="file"],.btn-danger,.btn-success,form:not([data-skos-login]),.form-grid:has(input:not([type="checkbox"])){display:none!important}td .btn{display:none!important}'; document.head.appendChild(st); } };
+  window.applyGuestRestrictions = () => { window.__skosReadOnly = true; if (!document.getElementById('ro-css')) { const st = document.createElement('style'); st.id = 'ro-css'; st.textContent = '#tab-set,#nav-set,input[type="file"],.btn-danger,.btn-success,form:not([data-skos-login]),.form-grid:not([data-view-filters]):has(input:not([type="checkbox"])){display:none!important}td .btn{display:none!important}'; document.head.appendChild(st); } };
 
   window.addEventListener('DOMContentLoaded', () => {
     window.ensureStore();
@@ -1686,6 +1717,7 @@
     if (fYrEl) { const c = fYrEl.value || 'ALL'; fYrEl.innerHTML = '<option value="ALL">Все годы</option>' + yrs.map(y => '<option value="' + y + '">' + y + '</option>').join(''); if (yrs.includes(c)) fYrEl.value = c; }
     if (fWalEl) { const c = fWalEl.value || 'ALL'; fWalEl.innerHTML = '<option value="ALL">Все счета и кассы</option>' + allWals.map(w => '<option value="' + w.id + '">' + window.esc(w.name) + '</option>').join(''); fWalEl.value = c; }
 
+    bindViewFilters([fYrEl,fMoEl,fWalEl]);
     const selYr = fYrEl ? fYrEl.value : 'ALL', selMo = fMoEl ? fMoEl.value : 'ALL', selWal = fWalEl ? fWalEl.value : 'ALL';
     const moNames = { '01': 'Январь', '02': 'Февраль', '03': 'Март', '04': 'Апрель', '05': 'Май', '06': 'Июнь', '07': 'Июль', '08': 'Август', '09': 'Сентябрь', '10': 'Октябрь', '11': 'Ноябрь', '12': 'Декабрь' };
     const groups = {};

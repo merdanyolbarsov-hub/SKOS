@@ -1,6 +1,6 @@
 /* === SKOS Finance 3.0 — Точная Юнит-экономика (только чтение из базы сайта) === */
 (function () {
-  window.unitState = { sub: 'WB', org: 'ALL', yr: '2026', mo: 'ALL', model: 'ALL' };
+  window.unitState = { sub: 'WB', org: 'ALL', yr: '2026', mo: 'ALL', model: 'ALL', ...window.loadViewFilter('unit',{}) };
   window.unitCalcState = { mp: 'WB', model: '', price: 4500, buyout: 88, commPct: 37, acqPct: 1.5, logTo: 350, logBack: 50, pack: 65, taxPct: 6, drrPct: 5, targetMargin: 30 };
 
   function hidePages(keepId) {
@@ -191,7 +191,7 @@
     const { codeToTitle, codeToUsd } = buildFolderDict();
 
     const nav = [['WB', '🟣 UNIT ВБ (факт)'], ['OZON', '🔵 UNIT Ozon (факт)'], ['YM', '🟡 UNIT ЯМ (факт)'], ['CALC', '🧮 Калькулятор цены (план)']]
-      .map(([k, t]) => `<button type="button" class="btn ${st.sub === k ? 'btn-primary' : ''}" style="display:inline-flex;align-items:center" onclick="unitState.sub='${k}';unitState.model='ALL';renderUnitTab()">${t}</button>`).join('');
+      .map(([k, t]) => `<button type="button" class="btn ${st.sub === k ? 'btn-primary' : ''}" style="display:inline-flex;align-items:center" onclick="unitState.sub='${k}';unitState.model='ALL';saveViewFilter('unit',unitState);renderUnitTab()">${t}</button>`).join('');
 
     if (st.sub === 'CALC') {
       const modelEntries = Array.from(codeToTitle.entries()).sort((a, b) => String(a).localeCompare(String(b)));
@@ -255,10 +255,10 @@
     sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🧮 Юнит-экономика SKOS (${st.sub}) — По папкам-моделям</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">${nav}</div>
       <div class="form-grid" style="margin-bottom:10px">
-        <div><label>Юрлицо / Аккаунт</label><select class="select" onchange="unitState.org=this.value;renderUnitTab()"><option value="ALL">Все (5 ИП + ООО)</option>${orgNames.map(n => `<option value="${window.esc(n)}"${n === st.org ? ' selected' : ''}>${window.esc(n)}</option>`).join('')}</select></div>
-        <div><label>Год (2020–2050)</label><select class="select" onchange="unitState.yr=this.value;renderUnitTab()">${yrOpts}</select></div>
-        <div><label>Месяц</label><select class="select" onchange="unitState.mo=this.value;renderUnitTab()">${moOpts}</select></div>
-        <div style="grid-column:span 2"><label>Папка-модель (${models.length} шт.)</label><select class="select" onchange="unitState.model=this.value;renderUnitTab()"><option value="ALL">— Все папки-модели —</option>${models.map(m => `<option value="${window.esc(m)}"${m === st.model ? ' selected' : ''}>${window.esc(m)}</option>`).join('')}</select></div>
+        <div><label>Юрлицо / Аккаунт</label><select class="select" onchange="unitState.org=this.value;saveViewFilter('unit',unitState);renderUnitTab()"><option value="ALL">Все (5 ИП + ООО)</option>${orgNames.map(n => `<option value="${window.esc(n)}"${n === st.org ? ' selected' : ''}>${window.esc(n)}</option>`).join('')}</select></div>
+        <div><label>Год (2020–2050)</label><select class="select" onchange="unitState.yr=this.value;saveViewFilter('unit',unitState);renderUnitTab()">${yrOpts}</select></div>
+        <div><label>Месяц</label><select class="select" onchange="unitState.mo=this.value;saveViewFilter('unit',unitState);renderUnitTab()">${moOpts}</select></div>
+        <div style="grid-column:span 2"><label>Папка-модель (${models.length} шт.)</label><select class="select" onchange="unitState.model=this.value;saveViewFilter('unit',unitState);renderUnitTab()"><option value="ALL">— Все папки-модели —</option>${models.map(m => `<option value="${window.esc(m)}"${m === st.model ? ' selected' : ''}>${window.esc(m)}</option>`).join('')}</select></div>
       </div>
       <div style="overflow-x:auto"><table style="font-size:11.5px;white-space:nowrap">
         <thead>

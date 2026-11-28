@@ -9,7 +9,7 @@
     ['ord','Пошив и техкарты'], ['mov','Списание / НЗП'],
     ['fg','Готовый товар и брак'], ['rawdef','Брак материалов'], ['cost','Себестоимость']
   ];
-  let month = '', year = '', edited = '';
+  let month = window.loadViewFilter('stockMonth',''), year = window.loadViewFilter('stockYear',''), edited = '';
 
   const names = values => [...new Set(values.map(value=>String(value || '').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b, 'ru'));
   const period = date => String(date || '').slice(0,7);
@@ -139,11 +139,11 @@
     };
     const dateFilter=target.querySelector('[data-stock-month]');
     if (dateFilter) {
-      dateFilter.onchange=()=>{month=dateFilter.value;window.renderStkTab();};
-      target.querySelector('[data-all-months]').onclick=()=>{month='';window.renderStkTab();};
+      dateFilter.onchange=()=>{month=dateFilter.value;window.saveViewFilter('stockMonth',month);window.renderStkTab();};
+      target.querySelector('[data-all-months]').onclick=()=>{month='';window.saveViewFilter('stockMonth',month);window.renderStkTab();};
     }
     const yearFilter=target.querySelector('[data-stock-year]');
-    if (yearFilter) yearFilter.onchange=()=>{if(yearFilter.checkValidity()){year=yearFilter.value;window.renderStkTab();}};
+    if (yearFilter) yearFilter.onchange=()=>{if(yearFilter.checkValidity()){year=yearFilter.value;window.saveViewFilter('stockYear',year);window.renderStkTab();}};
 
     const newMaterial=target.querySelector('#sm-nm');
     if (newMaterial) {

@@ -4,7 +4,7 @@
   const {esc, num} = window;
   const labels = {accrual:'Начислено', payment:'Выплачено'};
   const months = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  const filters = {year:'ALL',month:'ALL',party:'ALL'};
+  const filters = {year:'ALL',month:'ALL',party:'ALL',...window.loadViewFilter('contractors',{})};
   const currency = value => String(value || 'RUB').toUpperCase();
   const amount = (value, cur) => new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(value) + ' ' + cur;
   const options = (entries, selected) => entries.map(([value,label]) =>
@@ -89,6 +89,7 @@
     for (const dropdown of target.querySelectorAll('[data-filter]')) dropdown.onchange = () => {
       filters[dropdown.dataset.filter]=dropdown.value;
       if (filters.year==='ALL') filters.month='ALL';
+      window.saveViewFilter('contractors',filters);
       window.renderContractorReconciliation(target);
     };
     if (!write) return;
