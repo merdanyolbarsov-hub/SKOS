@@ -7,7 +7,13 @@
   gate.innerHTML = '<h2>SKOS Finance</h2><p role="status" style="margin:12px 0">Проверяем доступ…</p><form data-skos-login><label>Логин (почта)<input class="input" type="email" name="email" autocomplete="username" required></label><label>Пароль<input class="input" type="password" name="password" autocomplete="current-password" required></label><button type="submit" class="btn btn-primary" style="margin-top:12px" disabled>Войти</button></form>';
   gate.addEventListener('cancel', event => event.preventDefault());
   document.body.append(gate);
-  gate.showModal();
+  const appContent = [...document.querySelectorAll('.sidebar, .main-wrap')];
+  const setAppReady = ready => appContent.forEach(element => {
+    element.inert = !ready;
+    element.style.visibility = ready ? '' : 'hidden';
+  });
+  const showLogin = () => { if (!gate.open) gate.showModal(); };
+  setAppReady(false);
   window.__skosReadOnly = true;
   const message = gate.querySelector('[role=status]');
   const form = gate.querySelector('form');
@@ -69,7 +75,7 @@
     try {
       const latest = await request('/latest');
       if (active !== session || archivedVersion) return;
-      if (!latest) { tell('Владелец ещё не опубликовал базу.'); return; }
+      if (!latest) { tell('Владелец ещё не опубликовал базу.'); showLogin(); return; }
       if (latest.id !== currentVersion) {
         const version = await request('/version/' + encodeURIComponent(latest.title));
         if (active !== session || archivedVersion) return;
@@ -78,12 +84,13 @@
       }
       tell('Данные обновлены ' + format(latest.date));
       if (gate.open) gate.close();
+      setAppReady(true);
       returnToLatest.hidden = true;
       returnToLatest.disabled = false;
     } catch (error) {
       if (active !== session || archivedVersion) return;
       tell('Не удалось получить облачную базу.');
-      if ((error.status === 401 || error.status === 403) && !gate.open) gate.showModal();
+      if (error.status === 401 || error.status === 403 || !currentVersion) showLogin();
     } finally {
       updating = false;
       returnToLatest.disabled = false;
@@ -173,6 +180,7 @@
   async function setup() {
     if (!config?.firebase?.apiKey || !config.ownerUid || !config.viewerUid) {
       tell('Подключение Firebase ещё не настроено.');
+      showLogin();
       return;
     }
     const base = 'https://www.gstatic.com/firebasejs/11.10.0/';
@@ -182,6 +190,7 @@
     const app = appSdk.initializeApp(config.firebase);
     const auth = authSdk.getAuth(app);
     firestore = window.makeSkosFirestore(databaseSdk, databaseSdk.getFirestore(app), config, () => user?.uid);
+    await auth.authStateReady();
     await authSdk.setPersistence(auth,authSdk.browserLocalPersistence);
     form.onsubmit = async event => {
       event.preventDefault();
@@ -207,9 +216,13 @@
       window.__skosReadOnly = true;
       cloud.disabled = true;
       history.hidden = true;
-      if (!gate.open) gate.showModal();
+      setAppReady(false);
       login.disabled = false;
-      if (!account) { tell('Введите логин SKOS и пароль.'); return; }
+      if (!account) {
+        tell('Введите логин SKOS и пароль.');
+        showLogin();
+        return;
+      }
       try {
         const result = await request('/session');
         if (active !== session) return;
@@ -225,10 +238,12 @@
           if (active !== session) return;
           role = 'owner';
           window.__skosReadOnly = false;
+          document.getElementById('ro-css')?.remove();
           window.tab('dash');
           cloud.disabled = false;
           history.hidden = false;
-          gate.close();
+          if (gate.open) gate.close();
+          setAppReady(true);
           tell('Доступ владельца. Нажмите «Облако», чтобы опубликовать базу.');
         } else if (result.role === 'viewer') {
           role = 'viewer';
@@ -238,9 +253,13 @@
           if (active === session) timer = setInterval(refresh,10000);
         }
         if (active === session) logout.hidden = false;
-      } catch { tell('Этому аккаунту не выдан доступ к SKOS или сервер недоступен.'); }
+      } catch {
+        if (active !== session) return;
+        tell('Этому аккаунту не выдан доступ к SKOS или сервер недоступен.');
+        showLogin();
+      }
     });
     document.addEventListener('visibilitychange',() => { if (!document.hidden) refresh(); });
   }
-  setup().catch(() => tell('Не удалось подключиться к серверу входа SKOS.'));
+  setup().catch(() => { tell('Не удалось подключиться к Firebase.'); showLogin(); });
 })();

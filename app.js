@@ -265,7 +265,6 @@
       const act = window.db.tab || 'dash';
       const map = { dash: 'renderDashTab', abc: 'renderAbcTab', rep: 'renderRepTab', sku: 'renderSkuTab', stk: 'renderStkTab', dds: 'renderDdsTab', exp: 'renderExpTab', sup: 'renderSupTab', set: 'renderSetTab', dict: 'renderDictTab' };
       if (map[act] && typeof window[map[act]] === 'function') window[map[act]]();
-      if (window.__skosReadOnly && window.applyGuestRestrictions) window.applyGuestRestrictions();
     });
   };
   /* === Часть 5/10: Сводка руководителя (KPI, ИП/ООО, МП и Лесенка прибыли) === */
@@ -882,7 +881,7 @@
   window.deleteWholeFolder = enc => { const fKey = decodeURIComponent(enc), cnt = (window.db.skus || []).filter(s => (window.normStr(s.art) || 'Без артикула') === fKey).length; if (cnt && confirm('Удалить папку «' + fKey + '» (' + cnt + ' ШК)?')) { window.db.skus = window.db.skus.filter(s => (window.normStr(s.art) || 'Без артикула') !== fKey); window.save(true); window.renderSkuTab(); } };
   window.openEditSkuModal = id => { const s = (window.db.skus || []).find(x => x.id === id); if (!s) return; const m = document.createElement('div'); m.className = 'modal-bg'; m.innerHTML = `<div class="modal-box"><h3 style="font-size:16px;font-weight:800">✏️ Редактировать ШК</h3><div style="display:grid;gap:8px;margin-top:10px"><div><label>ШК</label><input id="e-bc" class="input" value="${window.esc(s.bc)}"></div><div><label>Артикул (папка)</label><input id="e-ar" class="input" value="${window.esc(s.art)}"></div><div><label>Название</label><input id="e-nm" class="input" value="${window.esc(s.name)}"></div><div><label>Себест. ($)</label><input id="e-us" type="number" step="0.01" class="input" value="${s.usd || 0}"></div></div><div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button><button class="btn btn-primary" id="e-sv">💾 Сохранить</button></div></div>`; document.body.appendChild(m); document.getElementById('e-sv').onclick = () => { const nb = window.normStr(document.getElementById('e-bc').value); if (!nb) return alert('Введите ШК!'); s.bc = nb; s.art = window.normStr(document.getElementById('e-ar').value) || 'Без артикула'; s.name = window.normStr(document.getElementById('e-nm').value) || s.art; s.usd = window.num(document.getElementById('e-us').value); s.isNew = s.usd === 0; window.recalcReportsCogs(); m.remove(); window.save(true); window.renderSkuTab(); }; };
   window.deleteSingleSku = id => { if (confirm('Удалить ШК?')) { window.db.skus = window.db.skus.filter(x => x.id !== id); window.save(true); window.renderSkuTab(); } };
-  window.openAddSingleSkuModal = () => { const m = document.createElement('div'); m.className = 'modal-bg'; m.innerHTML = `<div class="modal-box"><h3 style="font-size:16px;font-weight:800">+ Новый ШК</h3><div style="display:grid;gap:8px;margin-top:10px"><div><label>ШК *</label><input id="a-bc" class="input"></div><div><label>Артикул (папка) *</label><input id="a-ar" class="input"></div><div><label>Название</label><input id="a-nm" class="input"></div><div><label>Цвет</label><select id="a-col" class="select"><option value="—">Не указан</option>${window.getDictOptions(window.ensureStore().dictColors || [])}</select></div><div><label>Размер</label><select id="a-size" class="select"><option value="—">Не указан</option>${window.getDictOptions(window.ensureStore().dictSizes || [])}</select></div><div><label>Себест. ($)</label><input id="a-us" type="number" step="0.01" class="input" value="0"></div></div><div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button><button class="btn btn-primary" id="a-sv">✅ Добавить</button></div></div>`; document.body.appendChild(m); document.getElementById('a-sv').onclick = () => { const bc = window.normStr(document.getElementById('a-bc').value); if (!bc || window.db.skus.some(x => window.normStr(x.bc) === bc)) return alert('Пустой или дублирующий ШК!'); const art = window.normStr(document.getElementById('a-ar').value) || 'Без артикула', name = window.normStr(document.getElementById('a-nm').value) || art, usd = window.num(document.getElementById('a-us').value); window.db.skus.unshift({ id: 's_' + Date.now(), bc, art, name, col: document.getElementById('a-col').value, siz: document.getElementById('a-size').value, usd, src: 'Вручную', isNew: usd === 0 }); m.remove(); window.save(true); window.renderSkuTab(); }; };
+  window.openAddSingleSkuModal = () => { const m = document.createElement('div'); m.className = 'modal-bg'; m.innerHTML = `<div class="modal-box"><h3 style="font-size:16px;font-weight:800">+ Новый ШК</h3><div style="display:grid;gap:8px;margin-top:10px"><div><label>ШК *</label><input id="a-bc" class="input"></div><div><label>Артикул (папка) *</label><input id="a-ar" class="input"></div><div><label>Название</label><input id="a-nm" class="input"></div><div><label>Цвет</label><select id="a-col" class="select"><option value="—">Не указан</option>${window.getDictOptions(window.directoryRows('dictColors'))}</select></div><div><label>Размер</label><select id="a-size" class="select"><option value="—">Не указан</option>${window.getDictOptions(window.directoryRows('dictSizes'))}</select></div><div><label>Себест. ($)</label><input id="a-us" type="number" step="0.01" class="input" value="0"></div></div><div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px"><button class="btn" onclick="this.closest('.modal-bg').remove()">Отмена</button><button class="btn btn-primary" id="a-sv">✅ Добавить</button></div></div>`; document.body.appendChild(m); document.getElementById('a-sv').onclick = () => { const bc = window.normStr(document.getElementById('a-bc').value); if (!bc || window.db.skus.some(x => window.normStr(x.bc) === bc)) return alert('Пустой или дублирующий ШК!'); const art = window.normStr(document.getElementById('a-ar').value) || 'Без артикула', name = window.normStr(document.getElementById('a-nm').value) || art, usd = window.num(document.getElementById('a-us').value); window.db.skus.unshift({ id: 's_' + Date.now(), bc, art, name, col: document.getElementById('a-col').value, siz: document.getElementById('a-size').value, usd, src: 'Вручную', isNew: usd === 0 }); m.remove(); window.save(true); window.renderSkuTab(); }; };
 
   window.importCostCsv = async function (ev) {
     const f = ev?.target?.files?.[0]; if (!f) return; ev.target.value = '';
@@ -913,6 +912,9 @@
     window.ensureStore().bom.forEach(b => { if (b.product) map.set(b.product, b.product); });
     return '<option value="">— Модель —</option>' + Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'ru')).map(n => `<option value="${window.esc(n)}"${n === sel ? ' selected' : ''}>${window.esc(n)}</option>`).join('');
   };
+  window.directoryRows = key => key === 'ddsCats' ? (window.db.ddsCats || []) : (window.ensureStore()[key] || []);
+  window.directoryPurpose = folder => folder.usage || '';
+
   window.getDictOptions = (arr, sel) => (arr || []).filter(x => x && !x.arch).map(x => `<option value="${window.esc(x.name)}"${x.name === sel ? ' selected' : ''}>${window.esc(x.name)}</option>`).join('');
 
   window.p4StkSub = s => { window.ensureStore().stkSub = s; window.save(); window.renderStkTab(); };
@@ -948,11 +950,11 @@
         <table><thead><tr><th>Критичные (&lt;15)</th><th class="num">Остаток</th><th class="num">Сумма $</th></tr></thead><tbody>${low || '<tr><td colspan="3" style="text-align:center;color:#64748b">Дефицита нет</td></tr>'}</tbody></table>`;
     } else if (sub === 'mat') {
       const rows = st.matRows.map(m => `<tr><td class="bold">${window.esc(m.name)}</td><td>${window.esc(m.cat)}</td><td class="num bold">${m.qty.toFixed(2)} ${window.esc(m.unit)}</td><td class="num">${window.fmtU(m.usd)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4EditMat(${m.idx})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('materials',${m.idx})">✕</button></td></tr>`).join('');
-      body = `<div class="form-grid" style="margin-bottom:10px"><div><label>Название</label><input id="sm-nm" class="input"></div><div>${window.withPlusBtn('Категория', 'dictMatCats', 'Категория сырья', 'sm-cat')}<select id="sm-cat" class="select">${window.getDictOptions(e.dictMatCats)}</select></div><div>${window.withPlusBtn('Ед. изм.', 'dictUnits', 'Ед. измерения', 'sm-un')}<select id="sm-un" class="select">${window.getDictOptions(e.dictUnits)}</select></div><div><label>Нач. ост.</label><input id="sm-q" type="number" class="input" value="0"></div><div><label>Сумма $</label><input id="sm-u" type="number" step="0.01" class="input" value="0"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4MatAdd()">+ Сырьё</button></div></div>
+      body = `<div class="form-grid" style="margin-bottom:10px"><div><label>Название</label><input id="sm-nm" class="input"></div><div>${window.withPlusBtn('Категория', 'dictMatCats', 'Категория сырья', 'sm-cat')}<select id="sm-cat" class="select">${window.getDictOptions(window.directoryRows('dictMatCats'))}</select></div><div>${window.withPlusBtn('Ед. изм.', 'dictUnits', 'Ед. измерения', 'sm-un')}<select id="sm-un" class="select">${window.getDictOptions(window.directoryRows('dictUnits'))}</select></div><div><label>Нач. ост.</label><input id="sm-q" type="number" class="input" value="0"></div><div><label>Сумма $</label><input id="sm-u" type="number" step="0.01" class="input" value="0"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4MatAdd()">+ Сырьё</button></div></div>
         <table><thead><tr><th>Материал</th><th>Кат.</th><th class="num">Остаток</th><th class="num">Сумма $</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     } else if (sub === 'inc') {
       const rows = e.matIn.map((x, i) => `<tr><td>${window.esc(x.date)}</td><td class="bold">${window.esc(x.matName)}</td><td>${window.esc(x.supplier)}</td><td class="num">${x.qty}</td><td class="num bold">${window.fmtU(x.totalUsd)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4EditMatIn(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('matIn',${i})">✕</button></td></tr>`).join('');
-      body = `<div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="si-d" type="date" class="input" value="${window.today()}"></div><div>${window.withPlusBtn('Сырьё', 'materials', 'Материал', 'si-m')}<select id="si-m" class="select">${matOpts}</select></div><div>${window.withPlusBtn('Поставщик', 'dictSuppliers', 'Поставщик сырья', 'si-s')}<select id="si-s" class="select">${window.getDictOptions(e.dictSuppliers)}</select></div><div><label>Шт</label><input id="si-q" type="number" class="input"></div><div><label>Цена $</label><input id="si-p" type="number" step="0.01" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4MatInAdd()">+ Приход</button></div></div>
+      body = `<div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="si-d" type="date" class="input" value="${window.today()}"></div><div>${window.withPlusBtn('Сырьё', 'materials', 'Материал', 'si-m')}<select id="si-m" class="select">${matOpts}</select></div><div>${window.withPlusBtn('Поставщик', 'dictSuppliers', 'Поставщик сырья', 'si-s')}<select id="si-s" class="select">${window.getDictOptions(window.directoryRows('dictSuppliers'))}</select></div><div><label>Шт</label><input id="si-q" type="number" class="input"></div><div><label>Цена $</label><input id="si-p" type="number" step="0.01" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4MatInAdd()">+ Приход</button></div></div>
         <table><thead><tr><th>Дата</th><th>Сырьё</th><th>Поставщик</th><th class="num">Шт</th><th class="num">Итого $</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     }
     /* === Часть 10Б-2: Пошив/Техкарты, ГП и Брак === */
@@ -975,7 +977,7 @@
   };
   /* === Часть 10В-1: ДДС, входящие остатки 01.01 и конвертация === */
   window.buildDdsCatOptions = sel => {
-    const cats = window.db.ddsCats || [], groups = Object.create(null);
+    const cats = window.directoryRows('ddsCats'), groups = Object.create(null);
     cats.filter(c => !c.arch || c.name === sel).forEach(c => { (groups[c.grp] = groups[c.grp] || []).push(c.name); });
     if (sel && !cats.some(c => c.name === sel)) (groups['История'] ||= []).push(sel);
     return Object.keys(groups).map(g => `<optgroup label="${window.esc(g)}">${groups[g].map(n => `<option value="${window.esc(n)}"${n === sel ? ' selected' : ''}>${window.esc(n)}</option>`).join('')}</optgroup>`).join('');
@@ -1107,7 +1109,7 @@
 
   window.p4TdAdd = () => { window.ensureStore().taxDebts.unshift({ org: document.getElementById('td-o').value, tax: document.getElementById('td-t').value, debt: window.num(document.getElementById('td-a').value) }); window.save(true); window.renderExpTab(); };
   window.p4TdEdit = i => { const t = window.ensureStore().taxDebts[i]; if (!t) return; const v = prompt('Новое сальдо 01.01 (₽):', t.debt); if (v !== null) { t.debt = window.num(v); window.save(true); window.renderExpTab(); } };
-  window.p4ZpAdd = () => { const e = window.ensureStore(), emp = document.getElementById('zp-e').value, amt = window.num(document.getElementById('zp-a').value); if (!emp || amt <= 0) return alert('Выберите сотрудника и сумму!'); const st = e.staffList.find(x => x.name === emp); e.payrollOps.unshift({ date: document.getElementById('zp-d').value || window.today(), emp, kind: document.getElementById('zp-k').value, amt, cur: st ? st.cur : 'RUB' }); window.save(true); window.renderExpTab(); };
+  window.p4ZpAdd = () => { const e = window.ensureStore(), emp = document.getElementById('zp-e').value, amt = window.num(document.getElementById('zp-a').value); if (!emp || amt <= 0) return alert('Выберите сотрудника и сумму!'); const st = window.directoryRows('staffList').find(x => x.name === emp); e.payrollOps.unshift({ date: document.getElementById('zp-d').value || window.today(), emp, kind: document.getElementById('zp-k').value, amt, cur: st ? st.cur : 'RUB' }); window.save(true); window.renderExpTab(); };
   window.p4ZpEdit = i => { const op = window.ensureStore().payrollOps[i]; if (!op) return; const a = prompt('Сумма (' + op.emp + '):', op.amt); if (a !== null) { op.amt = window.num(a); window.save(true); window.renderExpTab(); } };
 
   window.renderExpTab = function () {
@@ -1116,28 +1118,28 @@
     const orgOpts = [...new Set((window.db.orgs || []).map(o => o.name))].map(n => `<option value="${window.esc(n)}">${window.esc(n)}</option>`).join('');
 
     const txType = document.getElementById('tx-type');
-    if (txType) { const c = txType.value; txType.innerHTML = window.getDictOptions(e.dictTaxTypes, c); const lbl = txType.parentElement?.querySelector('label'); if (lbl && !lbl.querySelector('button')) lbl.outerHTML = window.withPlusBtn('Вид налога', 'dictTaxTypes', 'Вид налога', 'tx-type'); }
+    if (txType) { const c = txType.value; txType.innerHTML = window.getDictOptions(window.directoryRows('dictTaxTypes'), c); const lbl = txType.parentElement?.querySelector('label'); if (lbl && !lbl.querySelector('button')) lbl.outerHTML = window.withPlusBtn('Вид налога', 'dictTaxTypes', 'Вид налога', 'tx-type'); }
     const txAmt = document.getElementById('tx-amt');
     if (txAmt && !document.getElementById('p4-tx-btn')) { const b = document.createElement('button'); b.id = 'p4-tx-btn'; b.type = 'button'; b.className = 'btn btn-success'; b.style.marginTop = '5px'; b.textContent = '✅ Целиком за месяц'; b.onclick = window.p4TaxFullMonth; txAmt.parentNode.appendChild(b); }
 
     const exCat = document.getElementById('ex-cat');
-    if (exCat) { const c = exCat.value; exCat.innerHTML = window.getDictOptions(e.dictOpiuArticles, c); const lbl = exCat.parentElement?.querySelector('label'); if (lbl && !lbl.querySelector('button')) lbl.outerHTML = window.withPlusBtn('Статья ОПиУ', 'dictOpiuArticles', 'Статья ОПиУ', 'ex-cat'); }
+    if (exCat) { const c = exCat.value; exCat.innerHTML = window.getDictOptions(window.directoryRows('dictOpiuArticles'), c); const lbl = exCat.parentElement?.querySelector('label'); if (lbl && !lbl.querySelector('button')) lbl.outerHTML = window.withPlusBtn('Статья ОПиУ', 'dictOpiuArticles', 'Статья ОПиУ', 'ex-cat'); }
 
     document.getElementById('tb-tax').innerHTML = (window.db.taxes || []).map(t => `<tr><td>${t.per || (t.yr + ' • ' + t.kv + ' кв.')}</td><td class="bold">${window.esc(t.org)}</td><td>${window.esc(t.type)}</td><td class="num">${window.fmtR(t.amt)}</td><td class="num bold text-red">${window.fmtR(t.mSum || (t.amt / 3))} / мес.</td><td style="white-space:nowrap"><button class="btn" style="padding:3px 7px" onclick="editTaxRow('${t.id}')">✏️</button> <button class="btn btn-danger" onclick="db.taxes=db.taxes.filter(x=>x.id!=='${t.id}');save(true);renderExpTab()">✕</button></td></tr>`).join('');
     document.getElementById('tb-exp').innerHTML = (window.db.expenses || []).map(x => `<tr><td>${x.yr}-${x.mo}</td><td class="bold">${window.esc(x.org)}</td><td>${window.esc(x.cat)}</td><td>${window.esc(x.tit)}</td><td class="num">${x.cur === 'USD' ? window.fmtU(x.amt) : window.fmtR(x.amt)}</td><td class="num bold text-red">${window.fmtR(x.cur === 'USD' ? x.amt * rate : x.amt)}</td><td style="white-space:nowrap"><button class="btn" style="padding:3px 7px" onclick="editExpRow('${x.id}')">✏️</button> <button class="btn btn-danger" onclick="db.expenses=db.expenses.filter(i=>i.id!=='${x.id}');save(true);renderExpTab()">✕</button></td></tr>`).join('');
 
     let box = document.getElementById('p4-exp-box');
     if (!box) { box = document.createElement('div'); box.id = 'p4-exp-box'; sec.appendChild(box); }
-    const stAct = e.staffList.filter(s => !s.arch);
+    const stAct = window.directoryRows('staffList').filter(s => !s.arch);
     const tdRows = e.taxDebts.map((t, i) => `<tr><td>${window.esc(t.org)}</td><td>${window.esc(t.tax)}</td><td class="num bold">${window.fmtR(t.debt)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4TdEdit(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('taxDebts',${i})">✕</button></td></tr>`).join('');
     const zpRows = stAct.map(s => { let bal = window.num(s.initDebt); e.payrollOps.forEach(op => { if (op.emp === s.name) bal += (op.kind === 'Начислено' ? window.num(op.amt) : -window.num(op.amt)); }); return `<tr><td class="bold">${window.esc(s.name)}</td><td>${window.esc(s.role)}</td><td class="num">${window.num(s.initDebt)} ${window.esc(s.cur)}</td><td class="num bold">${bal} ${window.esc(s.cur)}</td></tr>`; }).join('');
     const zpOpsRows = e.payrollOps.slice(0, 40).map((op, i) => `<tr><td>${window.esc(op.date)}</td><td class="bold">${window.esc(op.emp)}</td><td>${window.esc(op.kind)}</td><td class="num bold">${op.amt} ${window.esc(op.cur)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4ZpEdit(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('payrollOps',${i})">✕</button></td></tr>`).join('');
 
-    box.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🏛️ Входящие налоговые долги / переплаты на 01.01</div></div><div class="form-grid" style="margin-bottom:10px"><div>${window.withPlusBtn('Юрлицо', 'orgs', 'Юрлицо', 'td-o')}<select id="td-o" class="select">${orgOpts}</select></div><div>${window.withPlusBtn('Налог', 'dictTaxTypes', 'Вид налога', 'td-t')}<select id="td-t" class="select">${window.getDictOptions(e.dictTaxTypes)}</select></div><div><label>Сальдо ₽</label><input id="td-a" type="number" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4TdAdd()">+ Записать</button></div></div><table><thead><tr><th>Юрлицо</th><th>Налог</th><th class="num">Сальдо 01.01</th><th></th></tr></thead><tbody>${tdRows}</tbody></table></div>
+    box.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🏛️ Входящие налоговые долги / переплаты на 01.01</div></div><div class="form-grid" style="margin-bottom:10px"><div>${window.withPlusBtn('Юрлицо', 'orgs', 'Юрлицо', 'td-o')}<select id="td-o" class="select">${orgOpts}</select></div><div>${window.withPlusBtn('Налог', 'dictTaxTypes', 'Вид налога', 'td-t')}<select id="td-t" class="select">${window.getDictOptions(window.directoryRows('dictTaxTypes'))}</select></div><div><label>Сальдо ₽</label><input id="td-a" type="number" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4TdAdd()">+ Записать</button></div></div><table><thead><tr><th>Юрлицо</th><th>Налог</th><th class="num">Сальдо 01.01</th><th></th></tr></thead><tbody>${tdRows}</tbody></table></div>
       <div class="card"><div class="card-header"><div class="card-title">👥 Зарплатная ведомость SKOS (ЗПВ)</div></div><div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="zp-d" type="date" class="input" value="${window.today()}"></div><div>${window.withPlusBtn('Сотрудник', 'staffList', 'Сотрудник', 'zp-e')}<select id="zp-e" class="select"><option value="">— Сотрудник —</option>${stAct.map(x => `<option value="${window.esc(x.name)}">${window.esc(x.name)}</option>`).join('')}</select></div><div><label>Операция</label><select id="zp-k" class="select"><option>Начислено</option><option>Выплачено</option></select></div><div><label>Сумма</label><input id="zp-a" type="number" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4ZpAdd()">+ Провести</button></div></div><table style="margin-bottom:10px"><thead><tr><th>Сотрудник</th><th>Должность</th><th class="num">Долг 01.01</th><th class="num">Остаток</th></tr></thead><tbody>${zpRows}</tbody></table><table><thead><tr><th>Дата</th><th>Сотрудник</th><th>Операция</th><th class="num">Сумма</th><th></th></tr></thead><tbody>${zpOpsRows}</tbody></table></div>`;
   };
   /* === Часть 10Д-1: Контрагенты и Основные средства (ОС) === */
-  window.p4CtrAdd = () => { const e = window.ensureStore(), ctr = document.getElementById('ct-s').value, amt = window.num(document.getElementById('ct-a').value); if (!ctr || amt <= 0) return alert('Выберите контрагента и сумму!'); const info = e.contractors.find(c => c.name === ctr); e.contractorOps.unshift({ date: document.getElementById('ct-d').value || window.today(), ctr, kind: document.getElementById('ct-k').value, amt, cur: info ? info.cur : 'RUB' }); window.save(true); window.renderSupTab(); };
+  window.p4CtrAdd = () => { const e = window.ensureStore(), ctr = document.getElementById('ct-s').value, amt = window.num(document.getElementById('ct-a').value); if (!ctr || amt <= 0) return alert('Выберите контрагента и сумму!'); const info = window.directoryRows('contractors').find(c => c.name === ctr); e.contractorOps.unshift({ date: document.getElementById('ct-d').value || window.today(), ctr, kind: document.getElementById('ct-k').value, amt, cur: info ? info.cur : 'RUB' }); window.save(true); window.renderSupTab(); };
   window.p4CtrOpEdit = i => { const op = window.ensureStore().contractorOps[i]; if (!op) return; const a = prompt('Сумма (' + op.ctr + '):', op.amt); if (a !== null) { op.amt = window.num(a); window.save(true); window.renderSupTab(); } };
 
   window.p4OsAdd = () => { const e = window.ensureStore(), nm = document.getElementById('os-n').value.trim(), pr = window.num(document.getElementById('os-p').value); if (!nm || pr <= 0) return alert('Введите название и цену ОС!'); e.osList.unshift({ name: nm, qty: window.num(document.getElementById('os-q').value) || 1, price: pr, months: window.num(document.getElementById('os-m').value) || 36, passed: window.num(document.getElementById('os-ps').value) || 0, room: document.getElementById('os-r').value.trim() }); window.save(true); window.renderSupTab(); };
@@ -1150,7 +1152,7 @@
     let box = document.getElementById('p4-sup-box');
     if (!box) { box = document.createElement('div'); box.id = 'p4-sup-box'; sec.insertBefore(box, sec.firstChild); }
 
-    const cAct = e.contractors.filter(c => !c.arch);
+    const cAct = window.directoryRows('contractors').filter(c => !c.arch);
     const cRows = cAct.map(c => { let acc = 0, pay = 0; e.contractorOps.forEach(op => { if (op.ctr === c.name) { if (op.kind === 'Начислено') acc += window.num(op.amt); else pay += window.num(op.amt); } }); const end = window.num(c.initDebt) + acc - pay; return `<tr><td class="bold">${window.esc(c.name)}</td><td>${window.esc(c.art)}</td><td class="num">${window.num(c.initDebt)}</td><td class="num">${acc}</td><td class="num">${pay}</td><td class="num bold ${end > 0 ? 'text-red' : 'text-green'}">${end} ${window.esc(c.cur)}</td></tr>`; }).join('');
     const cOpsRows = e.contractorOps.slice(0, 40).map((op, i) => `<tr><td>${window.esc(op.date)}</td><td class="bold">${window.esc(op.ctr)}</td><td>${window.esc(op.kind)}</td><td class="num bold">${op.amt} ${window.esc(op.cur)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4CtrOpEdit(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('contractorOps',${i})">✕</button></td></tr>`).join('');
     const oRows = e.osList.map((o, i) => { const full = window.num(o.qty || 1) * window.num(o.price), m = Math.max(1, window.num(o.months) || 24), rem = Math.max(0, full - (full / m) * Math.min(m, window.num(o.passed))); return `<tr><td class="bold">${window.esc(o.name)} (${window.esc(o.room || 'Цех')})</td><td class="num">${window.fmtR(full)}</td><td class="num">${o.passed}/${m}</td><td class="num bold">${window.fmtR(rem)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4OsEdit(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('osList',${i})">✕</button></td></tr>`; }).join('');
@@ -1184,7 +1186,7 @@
     const list = e[cur.key] || [];
     let extra = '';
     if (cur.key === 'staffList') extra = '<div><label>Должность</label><input id="d-role" class="input"></div><div><label>Валюта</label><select id="d-cur" class="select"><option>RUB</option><option>USD</option></select></div><div><label>Долг 01.01</label><input id="d-debt" type="number" class="input" value="0"></div>';
-    else if (cur.key === 'contractors') extra = `<div><label>Статья ОПиУ</label><select id="d-art" class="select">${window.getDictOptions(e.dictOpiuArticles)}</select></div><div><label>Валюта</label><select id="d-cur" class="select"><option>RUB</option><option>USD</option></select></div><div><label>Сальдо 01.01</label><input id="d-debt" type="number" class="input" value="0"></div>`;
+    else if (cur.key === 'contractors') extra = `<div><label>Статья ОПиУ</label><select id="d-art" class="select">${window.getDictOptions(window.directoryRows('dictOpiuArticles'))}</select></div><div><label>Валюта</label><select id="d-cur" class="select"><option>RUB</option><option>USD</option></select></div><div><label>Сальдо 01.01</label><input id="d-debt" type="number" class="input" value="0"></div>`;
     const rows = list.map((it, i) => `<tr style="${it.arch ? 'opacity:0.5' : ''}"><td class="bold">${window.esc(it.name)}</td><td>${it.initDebt ? '01.01: ' + it.initDebt + ' ' + (it.cur || 'RUB') : 'Активен'}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4DictEdit('${cur.key}',${i})">✏️</button> <button class="btn" onclick="p4DictArch('${cur.key}',${i})">📦</button> <button class="btn btn-danger" onclick="p4DictDel('${cur.key}',${i})">✕</button></td></tr>`).join('');
     sec.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">📚 Единые справочники SKOS</div><button class="btn btn-success" onclick="p4AddCustomDictFolder()">+ Новая папка</button></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${baseFolders.map(f => `<button class="btn ${f.id === cur.id ? 'btn-primary' : ''}" onclick="p4DictSub('${f.id}')">${f.title} (${(e[f.key] || []).length})</button>`).join('')}</div><div class="form-grid" style="margin-bottom:10px"><div><label>Название</label><input id="d-nm" class="input"></div>${extra}<div><button class="btn btn-primary" style="width:100%" onclick="p4DictAdd('${cur.key}')">+ Добавить</button></div></div><table><thead><tr><th>Название</th><th>Параметры</th><th class="num">Действия</th></tr></thead><tbody>${rows || '<tr><td colspan="3">Пусто</td></tr>'}</tbody></table></div>`;
   };
@@ -1402,7 +1404,7 @@
     const res = _origResolveSize.apply(this, arguments);
     if (!res.siz || res.siz === '—') {
       const src = (' ' + String(artRaw || '') + ' ' + String(nameRaw || '') + ' ' + String(bcRaw || '') + ' ').toUpperCase().replace(/Х/g, 'X');
-      const dictList = (window.ensureStore().dictSizes || []).filter(x => !x.arch).map(x => String(x.name || '').toUpperCase().replace(/Х/g, 'X')).filter(Boolean).sort((a, b) => b.length - a.length);
+      const dictList = window.directoryRows('dictSizes').filter(x => !x.arch).map(x => String(x.name || '').toUpperCase().replace(/Х/g, 'X')).filter(Boolean).sort((a, b) => b.length - a.length);
       for (let i = 0; i < dictList.length; i++) {
         const sz = dictList.at(i);
         if (src.includes(' ' + sz + ' ') || src.includes('-' + sz + ' ') || src.includes('-' + sz + '-') || src.endsWith(sz + ' ')) {
@@ -1423,7 +1425,7 @@
     const sizSel = document.getElementById('abc-f-siz');
     if (sizSel) {
       const cur = sizSel.value || 'ALL';
-      const dictSizes = (window.ensureStore().dictSizes || []).filter(x => !x.arch).map(x => x.name);
+      const dictSizes = window.directoryRows('dictSizes').filter(x => !x.arch).map(x => x.name);
       const existing = Array.from(sizSel.options).map(o => o.value).filter(v => v && v !== 'ALL');
       const merged = Array.from(new Set([...dictSizes, ...existing]));
       sizSel.innerHTML = '<option value="ALL">Все размеры</option>' + merged.map(v => '<option value="' + window.esc(v) + '">' + window.esc(v) + '</option>').join('');
@@ -2261,7 +2263,7 @@
     return [
       {id:'sku', label:'Товары, ШК и себестоимость',count:(window.db.skus || []).length},
       ...groups.map(([id,key,label])=>({id,key,label})),
-      ...(store.customDictFolders || []).map(x=>({id:x.id,key:x.key,label:x.title}))
+      ...(store.customDictFolders || []).map(x=>({id:x.id,key:x.key,label:x.title,usage:window.directoryPurpose(x)}))
     ];
   }
   function records(store, section) {
@@ -2276,15 +2278,16 @@
     if (window.__skosReadOnly) return;
     const store=window.ensureStore();
     const list=records(store,section);
-    const isDds=section.key==='ddsCats', isStaff=section.key==='staffList', isParty=section.key==='contractors';
+    const type=section.usage || section.key;
+    const isDds=type==='ddsCats', isStaff=type==='staffList', isParty=type==='contractors';
     const esc=window.esc;
     const extra=isDds? '<label>Папка<input name="grp" class="input"></label><label>Движение<select name="direction" class="select"><option value="">Не выбрано</option><option>Поступление</option><option>Выбытие</option></select></label><label>Вид деятельности<input name="activity" class="input"></label>':
       isStaff?'<label>Должность<input name="role" class="input"></label>':
-      isParty?'<label>Статья ОПиУ<select name="art" class="select">'+window.getDictOptions(store.dictOpiuArticles)+'</select></label>':'';
+      isParty?'<label>Статья ОПиУ<select name="art" class="select">'+window.getDictOptions(window.directoryRows('dictOpiuArticles'))+'</select></label>':'';
     const currency=isDds||isStaff||isParty?'<label>Валюта<select name="cur" class="select"><option value="">Без ограничения</option><option>RUB</option><option>USD</option></select></label>':'';
     const balance=isStaff||isParty?'<label>Сальдо на начало года<input name="initDebt" class="input" type="number" step="0.01"></label>':'';
     const box=document.createElement('dialog');
-    box.style.cssText='max-width:min(520px,92vw);width:100%;border:1px solid #cbd5e1;border-radius:14px;padding:20px;color:#0f172a';
+    box.style.cssText='max-width:min(520px,92vw);width:100%;border:1px solid #cbd5e1;border-radius:14px;padding:20px;margin:auto;max-height:90vh;overflow:auto;color:#0f172a';
     box.innerHTML=`<form method="dialog"><h3 style="margin-top:0">${row?'Редактировать':'Добавить'} · ${esc(section.label)}</h3><div style="display:grid;gap:10px"><label>Название<input name="name" class="input" required></label>${extra}${currency}${balance}</div><p role="status" style="color:#b91c1c"></p><div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn">Отмена</button><button class="btn btn-primary">Сохранить</button></div></form>`;
     document.body.appendChild(box);
     const form=box.querySelector('form');
@@ -2304,7 +2307,7 @@
       if (isDds) {
         values.grp=values.grp||values.direction||'Прочее';
         values.sourceMetadata=true;
-        if (row && norm(row.name)!==norm(values.name)) remember(row.name);
+        if (section.key==='ddsCats' && row && norm(row.name)!==norm(values.name)) remember(row.name);
       }
       if (isStaff||isParty) values.initDebt=window.num(values.initDebt);
       if (row) Object.assign(row,values);
@@ -2316,10 +2319,10 @@
   function remove(section,row) {
     if (window.__skosReadOnly) return;
     const list=records(window.ensureStore(),section);
-    const isDds=section.key==='ddsCats';
+    const isDds=section.key==='ddsCats' || section.usage==='ddsCats';
     const linked=isDds && (window.db.dds||[]).some(op=>op.cat===row.name);
     if (!confirm(linked?'Скрыть статью из новых операций? История ДДС сохранится.':'Удалить «'+row.name+'»?')) return;
-    if (isDds) remember(row.name);
+    if (section.key==='ddsCats') remember(row.name);
     if (linked) row.arch=true;
     else {const index=list.indexOf(row);if(index>=0)list.splice(index,1);}
     window.save(true); window.renderDictTab();
@@ -2329,7 +2332,7 @@
     const store=window.ensureStore(), all=sections(store);
     const current=all.find(s=>s.key&&s.id===store.dictSub)||all[1];
     const list=records(store,current), readOnly=window.__skosReadOnly;
-    const esc=window.esc, dds=current.key==='ddsCats';
+    const esc=window.esc, dds=current.key==='ddsCats' || current.usage==='ddsCats';
     const action=readOnly?'':'<button type="button" id="skos-dir-add" class="btn btn-primary">Добавить</button>';
     target.innerHTML=`<section class="card"><div class="card-header"><div class="card-title">Справочники SKOS</div></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:8px">${all.map(s=>`<button type="button" class="btn ${s.id===current.id?'btn-primary':''}" data-directory="${esc(s.id)}" style="text-align:left;white-space:normal;min-height:46px">${esc(s.label)} (${s.count ?? records(store,s).filter(x=>!x.arch).length})</button>`).join('')}</div></section>
     <section class="card"><div class="card-header"><div class="card-title">${esc(current.label)}</div>${action}</div><div style="overflow:auto"><table><thead><tr><th>Название</th>${dds?'<th>Папка</th><th>Движение</th><th>Вид деятельности</th><th>Валюта</th>':'<th>Состояние</th>'}${readOnly?'':'<th>Действия</th>'}</tr></thead><tbody>${list.map((row,i)=>`<tr><td>${esc(row.name)}${row.arch?' (в архиве)':''}</td>${dds?`<td>${esc(row.grp)}</td><td>${esc(row.direction||'—')}</td><td>${esc(row.activity||'—')}</td><td>${esc(row.cur||'—')}</td>`:`<td>${row.arch?'В архиве':'Активен'}</td>`}${readOnly?'':`<td style="white-space:nowrap"><button type="button" class="btn" data-edit-directory="${i}">Редактировать</button> <button type="button" class="btn" data-archive-directory="${i}">${row.arch?'Восстановить':'В архив'}</button> <button type="button" class="btn btn-danger" data-remove-directory="${i}">Удалить</button></td>`}</tr>`).join('')||'<tr><td colspan="6">Пока нет записей.</td></tr>'}</tbody></table></div></section>`;

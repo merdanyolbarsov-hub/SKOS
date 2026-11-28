@@ -12,6 +12,61 @@
     ['sizes','dictSizes','Размерный ряд'], ['colors','dictColors','Цвета']
   ];
 
+  const destinations = new Map([
+    ['', 'Только справочник'],
+    ['banks', 'Юрлица → Банк / Счёт'],
+    ['ddsCats', 'ДДС → Статья'],
+    ['dictOpiuArticles', 'Расходы → Статья ОПиУ'],
+    ['contractors', 'Поставщики и ОС → Контрагент'],
+    ['staffList', 'Зарплатная ведомость → Сотрудник'],
+    ['dictTaxTypes', 'Налоги → Вид налога'],
+    ['dictMatCats', 'Запасы → Категория сырья'],
+    ['dictUnits', 'Запасы → Единица измерения'],
+    ['dictSuppliers', 'Запасы → Поставщик'],
+    ['dictSizes', 'Товары → Размер'],
+    ['dictColors', 'Товары → Цвет']
+  ]);
+  window.directoryPurpose = folder => typeof folder.usage === 'string'
+    ? (destinations.has(folder.usage) ? folder.usage : '')
+    : (/банк|расч[её]тн[а-яё]*\s+сч[её]т/i.test(folder.title || '') ? 'banks' : '');
+
+  window.directoryRows = key => {
+    const store = window.ensureStore();
+    const base = key === 'ddsCats' ? window.db.ddsCats : store[key];
+    const entries = new Map();
+    function add(row, group) {
+      const name = norm(row?.name);
+      if (!name || (entries.has(name) && (!entries.get(name).arch || row.arch))) return;
+      entries.set(name, group && key === 'ddsCats' && !row.grp ? {...row,grp:group} : row);
+    }
+    for (const row of Array.isArray(base) ? base : []) add(row);
+    for (const folder of store.customDictFolders) {
+      if (window.directoryPurpose(folder) !== key || !Array.isArray(store[folder.key])) continue;
+      for (const row of store[folder.key]) add(row, folder.title);
+    }
+    return [...entries.values()];
+  };
+
+  const renderSettings = window.renderSetTab;
+  window.renderSetTab = function () {
+    renderSettings.apply(this, arguments);
+    const field = document.getElementById('og-bank');
+    if (!field) return;
+    let options = document.getElementById('skos-bank-options');
+    if (!options) {
+      options = document.createElement('datalist');
+      options.id = 'skos-bank-options';
+      field.after(options);
+      field.setAttribute('list', options.id);
+    }
+    const banks = new Map();
+    for (const name of [...window.directoryRows('banks').filter(row=>!row.arch).map(row=>row.name),
+        ...(window.db.orgs || []).map(org=>org.bank)]) {
+      if (norm(name) && !banks.has(norm(name))) banks.set(norm(name), name);
+    }
+    options.replaceChildren(...Array.from(banks.values(), name => new Option(name, name)));
+  };
+
   let openFolderId = '';
   function sections(store) {
     const settings = store.dictFolderSettings || {};
@@ -31,22 +86,46 @@
 
   function editFolder(store, folder) {
     if (window.__skosReadOnly) return;
-    const name = prompt(folder ? 'Название папки:' : 'Название новой папки:', folder?.label || '')?.trim();
-    if (!name || name === folder?.label) return;
-    if (sections(store).some(item => item.id !== folder?.id && norm(item.label) === norm(name))) {
-      alert('Папка с таким названием уже существует.');
+    const duplicate = name => sections(store).some(item => item.id !== folder?.id && norm(item.label) === norm(name));
+    if (folder && !folder.custom) {
+      const name = prompt('Название папки:', folder.label)?.trim();
+      if (!name || name === folder.label) return;
+      if (duplicate(name)) { alert('Папка с таким названием уже существует.'); return; }
+      folderSettings(store, folder).label = name;
+      saveFolders();
       return;
     }
-    if (folder) {
-      if (folder.custom) folder.custom.title = name;
-      else folderSettings(store, folder).label = name;
-    } else {
-      const id = 'cust_' + crypto.randomUUID();
-      store[id] = [];
-      store.customDictFolders.push({id,key:id,title:name});
-      openFolderId = id;
-    }
-    saveFolders();
+
+    const dialog = document.createElement('dialog');
+    dialog.style.cssText = 'width:min(520px,92vw);margin:auto;padding:20px;border:1px solid #cbd5e1;border-radius:14px';
+    dialog.innerHTML = '<form><h3>Настройки папки</h3><label>Название<input class="input" name="name" required></label><label>Где показывать записи<select class="select" name="usage"></select></label><p role="status" style="color:#b91c1c"></p><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button type="button" class="btn">Отмена</button><button type="submit" class="btn btn-primary">Сохранить</button></div></form>';
+    const form = dialog.querySelector('form');
+    const nameField = form.elements.namedItem('name');
+    const usageField = form.elements.namedItem('usage');
+    for (const [value,label] of destinations) usageField.add(new Option(label,value));
+    nameField.value = folder?.label || '';
+    usageField.value = folder ? window.directoryPurpose(folder.custom) : '';
+    form.querySelector('button[type=button]').onclick = () => dialog.close();
+    dialog.onclose = () => dialog.remove();
+    form.onsubmit = event => {
+      event.preventDefault();
+      const name = nameField.value.trim(), usage = usageField.value;
+      if (!name || duplicate(name)) {
+        form.querySelector('[role=status]').textContent = 'Укажите уникальное название папки.';
+        return;
+      }
+      if (folder) Object.assign(folder.custom, {title:name,usage});
+      else {
+        const id = 'cust_' + crypto.randomUUID();
+        store[id] = [];
+        store.customDictFolders.push({id,key:id,title:name,usage});
+        openFolderId = id;
+      }
+      dialog.close();
+      saveFolders();
+    };
+    document.body.append(dialog);
+    dialog.showModal();
   }
 
   function folderSettings(store, folder) {
@@ -77,7 +156,7 @@
         ${visible.map(folder => `<div style="border:1px solid #cbd5e1;border-radius:10px;background:#f8fafc;padding:10px">
           <button type="button" class="btn" data-open-folder="${esc(folder.id)}" style="width:100%;text-align:left;white-space:normal;min-height:46px">📁 ${esc(folder.label)} (${folder.count ?? records(store,folder).filter(row=>!row.arch).length})</button>
           ${readOnly ? '' : `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
-            <button type="button" class="btn" data-rename-folder="${esc(folder.id)}">Переименовать</button>
+            <button type="button" class="btn" data-rename-folder="${esc(folder.id)}">${folder.custom ? 'Настроить' : 'Переименовать'}</button>
             <button type="button" class="btn ${folder.custom ? 'btn-danger' : ''}" data-remove-folder="${esc(folder.id)}">${folder.custom ? 'Удалить' : 'Скрыть'}</button>
           </div>`}
         </div>`).join('')}
