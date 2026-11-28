@@ -230,6 +230,7 @@
 
         <div class="card">
           <div class="card-header"><div class="card-title">💸 Операционные расходы (Таможня, 1С, Аренда, Сырьё, ФОТ)</div></div>
+          <p style="margin:8px 0">Здесь введите начисленный расход для ОПиУ один раз. Оплату из выписки ищите в ДДС. <button type="button" class="btn" onclick="tab('sup')">Расчёты с контрагентами</button></p>
           <form onsubmit="addExp(event)" class="form-grid">
             <div><label>Юрлицо</label><select id="ex-org" class="select"></select></div>
             <div>
@@ -415,10 +416,11 @@
     })();
   </script>
   
-   <script src="app.js?v=20261128-2"></script>
+   <script src="app.js?v=20261128-3"></script>
   <script src="unit.js"></script>
   <script src="directory-folders.js"></script>
   <script src="inventory-workbook.js?v=20261128-2"></script>
+  <script src="contractor-reconciliation.js"></script>
   <script src="financial-reports.js?v=20261128-2"></script>
   <script src="cloud-config.js" defer></script>
   <script src="cloud-firestore.js" defer></script>

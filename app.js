@@ -1237,9 +1237,6 @@
       <div class="card"><div class="card-header"><div class="card-title">👥 Зарплатная ведомость SKOS (ЗПВ)</div></div><div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="zp-d" type="date" class="input" value="${window.today()}"></div><div>${window.withPlusBtn('Сотрудник', 'staffList', 'Сотрудник', 'zp-e')}<select id="zp-e" class="select"><option value="">— Сотрудник —</option>${stAct.map(x => `<option value="${window.esc(x.name)}">${window.esc(x.name)}</option>`).join('')}</select></div><div><label>Операция</label><select id="zp-k" class="select"><option>Начислено</option><option>Выплачено</option></select></div><div><label>Сумма</label><input id="zp-a" type="number" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4ZpAdd()">+ Провести</button></div></div><table style="margin-bottom:10px"><thead><tr><th>Сотрудник</th><th>Должность</th><th class="num">Долг 01.01</th><th class="num">Остаток</th></tr></thead><tbody>${zpRows}</tbody></table><table><thead><tr><th>Дата</th><th>Сотрудник</th><th>Операция</th><th class="num">Сумма</th><th></th></tr></thead><tbody>${zpOpsRows}</tbody></table></div>`;
   };
   /* === Часть 10Д-1: Контрагенты и Основные средства (ОС) === */
-  window.p4CtrAdd = () => { const e = window.ensureStore(), ctr = document.getElementById('ct-s').value, amt = window.num(document.getElementById('ct-a').value); if (!ctr || amt <= 0) return alert('Выберите контрагента и сумму!'); const info = window.directoryRows('contractors').find(c => c.name === ctr); e.contractorOps.unshift({ date: document.getElementById('ct-d').value || window.today(), ctr, kind: document.getElementById('ct-k').value, amt, cur: info ? info.cur : 'RUB' }); window.save(true); window.renderSupTab(); };
-  window.p4CtrOpEdit = i => { const op = window.ensureStore().contractorOps[i]; if (!op) return; const a = prompt('Сумма (' + op.ctr + '):', op.amt); if (a !== null) { op.amt = window.num(a); window.save(true); window.renderSupTab(); } };
-
   window.fixedAssetAmounts = asset => {
     const full = window.num(asset.qty || 1) * window.num(asset.price);
     const months = Math.max(1, window.num(asset.months) || 24);
@@ -1305,9 +1302,6 @@
     let box = document.getElementById('p4-sup-box');
     if (!box) { box = document.createElement('div'); box.id = 'p4-sup-box'; sec.insertBefore(box, sec.firstChild); }
 
-    const cAct = window.directoryRows('contractors').filter(c => !c.arch);
-    const cRows = cAct.map(c => { let acc = 0, pay = 0; e.contractorOps.forEach(op => { if (op.ctr === c.name) { if (op.kind === 'Начислено') acc += window.num(op.amt); else pay += window.num(op.amt); } }); const end = window.num(c.initDebt) + acc - pay; return `<tr><td class="bold">${window.esc(c.name)}</td><td>${window.esc(c.art)}</td><td class="num">${window.num(c.initDebt)}</td><td class="num">${acc}</td><td class="num">${pay}</td><td class="num bold ${end > 0 ? 'text-red' : 'text-green'}">${end} ${window.esc(c.cur)}</td></tr>`; }).join('');
-    const cOpsRows = e.contractorOps.slice(0, 40).map((op, i) => `<tr><td>${window.esc(op.date)}</td><td class="bold">${window.esc(op.ctr)}</td><td>${window.esc(op.kind)}</td><td class="num bold">${op.amt} ${window.esc(op.cur)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4CtrOpEdit(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('contractorOps',${i})">✕</button></td></tr>`).join('');
     const activeEdit = e.osList.includes(editedAsset) ? editedAsset : null;
     const osField = (key, label, value, attrs='') => `<label>${label}<input class="input" name="${key}" value="${window.esc(activeEdit?.[key] ?? value)}" ${attrs}></label>`;
     const oRows = e.osList.map((asset,index) => {
@@ -1321,7 +1315,7 @@
     }).join('');
 
 
-    box.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🤝 Контрагенты SKOS (Сальдо 01.01 + Начислено − Выплачено)</div></div><div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="ct-d" type="date" class="input" value="${window.today()}"></div><div>${window.withPlusBtn('Контрагент', 'contractors', 'Контрагент', 'ct-s')}<select id="ct-s" class="select"><option value="">— Контрагент —</option>${cAct.map(x => `<option value="${window.esc(x.name)}">${window.esc(x.name)}</option>`).join('')}</select></div><div><label>Тип</label><select id="ct-k" class="select"><option>Начислено</option><option>Выплачено</option></select></div><div><label>Сумма</label><input id="ct-a" type="number" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4CtrAdd()">+ Записать</button></div></div><table style="margin-bottom:10px"><thead><tr><th>Контрагент</th><th>Статья</th><th class="num">Нач.</th><th class="num">Начисл.</th><th class="num">Выплач.</th><th class="num">Остаток</th></tr></thead><tbody>${cRows}</tbody></table><table><thead><tr><th>Дата</th><th>Контрагент</th><th>Операция</th><th class="num">Сумма</th><th></th></tr></thead><tbody>${cOpsRows}</tbody></table></div>
+    box.innerHTML = `<div class="card" id="contractor-reconciliation"></div>
       <div class="card" id="fixed-assets-panel"><div class="card-header"><div class="card-title">🖥️ Основные средства (ОС) и Амортизация</div></div>
         <p>Стоимость = количество × цена за единицу. Месячная норма = стоимость ÷ срок. Остаток рассчитывается по введённым месяцам износа.</p>
         ${window.__skosReadOnly?'':`<form class="form-grid" onsubmit="p4OsAdd(event)" style="margin:10px 0">
@@ -1341,6 +1335,7 @@
         <div style="overflow-x:auto"><table><thead><tr><th>Объект</th><th>Где</th><th class="num">Стоимость, ₽</th>
         <th class="num">Прошло / срок</th><th class="num">Норма в месяц, ₽</th><th class="num">Остаточная стоимость, ₽</th><th>Статус</th>
         ${window.__skosReadOnly?'':'<th>Действия</th>'}</tr></thead><tbody>${oRows}<tr data-asset-empty hidden><td colspan="8">Нет записей по выбранному фильтру.</td></tr></tbody></table></div></div>`;
+    window.renderContractorReconciliation(box.querySelector('#contractor-reconciliation'));
     box.querySelector('[name=assetStatus]').value = assetStatus;
     window.p4FilterAssets();
   };
@@ -2499,6 +2494,11 @@
         if (section.key==='ddsCats' && row && norm(row.name)!==norm(values.name)) remember(row.name);
       }
       if (isStaff||isParty) values.initDebt=window.num(values.initDebt);
+      if (isParty && row && row.name !== values.name) {
+        for (const operation of window.ensureStore().contractorOps) {
+          if (operation.ctr === row.name) operation.ctr = values.name;
+        }
+      }
       if (row) Object.assign(row,values);
       else list.push({id:'dict-' + crypto.randomUUID(),arch:false,...values});
       box.close(); window.save(true); window.renderDictTab();
