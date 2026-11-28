@@ -221,13 +221,13 @@
   const CRUMBS = {
     dash: 'SKOS / Сводка и 5 ИП + 1 ООО', abc: 'SKOS / Двойной ABC-анализ', rep: 'SKOS / Отчёты WB, Ozon и Яндекс Маркет',
     sku: 'SKOS / Справочники / Товары, ШК и себестоимость', stk: 'SKOS / Запасы, Брак и Фурнитура', dds: 'SKOS / ДДС, Выписки и Кассы',
-    exp: 'SKOS / Расходы, Налоги и ЗПВ', sup: 'SKOS / Контрагенты и Основные средства', set: 'SKOS / Юрлица, Банки и Облако', dict: 'SKOS / Единые справочники'
+    exp: 'SKOS / Расходы, Налоги и ЗПВ', sup: 'SKOS / Контрагенты и Основные средства', set: 'SKOS / Юрлица, Банки и Облако', opiu: 'SKOS / ОПиУ', balance: 'SKOS / Управленческий баланс', dict: 'SKOS / Единые справочники'
   };
 
   window.tab = id => {
     window.ensureDictNav();
     window.db.tab = id;
-    ['dash', 'abc', 'rep', 'sku', 'stk', 'dds', 'exp', 'sup', 'set', 'dict'].forEach(t => {
+    ['dash', 'abc', 'rep', 'sku', 'stk', 'dds', 'exp', 'sup', 'set', 'dict', 'opiu', 'balance'].forEach(t => {
       document.getElementById('tab-' + t)?.classList.toggle('hidden', t !== id);
       document.getElementById('nav-' + t)?.classList.toggle('active', t === (id === 'sku' ? 'dict' : id));
     });
@@ -263,7 +263,7 @@
       window.ensureStore(); window.ensureDictNav();
       if (window.fillAllSelects) window.fillAllSelects();
       const act = window.db.tab || 'dash';
-      const map = { dash: 'renderDashTab', abc: 'renderAbcTab', rep: 'renderRepTab', sku: 'renderSkuTab', stk: 'renderStkTab', dds: 'renderDdsTab', exp: 'renderExpTab', sup: 'renderSupTab', set: 'renderSetTab', dict: 'renderDictTab' };
+      const map = { dash: 'renderDashTab', abc: 'renderAbcTab', rep: 'renderRepTab', sku: 'renderSkuTab', stk: 'renderStkTab', dds: 'renderDdsTab', exp: 'renderExpTab', sup: 'renderSupTab', set: 'renderSetTab', dict: 'renderDictTab', opiu: 'renderOpiuTab', balance: 'renderBalanceTab' };
       if (map[act] && typeof window[map[act]] === 'function') window[map[act]]();
     });
   };
@@ -278,9 +278,44 @@
 
   window.calcStockStats = function () {
     const e = window.ensureStore(), map = new Map();
-    e.materials.forEach((m, idx) => { if (m && m.name) map.set(m.name, { idx, name: m.name, unit: m.unit || 'шт', cat: m.cat || 'Ткань', qty: window.num(m.initQty), usd: window.num(m.initUsd) }); });
-    e.matIn.forEach(inc => { const c = map.get(inc.matName); if (c) { c.qty += window.num(inc.qty); c.usd += window.num(inc.totalUsd) || (window.num(inc.qty) * window.num(inc.priceUsd)); } });
-    e.orders.forEach(o => { if (o && o.status === 'DONE') (o.lines || []).forEach(ln => { const c = map.get(ln.matName); if (c) { const ap = c.qty > 0 ? c.usd / c.qty : window.num(ln.priceUsd); c.qty -= window.num(ln.usedQty); c.usd -= window.num(ln.usedQty) * ap; } }); });
+    e.materials.forEach((m, idx) => {
+      if (m?.name) map.set(m.name, {
+        idx, name: m.name, unit: m.unit || 'шт', cat: m.cat || 'Ткань',
+        initialQty: window.num(m.initQty), qty: window.num(m.initQty), usd: window.num(m.initUsd),
+        receivedQty: 0, orderQty: 0, defectQty: 0, plannedQty: 0
+      });
+    });
+    e.matIn.forEach(inc => {
+      const row = map.get(inc.matName);
+      if (!row) return;
+      const qty = window.num(inc.qty);
+      row.receivedQty += qty;
+      row.qty += qty;
+      row.usd += window.num(inc.totalUsd) || qty * window.num(inc.priceUsd);
+    });
+    const deduct = (row, qty, price) => {
+      const average = row.qty > 0 ? row.usd / row.qty : window.num(price);
+      row.qty -= qty;
+      row.usd -= qty * average;
+    };
+    for (const order of e.orders) {
+      for (const line of order?.lines || []) {
+        const row = map.get(line.matName);
+        if (!row) continue;
+        const qty = window.num(line.usedQty);
+        if (order.status === 'DONE') {
+          row.orderQty += qty;
+          deduct(row, qty, line.priceUsd);
+        } else if (order.status === 'WIP') row.plannedQty += qty;
+      }
+    }
+    for (const defect of e.materialDefects || []) {
+      const row = map.get(defect.material);
+      if (!row) continue;
+      const qty = window.num(defect.qty);
+      row.defectQty += qty;
+      deduct(row, qty);
+    }
     let rawUsd = 0, wipUsd = 0, fgUsd = 0;
     const matRows = Array.from(map.values()).map(m => { if (m.usd > 0) rawUsd += m.usd; m.avg = m.qty > 0 ? m.usd / m.qty : 0; return m; });
     e.orders.forEach(o => { if (o && o.status === 'WIP') wipUsd += window.num(o.totalUsd); });
@@ -355,18 +390,6 @@
       return `<tr><td class="bold">${m}</td><td class="num bold">${window.fmtR(r)}</td><td class="num text-red">${window.fmtR(rt)}</td><td class="num">${window.fmtR(ad)}</td><td class="num">${window.fmtR(lg)}</td><td class="num">${window.fmtR(cm)}</td><td class="num">${window.fmtR(cg)}</td><td class="num">${bo}</td><td class="num bold ${pr >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(pr)}</td></tr>`;
     }).join('');
 
-    let wf = `<div class="wf-row"><span>1. Чистая выручка маркетплейсов</span><span class="bold">${window.fmtR(st.rev)}</span></div>
-      <div class="wf-row"><span>− Комиссия, логистика и услуги</span><span class="text-red">−${window.fmtR(st.com + st.log)}</span></div>
-      <div class="wf-row"><span>− Реклама и выкупы</span><span class="text-red">−${window.fmtR(st.ads)}</span></div>
-      <div class="wf-row"><span>− Себестоимость товаров</span><span class="text-red">−${window.fmtR(st.cogs)}</span></div>
-      <div class="wf-row wf-sub"><span>= Маржинальная прибыль площадок</span><span>${window.fmtR(st.mpProf)}</span></div>`;
-    if (window.db.mode === 'FULL') {
-      wf += `<div class="wf-row"><span>− Налоги (1/3 кв. / мес.)</span><span class="text-red">−${window.fmtR(st.taxMonth)}</span></div>
-        <div class="wf-row"><span>− Операционные расходы</span><span class="text-red">−${window.fmtR(st.expRub)}</span></div>
-        <div class="wf-row"><span>− Амортизация и Брак</span><span class="text-red">−${window.fmtR(st.depMonth + st.defectRub)}</span></div>
-        <div class="wf-row wf-tot ${st.net < 0 ? 'neg' : ''}"><span>= ЧИСТАЯ ПРИБЫЛЬ КОМПАНИИ</span><span>${window.fmtR(st.net)}</span></div>`;
-    }
-    document.getElementById('wf-box').innerHTML = wf;
     /* === Часть 6Б: Лесенка прибыли, Динамика и Баланс SKOS === */
     const dash = document.getElementById('tab-dash'), pct = (a, b) => b > 0 ? ((a / b) * 100).toFixed(1) : '0.0';
     let ladderBox = document.getElementById('skos-boss-ladder-box');
@@ -417,17 +440,23 @@
     const yrChips = dynMode === 'YEAR' ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;font-size:12px"><b>Сравнить годы:</b> ${Array.from(new Set(['2024', '2025', '2026', ...compareYears])).sort().map(y => `<label style="padding:2px 7px;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer"><input type="checkbox" ${compareYears.includes(y) ? 'checked' : ''} onchange="toggleSkosYr('${y}')"> ${y}</label>`).join('')} <select class="select" style="width:auto;padding:2px 6px" onchange="addSkosYr(this)"><option value="">+ Год...</option>${Array.from({ length: 31 }, (_, i) => 2020 + i).map(y => `<option value="${y}">${y}</option>`).join('')}</select></div>` : '';
     dynBox.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">📈 Динамика продаж и прибыли</div><div style="display:flex;gap:6px"><button class="btn ${dynMode === 'WEEK' ? 'btn-primary' : ''}" onclick="setSkosDynMode('WEEK')">📅 По отчётам</button><button class="btn ${dynMode === 'MONTH' ? 'btn-primary' : ''}" onclick="setSkosDynMode('MONTH')">🗓️ По месяцам</button><button class="btn ${dynMode === 'YEAR' ? 'btn-primary' : ''}" onclick="setSkosDynMode('YEAR')">📊 По годам</button></div></div>${yrChips}<div style="overflow-x:auto"><table><thead><tr><th>Период</th><th class="num">Выручка</th><th class="num">Доля %</th><th class="num">Нагрузка МП</th><th class="num">Себестоимость</th><th class="num">Прибыль</th></tr></thead><tbody>${rowsData.map(rw => `<tr><td class="bold">${rw.label}</td><td class="num bold">${window.fmtR(rw.rev)}</td><td class="num"><span class="badge badge-blue">${totR > 0 ? ((Math.max(0, rw.rev) / totR) * 100).toFixed(1) : '0.0'}%</span></td><td class="num">${window.fmtR(rw.fee)}</td><td class="num">${window.fmtR(rw.cogs)}</td><td class="num bold ${rw.prof >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(rw.prof)}</td></tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:#94a3b8">Нет данных</td></tr>'}</tbody></table></div></div>`;
 
-    const e = window.ensureStore();
-    let cash = 0, osRem = 0;
-    Object.keys(initB).forEach(k => { cash += window.num(initB[k]) * (/c[3-6]/.test(k) ? rate : 1); });
-    (window.db.dds || []).forEach(d => { cash += window.num(d.amt) * (/c[3-6]/.test(d.wal) ? rate : 1); });
-    e.osList.forEach(o => { const full = window.num(o.qty || 1) * window.num(o.price), m = Math.max(1, window.num(o.months) || 24); osRem += Math.max(0, full - (full / m) * Math.min(m, window.num(o.passed))); });
-    const taxD = e.taxDebts.reduce((s, t) => s + window.num(t.debt), 0);
-    const eq = cash + stk.totalUsd * rate + osRem - taxD;
-    let balCard = document.getElementById('p4-bal');
-    if (!balCard) { balCard = document.createElement('div'); balCard.id = 'p4-bal'; balCard.className = 'card'; dash.appendChild(balCard); }
-    balCard.innerHTML = `<div class="card-header"><div class="card-title">⚖️ Управленческий БАЛАНС SKOS</div></div><div class="kpi-grid"><div class="kpi-card"><div>💰 Деньги</div><div class="kpi-val">${window.fmtR(cash)}</div></div><div class="kpi-card"><div>🏭 Запасы</div><div class="kpi-val">${window.fmtR(stk.totalUsd * rate)}</div></div><div class="kpi-card"><div>🖥️ ОС ост.</div><div class="kpi-val">${window.fmtR(osRem)}</div></div><div class="kpi-card"><div>🏛️ Налог. долг</div><div class="kpi-val text-red">− ${window.fmtR(taxD)}</div></div><div class="kpi-card highlight"><div>💎 КАПИТАЛ</div><div class="kpi-val ${eq >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(eq)}</div></div></div>`;
   };
+
+  window.getOpiuRows = function (st) {
+    let wf = `<div class="wf-row"><span>1. Чистая выручка маркетплейсов</span><span class="bold">${window.fmtR(st.rev)}</span></div>
+      <div class="wf-row"><span>− Комиссия, логистика и услуги</span><span class="text-red">−${window.fmtR(st.com + st.log)}</span></div>
+      <div class="wf-row"><span>− Реклама и выкупы</span><span class="text-red">−${window.fmtR(st.ads)}</span></div>
+      <div class="wf-row"><span>− Себестоимость товаров</span><span class="text-red">−${window.fmtR(st.cogs)}</span></div>
+      <div class="wf-row wf-sub"><span>= Маржинальная прибыль площадок</span><span>${window.fmtR(st.mpProf)}</span></div>`;
+    if (window.db.mode === 'FULL') {
+      wf += `<div class="wf-row"><span>− Налоги (1/3 кв. / мес.)</span><span class="text-red">−${window.fmtR(st.taxMonth)}</span></div>
+        <div class="wf-row"><span>− Операционные расходы</span><span class="text-red">−${window.fmtR(st.expRub)}</span></div>
+        <div class="wf-row"><span>− Амортизация и Брак</span><span class="text-red">−${window.fmtR(st.depMonth + st.defectRub)}</span></div>
+        <div class="wf-row wf-tot ${st.net < 0 ? 'neg' : ''}"><span>= ЧИСТАЯ ПРИБЫЛЬ КОМПАНИИ</span><span>${window.fmtR(st.net)}</span></div>`;
+    }
+    return wf;
+  };
+
   /* === Часть 7А: Индексный поиск товаров (Map) и фильтры Двойного ABC === */
   window.resolveMetaFast = function (idx, bcRaw, artRaw, nameRaw) {
     const bc = window.normStr(bcRaw), art = window.normStr(artRaw), name = window.normStr(nameRaw);
@@ -556,11 +585,33 @@
     });
 
     const fillSel = (id, all, set) => { const el = document.getElementById(id); if (!el) return; const p = el.value || 'ALL'; el.innerHTML = `<option value="ALL">${all}</option>` + Array.from(set).sort().map(v => `<option value="${window.esc(v)}">${window.esc(v)}</option>`).join(''); if (set.has(p)) el.value = p; };
+    for (const sku of window.db.skus || []) {
+      if (sku.art) artsSet.add(sku.art);
+    }
+    for (const color of window.directoryRows('dictColors')) {
+      if (color.name && !color.arch) colsSet.add(color.name);
+    }
     fillSel('abc-f-art', 'Все артикулы', artsSet); fillSel('abc-f-col', 'Все цвета', colsSet); fillSel('abc-f-siz', 'Все размеры', sizsSet);
 
     const list = Object.values(groups).sort((a, b) => b.pr - a.pr);
     const posP = list.reduce((a, x) => a + Math.max(0, x.pr), 0);
-    let cP = 0;
+    const netQty = row => Math.max(0, row.sq - row.rq);
+    function classify(rows, amount) {
+      const rank = new Map();
+      const sorted = [...rows].sort((a,b)=>amount(b)-amount(a));
+      const total = sorted.reduce((sum,row)=>sum + amount(row),0);
+      let cumulative = 0;
+      for (const row of sorted) {
+        const contribution = amount(row);
+        const before = total ? cumulative / total : 1;
+        rank.set(row, contribution <= 0 ? 'C' : before < .8 ? 'A' : before < .95 ? 'B' : 'C');
+        cumulative += contribution;
+      }
+      return rank;
+    }
+    const byProfit = classify(list, row=>Math.max(0,row.pr));
+    const bySales = classify(list, netQty);
+    const badge = (label,value) => `<span class="badge ${value==='A'?'badge-green':value==='B'?'badge-amber':'badge-red'}" title="${label}">${value}</span>`;
 
     const sumBox = document.getElementById('skos-abc-summary');
     if (sumBox) sumBox.innerHTML = `<div style="font-size:12px;padding:6px;background:#fff;border:1px solid #e2e8f0;border-radius:7px">Выкуплено: <b>${tS} шт.</b> | Возвраты: <b class="text-red">${tR} шт.</b> | Выручка: <b>${window.fmtR(tRev)}</b> | Себест.: <b>${window.fmtR(tCog)}</b> | Чистая прибыль: <b class="${tPr >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(tPr)}</b></div>`;
@@ -570,11 +621,9 @@
     if (hdrRow && !hdrRow.dataset.unitCols) { hdrRow.dataset.unitCols = '1'; hdrRow.innerHTML += '<th class="num">Цена/шт</th><th class="num">Прибыль/шт</th>'; }
     const tbody = tbl?.querySelector('tbody');
     if (tbody) tbody.innerHTML = list.length ? list.map((x, index) => {
-      cP += Math.max(0, x.pr);
-      const cls = (x.pr <= 0 || posP <= 0) ? 'C' : ((cP / posP) * 100 <= 80 ? 'A' : ((cP / posP) * 100 <= 95 ? 'B' : 'C'));
       const sh = posP > 0 ? ((Math.max(0, x.pr) / posP) * 100).toFixed(1) : '0.0';
-      const nq = Math.max(1, x.sq - x.rq);
-      return `<tr><td><span class="badge ${cls === 'A' ? 'badge-green' : (cls === 'B' ? 'badge-amber' : 'badge-red')}">${cls}</span></td><td class="bold">${x.variants ? `<button type="button" class="btn" data-abc-variant="${index}" aria-expanded="false" aria-controls="abc-variants-${index}" style="max-width:100%;text-align:left">▸ ${window.esc(x.tit)}</button>` : window.esc(x.tit)}</td><td>${window.esc(x.sub)}</td><td class="num bold">${x.sq}</td><td class="num text-red">${x.rq}</td><td class="num">${window.fmtR(x.rev)}</td><td class="num">${window.fmtR(x.cog)}</td><td class="num bold ${x.pr >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(x.pr)}</td><td class="num">${sh}%</td><td class="num">${x.sq > 0 ? window.fmtR(x.rev / nq) : '0 ₽'}</td><td class="num bold ${x.pr >= 0 ? 'text-green' : 'text-red'}">${x.sq > 0 ? window.fmtR(x.pr / nq) : '0 ₽'}</td></tr>`;
+      const nq = x.sq - x.rq;
+      return `<tr><td>${badge('По прибыли',byProfit.get(x))} / ${badge('По чистым продажам',bySales.get(x))}</td><td class="bold">${x.variants ? `<button type="button" class="btn" data-abc-variant="${index}" aria-expanded="false" aria-controls="abc-variants-${index}" style="max-width:100%;text-align:left">▸ ${window.esc(x.tit)}</button>` : window.esc(x.tit)}</td><td>${window.esc(x.sub)}</td><td class="num bold">${x.sq - x.rq}</td><td class="num text-red">${x.rq}</td><td class="num">${window.fmtR(x.rev)}</td><td class="num">${window.fmtR(x.cog)}</td><td class="num bold ${x.pr >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(x.pr)}</td><td class="num">${sh}%</td><td class="num">${nq > 0 ? window.fmtR(x.rev / nq) : '0 ₽'}</td><td class="num bold ${x.pr >= 0 ? 'text-green' : 'text-red'}">${nq > 0 ? window.fmtR(x.pr / nq) : '0 ₽'}</td></tr>`;
     }).join('') : '<tr><td colspan="11" style="text-align:center;padding:16px;color:#94a3b8">Нет данных за выбранный фильтр</td></tr>';
     for (const button of tbody?.querySelectorAll('[data-abc-variant]') || []) {
       button.onclick = () => {
@@ -927,9 +976,23 @@
   window.getDictOptions = (arr, sel) => (arr || []).filter(x => x && !x.arch).map(x => `<option value="${window.esc(x.name)}"${x.name === sel ? ' selected' : ''}>${window.esc(x.name)}</option>`).join('');
 
   window.p4StkSub = s => { window.ensureStore().stkSub = s; window.save(); window.renderStkTab(); };
-  window.p4DelRow = (key, idx) => { const e = window.ensureStore(); if (!window.__skosReadOnly && e[key]?.[idx] && confirm('Удалить запись?')) { e[key].splice(idx, 1); window.save(true); window.render(); } };
+  window.p4DelRow = (key, idx) => { const e = window.ensureStore(); if (key === 'materials' && e.materials[idx] && (e.matIn.some(r => r.matName === e.materials[idx].name) ||
+      e.orders.some(r => r.lines?.some(line => line.matName === e.materials[idx].name)) ||
+      e.bom.some(r => r.items?.some(line => line.matName === e.materials[idx].name)) ||
+      (e.materialDefects || []).some(r => r.material === e.materials[idx].name))) return alert('Материал используется в складских записях.');
+    if (!window.__skosReadOnly && e[key]?.[idx] && confirm('Удалить запись?')) { e[key].splice(idx, 1); window.save(true); window.render(); } };
 
-  window.p4EditMat = idx => { const m = window.ensureStore().materials[idx]; if (!m) return; const nm = prompt('Название:', m.name); if (nm) m.name = nm.trim(); const q = prompt('Начальный остаток:', m.initQty); if (q !== null) m.initQty = window.num(q); const u = prompt('Начальная сумма $:', m.initUsd); if (u !== null) m.initUsd = window.num(u); window.save(true); window.renderStkTab(); };
+  window.p4EditMat = idx => { const m = window.ensureStore().materials[idx]; if (!m) return; const nm = prompt('Название:', m.name); if (nm?.trim() && nm.trim() !== m.name) {
+      const name = nm.trim();
+      if (window.ensureStore().materials.some(row => row !== m && row.name.toLocaleLowerCase('ru') === name.toLocaleLowerCase('ru'))) return alert('Материал с таким названием уже существует.');
+      const store = window.ensureStore();
+      const rename = row => { if (row.matName === m.name) row.matName = name; };
+      store.matIn.forEach(rename);
+      store.orders.forEach(order => order.lines?.forEach(rename));
+      store.bom.forEach(card => card.items?.forEach(rename));
+      (store.materialDefects || []).forEach(row => { if (row.material === m.name) row.material = name; });
+      m.name = name;
+    } const q = prompt('Начальный остаток:', m.initQty); if (q !== null) m.initQty = window.num(q); const u = prompt('Начальная сумма $:', m.initUsd); if (u !== null) m.initUsd = window.num(u); window.save(true); window.renderStkTab(); };
   window.p4EditMatIn = idx => { const x = window.ensureStore().matIn[idx]; if (!x) return; const q = prompt('Количество:', x.qty); if (q !== null) x.qty = window.num(q); const p = prompt('Цена $:', x.priceUsd); if (p !== null) x.priceUsd = window.num(p); x.totalUsd = x.qty * x.priceUsd; window.save(true); window.renderStkTab(); };
   window.p4EditOrder = idx => { const o = window.ensureStore().orders[idx]; if (!o) return; const q = prompt('Количество шт:', o.qty); if (q !== null) o.qty = window.num(q); const u = prompt('Сумма $:', o.totalUsd); if (u !== null) o.totalUsd = window.num(u); window.save(true); window.renderStkTab(); };
   window.p4EditBom = idx => { const b = window.ensureStore().bom[idx]; if (!b) return; const str = (b.items || []).map(it => it.matName + ':' + it.norm + ':' + it.priceUsd).join('; '); const res = prompt('Состав (Материал:Норма:Цена$ через ;):', str); if (res !== null) { b.items = res.split(';').map(p => p.trim()).filter(Boolean).map(p => { const [mn, nr, pr] = p.split(':'); return { matName: (mn || '').trim(), norm: window.num(nr), priceUsd: window.num(pr) }; }); window.save(true); window.renderStkTab(); } };
@@ -939,7 +1002,28 @@
   window.p4MatAdd = () => { if (window.__skosReadOnly) return; const e = window.ensureStore(), nm = document.getElementById('sm-nm').value.trim(); if (!nm) return alert('Введите название!'); if (e.materials.some(item => window.normStr(item.name).toLocaleLowerCase('ru') === nm.toLocaleLowerCase('ru'))) return alert('Материал с таким названием уже существует. Добавьте приход или измените его карточку.'); e.materials.unshift({ name: nm, cat: document.getElementById('sm-cat').value, unit: document.getElementById('sm-un').value, initQty: window.num(document.getElementById('sm-q').value), initUsd: window.num(document.getElementById('sm-u').value) }); window.save(true); window.renderStkTab(); };
   window.p4MatInAdd = () => { if (window.__skosReadOnly) return; const e = window.ensureStore(), m = document.getElementById('si-m').value, q = window.num(document.getElementById('si-q').value), p = window.num(document.getElementById('si-p').value); if (!m || q <= 0) return alert('Выберите сырьё и кол-во!'); e.matIn.unshift({ date: document.getElementById('si-d').value || window.today(), matName: m, supplier: document.getElementById('si-s').value, qty: q, priceUsd: p, totalUsd: q * p, comment: document.getElementById('si-note')?.value.trim() || '' }); window.save(true); window.renderStkTab(); };
   window.p4OrderAdd = () => { const e = window.ensureStore(), pr = document.getElementById('so-p').value, q = window.num(document.getElementById('so-q').value); if (!pr || q <= 0) return alert('Выберите модель и кол-во!'); const rec = e.bom.find(b => b.product === pr); let tot = 0; const lines = (rec?.items || []).map(it => { const u = window.num(it.norm) * q; tot += u * window.num(it.priceUsd); return { matName: it.matName, usedQty: u, priceUsd: window.num(it.priceUsd) }; }); e.orders.unshift({ date: document.getElementById('so-d').value || window.today(), doneDate: '', status: 'WIP', product: pr, qty: q, totalUsd: tot, comment: document.getElementById('so-c').value.trim(), lines }); window.save(true); window.renderStkTab(); };
-  window.p4OrderDone = i => { const o = window.ensureStore().orders[i]; if (o && confirm('Завершить пошив и списать сырьё?')) { o.status = 'DONE'; o.doneDate = window.today(); window.save(true); window.renderStkTab(); } };
+  window.p4OrderDone = index => {
+    if (window.__skosReadOnly) return;
+    const order = window.ensureStore().orders[index];
+    if (order?.status !== 'WIP') return;
+    const lines = order.lines?.length ? order.lines : (window.ensureStore().bom.find(card => card.product === order.product)?.items || [])
+      .map(item => ({matName:item.matName,usedQty:window.num(item.norm)*window.num(order.qty),priceUsd:window.num(item.priceUsd)}));
+    const available = new Map(window.calcStockStats().matRows.map(row => [row.name, row.qty]));
+    for (const line of lines) {
+      const left = (available.get(line.matName) ?? 0) - window.num(line.usedQty);
+      if (left < -1e-8 || !available.has(line.matName)) return alert('Недостаточно материала на складе: ' + line.matName);
+      available.set(line.matName, left);
+    }
+    const doneDate = document.getElementById('stock-done-date-' + index)?.value || window.today();
+    if (order.date && doneDate < order.date) return alert('Дата завершения должна быть не раньше даты заказа.');
+    const question = lines.length ? 'Завершить пошив и списать сырьё по техкарте?' : 'Техкарты нет. Завершить пошив без списания сырья?';
+    if (!confirm(question)) return;
+    order.lines = lines;
+    order.status = 'DONE';
+    order.doneDate = doneDate;
+    window.save(true);
+    window.renderStkTab();
+  };
   window.p4BomAdd = () => { const e = window.ensureStore(), pr = document.getElementById('sb-p').value, m = document.getElementById('sb-m').value, n = window.num(document.getElementById('sb-n').value), p = window.num(document.getElementById('sb-pr').value); if (!pr || !m || n <= 0) return alert('Заполните модель, материал и норму!'); let rec = e.bom.find(b => b.product === pr); if (!rec) { rec = { product: pr, items: [] }; e.bom.unshift(rec); } rec.items.push({ matName: m, norm: n, priceUsd: p }); window.save(true); window.renderStkTab(); };
   window.p4FgAdd = () => { const e = window.ensureStore(), pr = document.getElementById('sf-p').value; if (!pr) return alert('Выберите модель!'); const ru = window.num(document.getElementById('sf-ru').value), tm = window.num(document.getElementById('sf-tm').value), way = window.num(document.getElementById('sf-way').value), u = window.num(document.getElementById('sf-u').value); e.fgStocks.unshift({ month: document.getElementById('sf-m').value || window.today().slice(0, 7), product: pr, ruQty: ru, tmQty: tm, wayQty: way, unitUsd: u, lockedUsd: (ru + tm + way) * u }); window.save(true); window.renderStkTab(); };
   window.p4DefAdd = () => { const e = window.ensureStore(), pr = document.getElementById('sd-p').value, q = window.num(document.getElementById('sd-q').value); if (!pr || q <= 0) return alert('Выберите модель и кол-во!'); e.defects.unshift({ date: document.getElementById('sd-d').value || window.today(), product: pr, qty: q, unitUsd: window.num(document.getElementById('sd-u').value), reason: document.getElementById('sd-r').value.trim() || 'Брак' }); window.save(true); window.renderStkTab(); };
@@ -968,7 +1052,7 @@
     }
     /* === Часть 10Б-2: Пошив/Техкарты, ГП и Брак === */
     else if (sub === 'ord') {
-      const oRows = e.orders.map((o, i) => `<tr><td>${window.esc(o.date)}</td><td class="bold">${window.esc(o.product)}</td><td class="num">${o.qty}</td><td class="num">${window.fmtU(o.totalUsd)}</td><td class="num" style="white-space:nowrap">${o.status === 'DONE' ? '<span class="badge badge-green">Готово</span>' : `<button class="btn btn-success" onclick="p4OrderDone(${i})">✅</button>`} <button class="btn" onclick="p4EditOrder(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('orders',${i})">✕</button></td></tr>`).join('');
+      const oRows = e.orders.map((o, i) => `<tr><td>${window.esc(o.date)}</td><td class="bold">${window.esc(o.product)}</td><td class="num">${o.qty}</td><td class="num">${window.fmtU(o.totalUsd)}</td><td class="num" style="white-space:nowrap">${o.status === 'DONE' ? '<span class="badge badge-green">Готово</span>' : `<input type="date" class="input" id="stock-done-date-${i}" aria-label="Дата завершения" value="${window.esc(window.today())}" style="width:auto"> <button class="btn btn-success" onclick="p4OrderDone(${i})">✅ Завершить</button>`} <button class="btn" onclick="p4EditOrder(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('orders',${i})">✕</button></td></tr>`).join('');
       const bRows = e.bom.map((b, i) => { const tot = (b.items || []).reduce((s, it) => s + window.num(it.norm) * window.num(it.priceUsd), 0); return `<tr><td class="bold">${window.esc(b.product)}</td><td>${(b.items || []).map(it => window.esc(it.matName) + ' (' + it.norm + ')').join(', ')}</td><td class="num bold">${window.fmtU(tot)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4EditBom(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('bom',${i})">✕</button></td></tr>`; }).join('');
       body = `<div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="so-d" type="date" class="input" value="${window.today()}"></div><div>${window.withPlusBtn('Модель', 'models', 'Модель', 'so-p')}<select id="so-p" class="select">${window.getModelsOptions()}</select></div><div><label>Шт</label><input id="so-q" type="number" class="input"></div><div><label>Коммент</label><input id="so-c" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4OrderAdd()">+ В пошив</button></div></div>
         <table style="margin-bottom:12px"><thead><tr><th>Дата</th><th>Модель</th><th class="num">Шт</th><th class="num">Сумма $</th><th></th></tr></thead><tbody>${oRows}</tbody></table>
@@ -1448,7 +1532,7 @@
     if (!confirm('Очистить ВСЕ тестовые операции (отчёты МП, ABC, ДДС, расходы, налоги, остатки склада) и начать с чистого листа?\n\nБаза товаров (32 папки ШК), юрлица и справочники СОХРАНЯТСЯ!')) return;
     window.db.reports = []; window.db.itemSales = []; window.db.dds = []; window.db.ddsHashes = {};
     window.db.initBalances = {}; window.db.taxes = []; window.db.expenses = [];
-    if (window.db.erp) ['matIn', 'orders', 'fgStocks', 'defects', 'contractorOps', 'payrollOps', 'taxDebts'].forEach(k => { window.db.erp[k] = []; });
+    if (window.db.erp) ['matIn', 'orders', 'fgStocks', 'defects', 'materialDefects', 'contractorOps', 'payrollOps', 'taxDebts'].forEach(k => { window.db.erp[k] = []; });
     window.save(true); window.render();
     alert('✅ Все тестовые данные очищены! Каталог товаров (ШК) и справочники сохранены.');
   };
@@ -2100,7 +2184,7 @@
     const col=(...labels)=>header.findIndex(x=>labels.includes(x));
     const barcode=col('баркод','шк','barcode','bc'), name=col('название','наименование товара','name'), usd=col('себестоимость usd','себестоимость в usd','usd');
     if(Math.min(barcode,name,usd)<0)throw new Error('Нужны колонки «Баркод», «Название» и «Себестоимость USD».');
-    const art = col('артикул', 'артикул продавца', 'артикул товара', 'артикул поставщика', 'art');
+    const art = col('артикул папки', 'артикул', 'артикул продавца', 'артикул товара', 'артикул поставщика', 'art');
     const color = col('цвет', 'color', 'col');
     const size = col('размер', 'size', 'siz');
     const sku = col('ваш sku', 'sku');
@@ -2134,7 +2218,7 @@
       templateButton.textContent = 'Скачать шаблон CSV с примером';
       templateButton.onclick = () => {
         const csv = [
-          'Артикул продавца;Баркод;Название;Цвет;Размер;Себестоимость USD;Ваш SKU',
+          'Артикул папки;Баркод;Название;Цвет;Размер;Себестоимость USD;Ваш SKU',
           'SKOS-EXAMPLE;2000000000015;Футболка пример;Белый;M;4,50;SKOS-EXAMPLE белый M',
           'SKOS-EXAMPLE;2000000000022;Футболка пример;Чёрный;L;4,80;SKOS-EXAMPLE чёрный L'
         ].join('\r\n');

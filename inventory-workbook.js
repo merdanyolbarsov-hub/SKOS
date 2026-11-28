@@ -7,7 +7,7 @@
   const tabs = [
     ['sum','Свод'], ['mat','Материалы и остатки'], ['inc','Приход материалов'],
     ['ord','Пошив и техкарты'], ['mov','Списание / НЗП'],
-    ['fg','Готовый товар и брак'], ['cost','Себестоимость']
+    ['fg','Готовый товар и брак'], ['rawdef','Брак материалов'], ['cost','Себестоимость']
   ];
   let month = '', year = '', edited = '';
 
@@ -33,6 +33,33 @@
     return `<p style="margin:8px 0">Строки формируются из заказов в разделе «Пошив и техкарты». Списание выполняется при завершении заказа.</p>
       <div style="margin:10px 0">${monthField()}</div>${table(['Месяц','Дата','Количество','Цена USD','Итого USD',
         'Материал','Товар','Комментарий','Дата изготовления','Статус'],rows)}`;
+  }
+
+  const quantity = value => num(value).toLocaleString('ru-RU',{maximumFractionDigits:6});
+  function renderBalances() {
+    const rows = window.calcStockStats().matRows;
+    return `<h3 style="margin:16px 0 8px">Остаток сырья и фурнитуры на руках</h3>
+      <p>Остаток = начальный запас + приход − списано по заказам − брак материалов. Расход по незавершённым заказам показан отдельно.</p>
+      ${table(['Материал','Категория','Ед.','Начальный','Приход','Списано по заказам','Брак','В пошиве','На руках'],rows.map(row =>
+        cells([row.name,row.cat,row.unit,...[row.initialQty,row.receivedQty,row.orderQty,row.defectQty,row.plannedQty,row.qty].map(quantity)])))}`;
+  }
+
+  function renderMaterialDefects(store) {
+    const writable = !window.__skosReadOnly;
+    const options = window.calcStockStats().matRows.map(row =>
+      `<option value="${esc(row.name)}">${esc(row.name)} · ${quantity(row.qty)} ${esc(row.unit)}</option>`).join('');
+    return `<h3 style="margin:16px 0 8px">Списание брака сырья и фурнитуры</h3>
+      <p>Вносите здесь материал, снятый со складского остатка. Брак готового изделия учитывается во вкладке «Готовый товар и брак».</p>
+      ${writable?`<form class="form-grid" data-material-defect style="margin:10px 0">
+        <label>Дата<input class="input" name="date" type="date" value="${esc(window.today())}" required></label>
+        <label>Материал<select class="select" name="material" required><option value="">Выберите</option>${options}</select></label>
+        <label>Количество<input class="input" name="qty" type="number" min="0.000001" step="any" required></label>
+        <label>Причина<input class="input" name="reason" required></label>
+        <button type="submit" class="btn btn-danger">Списать брак</button></form>`:''}
+      ${table(['Дата','Материал','Списано','Причина',...(writable?['Действия']:[])],(store.materialDefects || []).map(row=>{
+        const content = cells([row.date,row.material,quantity(row.qty),row.reason]);
+        return writable?content.replace('</tr>',`<td><button type="button" class="btn" data-remove-material-defect="${esc(row.id)}">Отменить списание</button></td></tr>`):content;
+      }))}${renderBalances()}`;
   }
 
   function costForm(store, current) {
@@ -93,13 +120,14 @@
     const target = document.getElementById('tab-stk');
     if (!target) return;
     const store = window.ensureStore(), sub = store.stkSub || 'sum';
-    if (sub==='mov' || sub==='cost') {
+    if (['mov','cost','rawdef'].includes(sub)) {
       target.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🏭 Запасы, Брак и Фурнитура</div></div>
-        <div data-stock-tabs style="display:flex;flex-wrap:wrap;gap:6px"></div>${sub==='mov'?renderMovements(store):renderCosts(store)}</div>`;
+        <div data-stock-tabs style="display:flex;flex-wrap:wrap;gap:6px"></div>${sub==='mov'?renderMovements(store):sub==='cost'?renderCosts(store):renderMaterialDefects(store)}</div>`;
     } else {
       renderExisting.apply(this,arguments);
       target.querySelector('.card-header + div')?.setAttribute('data-stock-tabs','');
       if (sub==='sum') target.insertAdjacentHTML('beforeend',renderMonthly(store));
+      if (['sum','mat','inc'].includes(sub)) target.firstElementChild?.insertAdjacentHTML('beforeend',renderBalances());
     }
 
     const navigation = target.querySelector('[data-stock-tabs]');
@@ -126,6 +154,26 @@
       newMaterial.after(suggestions);
       newMaterial.setAttribute('list',suggestions.id);
     }
+    const defectForm = target.querySelector('[data-material-defect]');
+    if (defectForm) defectForm.onsubmit = event => {
+      event.preventDefault();
+      if (window.__skosReadOnly) return;
+      const {date, material, qty: inputQty, reason} = Object.fromEntries(new FormData(defectForm));
+      const qty = Number(inputQty);
+      const row = window.calcStockStats().matRows.find(item => item.name === material);
+      if (!date || !reason.trim() || !row || !Number.isFinite(qty) || qty <= 0) return;
+      if (qty > row.qty + 1e-8) return alert('На складе недостаточно материала для списания.');
+      store.materialDefects ||= [];
+      store.materialDefects.unshift({id:crypto.randomUUID(),date,material,qty,reason:reason.trim()});
+      window.save(true);
+      window.renderStkTab();
+    };
+    for (const button of target.querySelectorAll('[data-remove-material-defect]')) button.onclick = () => {
+      if (window.__skosReadOnly || !confirm('Отменить списание и вернуть количество в остаток?')) return;
+      store.materialDefects = store.materialDefects.filter(row => row.id !== button.dataset.removeMaterialDefect);
+      window.save(true);
+      window.renderStkTab();
+    };
     const form=target.querySelector('#stock-cost-form');
     if (!form || window.__skosReadOnly) return;
     const save=()=>{edited='';window.save(true);window.renderStkTab();};

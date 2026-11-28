@@ -17,7 +17,7 @@
         </div>
       </div>
       <div class="nav-section">
-        <div class="nav-label">Аналитика и ОПиУ</div>
+        <div class="nav-label">Аналитика</div>
         <button class="nav-btn active" id="nav-dash" onclick="tab('dash')">📊 Сводка (5 ИП + ООО)</button>
         <button class="nav-btn" id="nav-abc" onclick="tab('abc')">🏆 Двойной ABC-анализ</button>
         <button class="nav-btn" id="nav-rep" onclick="tab('rep')">📥 Отчёты WB / Ozon / ЯМ</button>
@@ -25,6 +25,8 @@
         <div class="nav-label">Склад и Производство</div>
         <button class="nav-btn" id="nav-stk" onclick="tab('stk')">🏭 Запасы, Брак и Фурнитура</button>
         <div class="nav-label">Финансы и Настройки</div>
+        <button class="nav-btn" id="nav-opiu" onclick="tab('opiu')">📊 ОПиУ</button>
+        <button class="nav-btn" id="nav-balance" onclick="tab('balance')">⚖️ Баланс</button>
         <button class="nav-btn" id="nav-dds" onclick="tab('dds')">💳 ДДС, Выписки и Кассы</button>
         <button class="nav-btn" id="nav-exp" onclick="tab('exp')">💸 Расходы и Налоги (КВ/3)</button>
         <button class="nav-btn" id="nav-sup" onclick="tab('sup')">🤝 Поставщики и ОС</button>
@@ -83,14 +85,13 @@
           <div style="overflow-x:auto"><table><thead><tr><th>Площадка</th><th class="num">Выручка (чист.)</th><th class="num">Возвраты</th><th class="num">Реклама</th><th class="num">Логистика</th><th class="num">Комиссия и усл.</th><th class="num">Себестоимость</th><th class="num">Выкуп %</th><th class="num">Прибыль МП</th></tr></thead><tbody id="tb-mps"></tbody></table></div>
         </div>
 
-        <div class="card"><div class="card-header"><div class="card-title">Каскад чистой прибыли (ОПиУ)</div><button class="btn" onclick="tab('exp')">+ Добавить расход / налог</button></div><div id="wf-box"></div></div>
       </section>
 
       <section id="tab-abc" class="hidden">
         <div class="card">
           <div class="card-header">
-            <div><div class="card-title">🏆 Двойной ABC-анализ (по Прибыли и по Продажам)</div><div style="font-size:11.5px;color:#64748b">A = 80%, B = 15%, C = 5% или убыток</div></div>
-            <div style="display:flex;gap:8px;align-items:center"><span style="font-size:12px;font-weight:700">Группировка:</span><select id="abc-mode" class="select" style="width:auto" onchange="renderAbc()"><option value="MODEL">По моделям</option><option value="COLOR">По цветам</option><option value="SIZE">По размерам</option><option value="SKU">Детально по ШК / SKU</option></select></div>
+            <div><div class="card-title">🏆 Двойной ABC-анализ (по Прибыли и по Продажам)</div><div style="font-size:11.5px;color:#64748b">Первая буква — по прибыли, вторая — по чистым продажам в штуках</div></div>
+            <div style="display:flex;gap:8px;align-items:center"><span style="font-size:12px;font-weight:700">Группировка:</span><select id="abc-mode" class="select" style="width:auto" onchange="renderAbc()"><option value="MODEL">По папкам / артикулам</option><option value="COLOR">По цветам</option><option value="SIZE">По размерам</option><option value="SKU">Детально по ШК / SKU</option></select></div>
           </div>
           <div style="overflow-x:auto"><table><thead><tr><th>Прибыль / Продажи</th><th>Товар / Группа</th><th>Детали</th><th class="num">Чист. шт</th><th class="num">Возвр. шт</th><th class="num">Выручка</th><th class="num">Себест.</th><th class="num">Прибыль</th><th class="num">Доля приб.</th></tr></thead><tbody id="tb-abc"></tbody></table></div>
         </div>
@@ -186,6 +187,9 @@
           <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>Дата</th><th>Товар</th><th>Операция</th><th class="num">Шт</th><th class="num">Цена ($)</th><th class="num">Сумма (₽)</th><th></th></tr></thead><tbody id="tb-stk"></tbody></table></div>
         </div>
       </section>
+
+      <section id="tab-opiu" class="hidden"></section>
+      <section id="tab-balance" class="hidden"></section>
 
       <section id="tab-dds" class="hidden">
         <div class="kpi-grid" id="dds-kpis"></div>
@@ -415,6 +419,7 @@
   <script src="unit.js"></script>
   <script src="directory-folders.js"></script>
   <script src="inventory-workbook.js"></script>
+  <script src="financial-reports.js"></script>
   <script src="cloud-config.js" defer></script>
   <script src="cloud-firestore.js" defer></script>
   <script src="cloud-sync.js" defer></script>
