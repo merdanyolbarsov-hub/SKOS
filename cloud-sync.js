@@ -22,8 +22,10 @@
   const settings = document.getElementById('skos-cloud-settings');
   const logout = document.createElement('button');
   const history = document.createElement('button');
+  const ownedFolders = window.getFolderNames;
+  const working = document.createElement('button');
   const returnToLatest = document.createElement('button');
-  for (const button of [logout, history, returnToLatest]) {
+  for (const button of [logout, history, returnToLatest, working]) {
     button.className = 'btn';
     button.type = 'button';
     button.hidden = true;
@@ -31,8 +33,10 @@
   }
   logout.textContent = 'Выйти';
   history.textContent = 'Версии облака';
+  working.textContent = 'Локальный черновик';
   cloud.disabled = true;
 
+  let ownerWork, ownerLatest, ownerCloudReady;
   let user, role, timer, currentVersion, archivedVersion, session = 0, updating = false, publishing = false;
   const tell = text => {
     message.textContent = text;
@@ -40,21 +44,66 @@
     cloud.title = text;
   };
   const format = date => new Date(date).toLocaleString('ru-RU');
+  const signatureKey = 'skos_owner_cloud_signature';
+  function capture(data = window.db, folderNames = window.getFolderNames()) {
+    const {cloud, tab, ...content} = data;
+    return {schema:1,data:content,folderNames};
+  }
+  async function signature(payload) {
+    const {erp, ...data} = payload.data;
+    const {dictSub, stkSub, ...records} = erp || {};
+    const ordered = (_, value) => value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value).sort().map(key=>[key,value[key]])) : value;
+    const bytes = new TextEncoder().encode(JSON.stringify({data:{...data,erp:records},folderNames:payload.folderNames},ordered));
+    const digest = await crypto.subtle.digest('SHA-256',bytes);
+    return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+  }
   function apply(payload, owner) {
-    const {cloud, tab, ...data} = payload.data;
-    if (!owner) {
-      const selectedTab = window.db.tab;
-      for (const key of Object.keys(window.db)) delete window.db[key];
-      Object.assign(window.db, structuredClone(defaults), {tab:selectedTab});
-    }
-    Object.assign(window.db, data);
-    if (owner) localStorage.setItem(window._CFG.FMAP, JSON.stringify(payload.folderNames));
-    else window.getFolderNames = () => payload.folderNames;
+    const {cloud, tab, ...data} = structuredClone(payload.data);
+    const selectedTab = window.db.tab;
+    for (const key of Object.keys(window.db)) delete window.db[key];
+    Object.assign(window.db, structuredClone(defaults), data, {tab:selectedTab});
+    window.getFolderNames = owner ? ownedFolders : () => payload.folderNames || {};
+    if (owner) localStorage.setItem(window._CFG.FMAP, JSON.stringify(payload.folderNames || {}));
     window.ensureStore();
     window.fillAllSelects();
     window.onPerChange();
     window.tab(window.db.tab || 'dash');
   }
+  function ownerMode(editable) {
+    if (editable) {
+      window.__skosReadOnly = false;
+      document.getElementById('ro-css')?.remove();
+    } else window.applyGuestRestrictions();
+    cloud.disabled = !editable || !ownerCloudReady;
+    working.hidden = editable || !ownerWork;
+  }
+  function showOwnerLatest() {
+    archivedVersion = '';
+    returnToLatest.hidden = true;
+    if (ownerWork) {
+      ownerMode(false);
+      apply(ownerLatest.snapshot,false);
+      tell('Последняя версия облака ' + format(ownerLatest.date) + '. Локальный черновик доступен отдельно.');
+    } else if (ownerLatest) {
+      ownerMode(true);
+      apply(ownerLatest.snapshot,true);
+      window.flushLocalSave();
+      tell('Последняя версия облака ' + format(ownerLatest.date));
+    }
+  }
+  working.onclick = () => {
+    if (role !== 'owner' || !ownerWork || publishing) return;
+    const draft = ownerWork;
+    ownerWork = null;
+    archivedVersion = '';
+    ownerMode(true);
+    apply(draft,true);
+    window.flushLocalSave();
+    returnToLatest.textContent = 'Открыть последнюю облачную версию';
+    returnToLatest.hidden = !ownerLatest;
+    tell('Открыт локальный черновик. Кнопка «Облако» публикует его как новую версию.');
+  };
   let firestore;
   async function request(path, body) {
     try {
@@ -98,26 +147,43 @@
   }
 
   window.syncCloud = async () => {
-    if (role !== 'owner' || publishing) return;
+    if (role !== 'owner' || window.__skosReadOnly || !ownerCloudReady || publishing) return;
     publishing = true;
     cloud.disabled = true;
     let notice;
     try {
       window.flushLocalSave();
-      const {cloud, tab, ...data} = window.db;
-      const result = await request('/publish',{schema:1,data,folderNames:window.getFolderNames()});
+      const snapshot = structuredClone(capture());
+      const baseline = await signature(snapshot);
+      const result = await request('/publish',snapshot);
+      try { localStorage.setItem(signatureKey,baseline); } catch {}
+      ownerLatest = {...result,snapshot};
+      returnToLatest.hidden = true;
       notice = 'База опубликована ' + format(result.date);
     } catch (error) {
       notice = error.status === 413 ? 'База превышает размер одной публикации.' : 'Облако не подтвердило публикацию.';
     } finally {
       publishing = false;
-      cloud.disabled = role !== 'owner';
+      cloud.disabled = role !== 'owner' || window.__skosReadOnly;
     }
     tell(notice);
     window.showToastProgress(notice, 3500);
   };
 
-  returnToLatest.onclick = () => {
+  returnToLatest.onclick = async () => {
+    if (role === 'owner') {
+      if (publishing || !ownerLatest) return;
+      if (!window.__skosReadOnly) {
+        window.flushLocalSave();
+        const draft = structuredClone(capture());
+        const active = session;
+        const hash = await signature(draft);
+        if (active !== session) return;
+        ownerWork = hash === localStorage.getItem(signatureKey) ? null : draft;
+      }
+      showOwnerLatest();
+      return;
+    }
     archivedVersion = '';
     currentVersion = '';
     returnToLatest.disabled = true;
@@ -127,6 +193,7 @@
   history.onclick = async () => {
     const active = session;
     const viewer = role === 'viewer';
+    if (publishing) return;
     history.disabled = true;
     try {
       const versions = await request('/history');
@@ -134,25 +201,34 @@
       if (!versions.length) { tell('Сохранённых версий пока нет.'); return; }
       const dialog = document.createElement('dialog');
       dialog.style.cssText = gate.style.cssText;
-      dialog.innerHTML = '<h2>Версии облака</h2><select class="select" aria-label="Версия"></select><p role="status"></p><button type="button" class="btn btn-primary">Скачать JSON</button> <button type="button" class="btn">Закрыть</button>';
+      dialog.innerHTML = '<h2>Версии облака</h2><select class="select" aria-label="Версия"></select><p role="status"></p><button type="button" class="btn btn-primary">Открыть для просмотра</button> <button type="button" class="btn" data-download>Скачать JSON</button> <button type="button" class="btn">Закрыть</button>';
       const select = dialog.querySelector('select');
       for (const title of versions) {
         const date = title.slice(7,24).replace(/^(....)(..)(..)(..)(..)(..)(...)$/, '$1-$2-$3T$4:$5:$6.$7Z');
-        select.add(new Option(format(date),title));
+        select.add(new Option(format(date) + (title===(ownerLatest?.id || currentVersion)?' · текущая':''),title));
       }
-      const [open, close] = dialog.querySelectorAll('button');
-      if (viewer) open.textContent = 'Открыть для просмотра';
+      const [open, download, close] = dialog.querySelectorAll('button');
+      download.hidden = viewer;
       close.onclick = () => dialog.close();
       dialog.onclose = () => dialog.remove();
-      open.onclick = async () => {
-        open.disabled = true;
+      const viewVersion = async shouldDownload => {
+        open.disabled = download.disabled = true;
         const title = select.value;
         const previousArchive = archivedVersion;
-        if (viewer) archivedVersion = title;
+        if (!shouldDownload && viewer) archivedVersion = title;
         try {
           const {snapshot, date} = await request('/version/' + encodeURIComponent(title));
           if (active !== session) return;
-          if (viewer) {
+          if (!shouldDownload) {
+            if (!viewer && !window.__skosReadOnly) {
+              window.flushLocalSave();
+              const draft = structuredClone(capture());
+              const hash = await signature(draft);
+              if (active !== session) return;
+              ownerWork = ownerLatest && hash === localStorage.getItem(signatureKey) ? null : draft;
+            }
+            archivedVersion = title;
+            if (!viewer) ownerMode(false);
             apply(snapshot, false);
             returnToLatest.textContent = 'Архив ' + format(date) + ' · к последней версии';
             returnToLatest.hidden = false;
@@ -169,8 +245,10 @@
           if (active !== session) return;
           if (viewer) archivedVersion = previousArchive;
           dialog.querySelector('[role=status]').textContent = 'Не удалось открыть версию.';
-        } finally { open.disabled = false; }
+        } finally { open.disabled = download.disabled = false; }
       };
+      open.onclick = () => viewVersion(false);
+      download.onclick = () => viewVersion(true);
       document.body.append(dialog);
       dialog.showModal();
     } catch { tell('Не удалось получить историю облака.'); }
@@ -208,6 +286,10 @@
       const active = ++session;
       clearInterval(timer);
       role = null;
+      ownerLatest = ownerWork = null;
+      ownerCloudReady = false;
+      working.hidden = true;
+      window.getFolderNames = ownedFolders;
       user = account;
       currentVersion = '';
       archivedVersion = '';
@@ -227,24 +309,47 @@
         const result = await request('/session');
         if (active !== session) return;
         if (result.role === 'owner') {
-          const local = localStorage.getItem(window._CFG.KEY);
-          if (local) {
-            const {cloud,tab,...data} = JSON.parse(local);
-            apply({data,folderNames:window.getFolderNames()},true);
-          } else {
+          let local;
+          try { local = JSON.parse(localStorage.getItem(window._CFG.KEY)); } catch {}
+          const draft = local && capture(local,ownedFolders());
+          try {
             const latest = await request('/latest');
-            if (latest) apply((await request('/version/' + latest.title)).snapshot,true);
+            if (active !== session) return;
+            ownerCloudReady = true;
+            if (latest) {
+              const version = await request('/version/' + encodeURIComponent(latest.title));
+              if (active !== session) return;
+              ownerLatest = {...latest,...version};
+              if (draft) {
+                const [localSignature, cloudSignature] = await Promise.all([signature(draft),signature(version.snapshot)]);
+                if (localSignature !== cloudSignature && localSignature !== localStorage.getItem(signatureKey)) ownerWork = draft;
+              }
+              if (active !== session) return;
+            }
+          } catch {
+            if (active !== session) return;
+            if (!draft) throw new Error('Облачная база недоступна.');
+            ownerLatest = null;
+            ownerCloudReady = false;
           }
-          if (active !== session) return;
           role = 'owner';
-          window.__skosReadOnly = false;
-          document.getElementById('ro-css')?.remove();
+          if (ownerLatest) {
+            showOwnerLatest();
+            if (!ownerWork) {
+              const baseline = await signature(capture());
+              if (active !== session) return;
+              localStorage.setItem(signatureKey,baseline);
+            }
+          } else {
+            ownerMode(true);
+            if (draft) apply(draft,true);
+            tell(ownerCloudReady ? 'Сохранённых версий в облаке пока нет.' :
+              'Открыта локальная база. Обновите страницу, чтобы повторить проверку облака перед публикацией.');
+          }
           window.tab('dash');
-          cloud.disabled = false;
           history.hidden = false;
           if (gate.open) gate.close();
           setAppReady(true);
-          tell('Доступ владельца. Нажмите «Облако», чтобы опубликовать базу.');
         } else if (result.role === 'viewer') {
           role = 'viewer';
           window.applyGuestRestrictions();
