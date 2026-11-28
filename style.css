@@ -263,16 +263,38 @@ tbody tr:hover > td { background-color: #e8ede9; }
 
 .ladder-controls, .ladder-markets, .row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .ladder-controls { max-width: 100%; gap: 10px; }
-.ladder-market { min-height: 38px; border-radius: 8px; font-size: 13px; }
+.ladder-market {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  min-width: 116px;
+  min-height: 64px;
+  padding: 9px 17px;
+  border-radius: 11px;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+.ladder-market[data-ladder-market="WB"], .ladder-market[data-ladder-market="OZON"] {
+  font-size: clamp(26px, 2.5vw, 36px);
+  letter-spacing: -.035em;
+}
 .ladder-market[data-ladder-market="WB"] { background: #8f207b; border-color: #8f207b; color: #fff; }
-.ladder-market[data-ladder-market="OZON"] { background: #0754da; border-color: #0754da; color: #fff; font-size: 15px; }
+.ladder-market[data-ladder-market="OZON"] { background: #0754da; border-color: #0754da; color: #fff; }
 .ladder-market[data-ladder-market="YM"] { background: #ffda37; border-color: #d1ad23; color: #231c09; }
 .ladder-market[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px #354f69; }
-.ladder-market[aria-pressed="true"]::after { content: " ✓"; }
+.ladder-market[aria-pressed="true"]::after { content: "✓"; position: absolute; inset: 4px 6px auto auto; font-size: 14px; }
 .ladder-account { display: grid; gap: 3px; min-width: 0; width: min(100%, 230px); font-size: 11px; }
 .ladder-account .select { min-height: 38px; }
 .bom-editor { width: min(94vw, 520px); margin: auto; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
 .bom-editor > p { margin: 7px 0 12px; }
 .bom-editor form { display: grid; gap: 10px; }
-.ladder-ya { font-size: 16px; font-weight: 850; }
+.ladder-ya { font-size: clamp(26px, 2.6vw, 39px); font-weight: 850; }
+@media (max-width: 760px) {
+  .ladder-markets { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); width: 100%; gap: 9px; }
+  .ladder-market { min-width: 0; min-height: 60px; padding-inline: 12px; }
+  .ladder-market[data-ladder-market="YM"] { font-size: 14px; }
+}
 .ladder-revenue-share { margin-bottom: 4px; color: #405571; font-size: 11px; font-weight: 650; }
