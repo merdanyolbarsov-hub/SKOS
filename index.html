@@ -10,13 +10,13 @@
     #skos-startup strong{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:10px;background:#172638;color:#f6f4ef;font-size:24px}
     #skos-startup progress{display:block;margin:14px auto 0;width:190px;height:7px;accent-color:#46647e}
   </style>
-  <link rel="stylesheet" href="style.css?v=20261128-9" />
+  <link rel="stylesheet" href="style.css?v=20261128-10" />
 </head>
 <body>
   <div id="skos-startup" role="status">
     <div><strong aria-hidden="true">S</strong><h1>SKOS Finance 3.0</h1><p data-startup-message>Проверяем доступ…</p><progress aria-label="Загрузка SKOS"></progress></div>
   </div>
-  <aside class="sidebar">
+  <aside class="sidebar" id="skos-sidebar" aria-label="Разделы SKOS">
     <div>
       <div class="brand">
         <div class="brand-logo">S</div>
@@ -24,6 +24,7 @@
           <div class="brand-name">SKOS <span>Finance 3.0</span></div>
           <div style="font-size:10px;color:#94a3b8">Управленческий контур</div>
         </div>
+        <button type="button" class="mobile-drawer-close" aria-label="Закрыть меню">×</button>
       </div>
       <div class="nav-section">
         <div class="nav-label">Аналитика</div>
@@ -47,17 +48,22 @@
       <div style="display:flex;align-items:center;gap:6px"><input type="number" step="0.1" id="usd-rate" class="rate-input" onchange="setRate(this.value)"><b>₽</b></div>
     </div>
   </aside>
+  <div class="mobile-backdrop" hidden aria-hidden="true"></div>
 
   <div class="main-wrap">
     <header class="topbar">
-      <div style="font-size:13.5px;font-weight:700" id="crumb">SKOS / Сводка и 5 ИП + 1 ООО</div>
-      <div class="topbar-actions">
+      <div class="topbar-heading">
+        <button type="button" class="btn mobile-menu-toggle" aria-controls="skos-sidebar" aria-expanded="false" aria-label="Открыть меню">☰</button>
+        <div style="font-size:13.5px;font-weight:700" id="crumb">SKOS / Сводка и 5 ИП + 1 ООО</div>
+        <button type="button" class="btn mobile-actions-toggle" aria-controls="skos-topbar-actions" aria-expanded="false">Действия</button>
+      </div>
+      <div class="topbar-actions" id="skos-topbar-actions">
         <button class="btn btn-primary" id="m-full" onclick="setMode('FULL')">🏢 Вся компания</button>
         <button class="btn" id="m-mp" onclick="setMode('MP')">🛒 Только МП</button>
-        <button class="btn btn-amber" id="lock-btn" onclick="toggleLock()">🔓 Открыт</button>
-        <button class="btn btn-success" id="skos-cloud-button" onclick="syncCloud(true)">☁️ Облако</button>
-        <button class="btn" onclick="exportJson()">💾 Бэкап</button>
-        <label class="btn" style="cursor:pointer">📂 Загрузить<input type="file" accept=".json" style="display:none" onchange="importJson(event)"></label>
+        <button class="btn btn-amber" id="lock-btn" data-owner-action onclick="toggleLock()">🔓 Открыт</button>
+        <button class="btn btn-success" id="skos-cloud-button" data-owner-action onclick="syncCloud(true)">☁️ Облако</button>
+        <button class="btn" data-owner-action onclick="exportJson()">💾 Бэкап</button>
+        <label class="btn" data-owner-action style="cursor:pointer">📂 Загрузить<input type="file" accept=".json" style="display:none" onchange="importJson(event)"></label>
       </div>
     </header>
 
@@ -441,6 +447,7 @@
   <script src="financial-reports.js?v=20261128-2"></script>
   <script src="cloud-config.js" defer></script>
   <script src="cloud-firestore.js?v=20261128-7" defer></script>
+  <script src="mobile-layout.js?v=20261128-10" defer></script>
   <script src="cloud-sync.js?v=20261128-9" defer></script>
 </body>
 </html>

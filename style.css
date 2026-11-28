@@ -183,3 +183,80 @@ td { border-color: #e4dfd6; }
 tbody tr:nth-child(even) > td { background-color: #f0ede6; }
 tbody tr:hover > td { background-color: #e8ede9; }
 .btn-primary:hover { background: #36546d; border-color: #36546d; }
+
+.mobile-menu-toggle, .mobile-actions-toggle, .mobile-drawer-close, .mobile-backdrop { display: none; }
+
+@media (max-width: 760px) {
+  body { height: 100dvh; }
+  .sidebar {
+    display: none;
+    position: fixed;
+    z-index: 92;
+    inset: 0 auto 0 0;
+    width: min(84vw, 295px);
+    box-shadow: 8px 0 26px #11274140;
+  }
+  .sidebar.mobile-open { display: flex; }
+  .sidebar .brand { padding: 14px 12px; }
+  .sidebar .brand-name { font-size: 15px; }
+  .sidebar .nav-btn { min-height: 44px; padding-inline: 12px; font-size: 14px; }
+  .mobile-backdrop:not([hidden]) {
+    display: block;
+    position: fixed;
+    z-index: 91;
+    inset: 0;
+    background: #17263870;
+  }
+  .mobile-drawer-close {
+    display: block;
+    margin-inline-start: auto;
+    min-width: 44px;
+    min-height: 44px;
+    border: 1px solid #8ba2bb;
+    border-radius: 8px;
+    color: #fff;
+    background: transparent;
+    font-size: 23px;
+  }
+  .topbar { display: block; padding: 7px 10px; }
+  .topbar-heading {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+  #crumb { overflow-wrap: anywhere; line-height: 1.25; }
+  .mobile-menu-toggle, .mobile-actions-toggle { display: block; min-height: 44px; min-width: 44px; }
+  .mobile-menu-toggle { font-size: 18px; }
+  .mobile-actions-toggle { font-size: 12px; }
+  .topbar-actions { display: none; }
+  .topbar:has(.mobile-actions-toggle[aria-expanded="true"]) .topbar-actions {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+    max-height: 31dvh;
+    overflow-y: auto;
+  }
+  .topbar-actions .btn { min-height: 40px; display: inline-flex; align-items: center; }
+  .topbar-actions [hidden], :root:has(#ro-css) .topbar-actions [data-owner-action] { display: none; }
+  .content { padding: 10px; }
+  .card, .hero, .kpi-card { min-width: 0; }
+  .card-header { gap: 7px; }
+  .hero, .card { padding: 11px; }
+  .hero h1 { font-size: 22px; }
+  .filters-box { max-width: 100%; padding: 7px; gap: 7px; }
+  .filters-box > div, .form-grid > * { min-width: 0; }
+  .filter-select { max-width: 100%; }
+  .form-grid { grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); }
+  .filters-box select, .input, .select, .rate-input { min-height: 42px; font-size: 16px; min-width: 0; }
+  input[type="date"], input[type="month"] { max-width: 100%; }
+  .content .btn { min-height: 38px; }
+  .content table { display: block; overflow-x: auto; max-width: 100%; overscroll-behavior-inline: contain; }
+  .content table :is(th, td) { min-width: 5.5em; }
+  .content table :is(th, td):first-child { min-width: 8em; }
+  .content table td .btn { min-width: 36px; }
+  dialog { max-width: calc(100vw - 20px); max-height: 90dvh; overflow: auto; }
+  .modal-box { max-height: 90dvh; }
+}
