@@ -107,13 +107,21 @@
   }
   working.onclick = openOwnerDraft;
   let firestore;
+  async function readCloud(operation) {
+    let timeout;
+    try {
+      return await Promise.race([operation, new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('Облако отвечает слишком долго.')), 12000);
+      })]);
+    } finally { clearTimeout(timeout); }
+  }
   async function request(path, body) {
     try {
       if (path === '/session') return await firestore.session();
-      if (path === '/latest') return await firestore.latest();
-      if (path === '/history') return await firestore.history();
+      if (path === '/latest') return await readCloud(firestore.latest());
+      if (path === '/history') return await readCloud(firestore.history());
       if (path === '/publish') return await firestore.publish(body);
-      return await firestore.version(decodeURIComponent(path.slice('/version/'.length)));
+      return await readCloud(firestore.version(decodeURIComponent(path.slice('/version/'.length))));
     } catch (error) {
       if (error.code === 'permission-denied') error.status = 403;
       throw error;
@@ -145,8 +153,16 @@
       returnToLatest.disabled = false;
     } catch (error) {
       if (active !== session || archivedVersion) return;
-      tell('Не удалось получить облачную базу.');
-      if (error.status === 401 || error.status === 403 || !currentVersion) showLogin();
+      if (error.status === 401 || error.status === 403) {
+        setAppReady(false);
+        tell('Нет доступа к облачной базе.');
+        showLogin();
+      } else if (currentVersion) {
+        tell('Связь с облаком прервана. Показана последняя загруженная версия.');
+      } else {
+        tell('Облачная база пока недоступна. Повторим загрузку автоматически.');
+        showLogin();
+      }
     } finally {
       updating = false;
       returnToLatest.disabled = false;
@@ -158,8 +174,15 @@
 
   window.syncCloud = async () => {
     if (role !== 'owner' || window.__skosReadOnly || !ownerCloudReady || publishing) return;
+    if (navigator.onLine === false) {
+      window.showToastProgress('Нет сети. Черновик остался на этом устройстве.', 3500);
+      return;
+    }
     publishing = true;
     cloud.disabled = true;
+    const label = cloud.textContent;
+    cloud.textContent = 'Облако · отправка…';
+    tell('Публикуем базу. Читатель пока видит предыдущую версию.');
     let notice;
     try {
       window.flushLocalSave();
@@ -174,6 +197,7 @@
       notice = error.status === 413 ? 'База превышает размер одной публикации.' : 'Облако не подтвердило публикацию.';
     } finally {
       publishing = false;
+      cloud.textContent = label;
       cloud.disabled = role !== 'owner' || window.__skosReadOnly;
     }
     tell(notice);
@@ -318,6 +342,7 @@
         showLogin();
         return;
       }
+      tell('Загружаем последнюю облачную версию…');
       try {
         const result = await request('/session');
         if (active !== session) return;

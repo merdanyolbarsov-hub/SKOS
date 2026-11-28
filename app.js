@@ -365,12 +365,19 @@
       (window.db.expenses || []).forEach(ex => { if ((yr === 'ALL' || String(ex.yr) === String(yr)) && (mo === 'ALL' || String(ex.mo) === String(mo)) && (orgF === 'ALL' || ex.org === orgF)) expRub += ex.cur === 'USD' ? window.num(ex.amt) * rate : window.num(ex.amt); });
       const e = window.ensureStore();
       const months = mo === 'ALL' ? Array.from({length:12}, (_, index) => String(index + 1).padStart(2, '0')) : [mo];
-      depMonth = e.osList.reduce((sum, asset) => sum + months.reduce((total, month) => {
-        const period = (yr === 'ALL' ? window.today().slice(0, 4) : yr) + '-' + month;
-        const archived = (asset.archivePeriods || []).some(range => period >= range.from && (!range.to || period < range.to));
-        return total + (archived ? 0 : window.fixedAssetAmounts(asset).monthly);
-      }, 0), 0);
-      defectRub = e.defects.filter(d => (yr === 'ALL' || String(d.date).startsWith(yr)) && (mo === 'ALL' || String(d.date).slice(5, 7) === mo)).reduce((s, d) => s + window.num(d.qty) * window.num(d.unitUsd) * rate, 0);
+      depMonth = e.osList.reduce((sum, asset) => {
+        if (orgF !== 'ALL' && asset.org !== orgF) return sum;
+        const amounts = window.fixedAssetAmounts(asset);
+        if (amounts.passed >= amounts.months || (asset.arch && !asset.archivePeriods?.length)) return sum;
+        return sum + months.reduce((total, month) => {
+          const period = (yr === 'ALL' ? window.today().slice(0, 4) : yr) + '-' + month;
+          const archived = (asset.archivePeriods || []).some(range => period >= range.from && (!range.to || period < range.to));
+          return total + (archived ? 0 : amounts.monthly);
+        }, 0);
+      }, 0);
+      defectRub = e.defects.filter(d => (orgF === 'ALL' || d.org === orgF) &&
+        (yr === 'ALL' || String(d.date).startsWith(yr)) && (mo === 'ALL' || String(d.date).slice(5, 7) === mo))
+        .reduce((s, d) => s + window.num(d.qty) * window.num(d.unitUsd) * rate, 0);
     }
     const net = window.db.mode === 'FULL' ? (mpProf - taxMonth - expRub - depMonth - defectRub) : mpProf;
     return { rev, ret, ads, log, com, mpFee, afterMp, cogs, mpProf, taxMonth, expRub, depMonth, defectRub, net, bo: reps.length ? Math.round(boSum / reps.length) : 0 };
@@ -431,7 +438,7 @@
     const expenseShare = ladderMp === 'ALL' ? 1 : accountTotals.rev > 0 ? Math.min(1, Math.max(0, ladder.rev / accountTotals.rev)) : 0;
     const ovh = accountExpenses * expenseShare;
     const ladderNet = ladder.mpProf - ovh;
-    const expenseLabel = ladderMp === 'ALL' ? 'Налоги, ЗП и офис' : 'Доля общих расходов по выручке';
+    const expenseLabel = ladderMp === 'ALL' ? 'Налоги, расходы, амортизация и брак' : 'Доля общих расходов по выручке';
     const option = (value, title, selected) => `<option value="${window.esc(value)}"${value === selected ? ' selected' : ''}>${window.esc(title)}</option>`;
     ladderBox.innerHTML = `<div class="card" style="border:1.5px solid #bfdbfe;background:linear-gradient(180deg,#f8faff 0%,#ffffff 100%)">
       <div class="card-header" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">

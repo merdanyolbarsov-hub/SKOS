@@ -43,7 +43,6 @@
         const uid = currentUid();
         const role = uid === config.ownerUid ? 'owner' : uid === config.viewerUid ? 'viewer' : null;
         if (!role) throw Object.assign(new Error('Нет доступа к SKOS.'), {status:403});
-        await sdk.getDocFromServer(pointer);
         return {role};
       },
       latest,
