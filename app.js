@@ -341,7 +341,12 @@
       });
       (window.db.expenses || []).forEach(ex => { if ((yr === 'ALL' || String(ex.yr) === String(yr)) && (mo === 'ALL' || String(ex.mo) === String(mo)) && (orgF === 'ALL' || ex.org === orgF)) expRub += ex.cur === 'USD' ? window.num(ex.amt) * rate : window.num(ex.amt); });
       const e = window.ensureStore();
-      depMonth = e.osList.reduce((s, o) => s + ((window.num(o.qty || 1) * window.num(o.price)) / Math.max(1, window.num(o.months) || 24)), 0) * (mo === 'ALL' ? 12 : 1);
+      const months = mo === 'ALL' ? Array.from({length:12}, (_, index) => String(index + 1).padStart(2, '0')) : [mo];
+      depMonth = e.osList.reduce((sum, asset) => sum + months.reduce((total, month) => {
+        const period = (yr === 'ALL' ? window.today().slice(0, 4) : yr) + '-' + month;
+        const archived = (asset.archivePeriods || []).some(range => period >= range.from && (!range.to || period < range.to));
+        return total + (archived ? 0 : window.fixedAssetAmounts(asset).monthly);
+      }, 0), 0);
       defectRub = e.defects.filter(d => (yr === 'ALL' || String(d.date).startsWith(yr)) && (mo === 'ALL' || String(d.date).slice(5, 7) === mo)).reduce((s, d) => s + window.num(d.qty) * window.num(d.unitUsd) * rate, 0);
     }
     const net = window.db.mode === 'FULL' ? (mpProf - taxMonth - expRub - depMonth - defectRub) : mpProf;
@@ -1235,8 +1240,63 @@
   window.p4CtrAdd = () => { const e = window.ensureStore(), ctr = document.getElementById('ct-s').value, amt = window.num(document.getElementById('ct-a').value); if (!ctr || amt <= 0) return alert('Выберите контрагента и сумму!'); const info = window.directoryRows('contractors').find(c => c.name === ctr); e.contractorOps.unshift({ date: document.getElementById('ct-d').value || window.today(), ctr, kind: document.getElementById('ct-k').value, amt, cur: info ? info.cur : 'RUB' }); window.save(true); window.renderSupTab(); };
   window.p4CtrOpEdit = i => { const op = window.ensureStore().contractorOps[i]; if (!op) return; const a = prompt('Сумма (' + op.ctr + '):', op.amt); if (a !== null) { op.amt = window.num(a); window.save(true); window.renderSupTab(); } };
 
-  window.p4OsAdd = () => { const e = window.ensureStore(), nm = document.getElementById('os-n').value.trim(), pr = window.num(document.getElementById('os-p').value); if (!nm || pr <= 0) return alert('Введите название и цену ОС!'); e.osList.unshift({ name: nm, qty: window.num(document.getElementById('os-q').value) || 1, price: pr, months: window.num(document.getElementById('os-m').value) || 36, passed: window.num(document.getElementById('os-ps').value) || 0, room: document.getElementById('os-r').value.trim() }); window.save(true); window.renderSupTab(); };
-  window.p4OsEdit = i => { const o = window.ensureStore().osList[i]; if (!o) return; const nm = prompt('Название ОС:', o.name); if (nm) o.name = nm.trim(); const pr = prompt('Цена ₽:', o.price); if (pr !== null) o.price = window.num(pr); const p = prompt('Прошло месяцев износа:', o.passed || 0); if (p !== null) o.passed = window.num(p); window.save(true); window.renderSupTab(); };
+  window.fixedAssetAmounts = asset => {
+    const full = window.num(asset.qty || 1) * window.num(asset.price);
+    const months = Math.max(1, window.num(asset.months) || 24);
+    const passed = Math.max(0, Math.min(months, window.num(asset.passed)));
+    const monthly = full / months;
+    return {full, months, passed, monthly, remaining: Math.max(0, full - monthly * passed)};
+  };
+  let editedAsset = null;
+  let assetSearch = '', assetStatus = 'all';
+  window.p4FilterAssets = () => {
+    const panel = document.getElementById('fixed-assets-panel');
+    if (!panel) return;
+    assetSearch = panel.querySelector('[name=assetSearch]').value;
+    assetStatus = panel.querySelector('[name=assetStatus]').value;
+    const term = assetSearch.trim().toLocaleLowerCase('ru');
+    let shown = 0;
+    for (const row of panel.querySelectorAll('[data-asset-status]')) {
+      row.hidden = (assetStatus !== 'all' && row.dataset.assetStatus !== assetStatus) ||
+        !row.dataset.assetSearch.toLocaleLowerCase('ru').includes(term);
+      if (!row.hidden) shown++;
+    }
+    panel.querySelector('[data-asset-empty]').hidden = shown > 0;
+  };
+  window.p4OsAdd = event => {
+    event.preventDefault();
+    if (window.__skosReadOnly) return;
+    const form = event.currentTarget;
+    const {name, qty, price, months, passed, room} = Object.fromEntries(new FormData(form));
+    if (!name.trim() || Number(passed) > Number(months)) return alert('Укажите название и проверьте срок амортизации.');
+    const values = {name:name.trim(), qty:Number(qty), price:Number(price), months:Number(months), passed:Number(passed), room:room.trim()};
+    const list = window.ensureStore().osList;
+    if (editedAsset && list.includes(editedAsset)) Object.assign(editedAsset, values);
+    else list.unshift(values);
+    window.p4OsCancel();
+    window.save(true);
+  };
+  window.p4OsEdit = index => {
+    if (window.__skosReadOnly) return;
+    editedAsset = window.ensureStore().osList[index];
+    window.renderSupTab();
+    document.querySelector('#p4-sup-box [name=name]')?.focus();
+  };
+  window.p4OsCancel = () => { editedAsset = null; window.renderSupTab(); };
+  window.p4OsArchive = index => {
+    if (window.__skosReadOnly) return;
+    const asset = window.ensureStore().osList[index];
+    if (!asset) return;
+    const month = window.today().slice(0, 7);
+    asset.archivePeriods ||= [];
+    if (asset.arch) {
+      const latest = asset.archivePeriods.at(-1);
+      if (latest && !latest.to) latest.to = month;
+    } else asset.archivePeriods.push({from:month});
+    asset.arch = !asset.arch;
+    window.save(true);
+    window.renderSupTab();
+  };
 
   window.renderSupTab = function () {
     const sec = document.getElementById('tab-sup'); if (!sec) return;
@@ -1248,10 +1308,41 @@
     const cAct = window.directoryRows('contractors').filter(c => !c.arch);
     const cRows = cAct.map(c => { let acc = 0, pay = 0; e.contractorOps.forEach(op => { if (op.ctr === c.name) { if (op.kind === 'Начислено') acc += window.num(op.amt); else pay += window.num(op.amt); } }); const end = window.num(c.initDebt) + acc - pay; return `<tr><td class="bold">${window.esc(c.name)}</td><td>${window.esc(c.art)}</td><td class="num">${window.num(c.initDebt)}</td><td class="num">${acc}</td><td class="num">${pay}</td><td class="num bold ${end > 0 ? 'text-red' : 'text-green'}">${end} ${window.esc(c.cur)}</td></tr>`; }).join('');
     const cOpsRows = e.contractorOps.slice(0, 40).map((op, i) => `<tr><td>${window.esc(op.date)}</td><td class="bold">${window.esc(op.ctr)}</td><td>${window.esc(op.kind)}</td><td class="num bold">${op.amt} ${window.esc(op.cur)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4CtrOpEdit(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('contractorOps',${i})">✕</button></td></tr>`).join('');
-    const oRows = e.osList.map((o, i) => { const full = window.num(o.qty || 1) * window.num(o.price), m = Math.max(1, window.num(o.months) || 24), rem = Math.max(0, full - (full / m) * Math.min(m, window.num(o.passed))); return `<tr><td class="bold">${window.esc(o.name)} (${window.esc(o.room || 'Цех')})</td><td class="num">${window.fmtR(full)}</td><td class="num">${o.passed}/${m}</td><td class="num bold">${window.fmtR(rem)}</td><td class="num" style="white-space:nowrap"><button class="btn" onclick="p4OsEdit(${i})">✏️</button> <button class="btn btn-danger" onclick="p4DelRow('osList',${i})">✕</button></td></tr>`; }).join('');
+    const activeEdit = e.osList.includes(editedAsset) ? editedAsset : null;
+    const osField = (key, label, value, attrs='') => `<label>${label}<input class="input" name="${key}" value="${window.esc(activeEdit?.[key] ?? value)}" ${attrs}></label>`;
+    const oRows = e.osList.map((asset,index) => {
+      const {full, months, passed, monthly, remaining} = window.fixedAssetAmounts(asset);
+      return `<tr data-asset-status="${asset.arch ? 'archived' : 'active'}" data-asset-search="${window.esc(asset.name + ' ' + (asset.room || 'Цех'))}"><td class="bold">${window.esc(asset.name)}</td><td>${window.esc(asset.room || 'Цех')}</td>
+        <td class="num">${window.fmtR(full)}</td><td class="num">${passed} / ${months}</td>
+        <td class="num">${window.fmtR(monthly)}</td><td class="num">${window.fmtR(remaining)}</td><td>${asset.arch?'В архиве':'Активно'}</td>
+        ${window.__skosReadOnly?'':`<td><button class="btn" onclick="p4OsEdit(${index})">Редактировать</button>
+        <button class="btn" onclick="p4OsArchive(${index})">${asset.arch?'Восстановить':'В архив'}</button>
+        <button class="btn btn-danger" onclick="p4DelRow('osList',${index})">Удалить</button></td>`}</tr>`;
+    }).join('');
+
 
     box.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">🤝 Контрагенты SKOS (Сальдо 01.01 + Начислено − Выплачено)</div></div><div class="form-grid" style="margin-bottom:10px"><div><label>Дата</label><input id="ct-d" type="date" class="input" value="${window.today()}"></div><div>${window.withPlusBtn('Контрагент', 'contractors', 'Контрагент', 'ct-s')}<select id="ct-s" class="select"><option value="">— Контрагент —</option>${cAct.map(x => `<option value="${window.esc(x.name)}">${window.esc(x.name)}</option>`).join('')}</select></div><div><label>Тип</label><select id="ct-k" class="select"><option>Начислено</option><option>Выплачено</option></select></div><div><label>Сумма</label><input id="ct-a" type="number" class="input"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4CtrAdd()">+ Записать</button></div></div><table style="margin-bottom:10px"><thead><tr><th>Контрагент</th><th>Статья</th><th class="num">Нач.</th><th class="num">Начисл.</th><th class="num">Выплач.</th><th class="num">Остаток</th></tr></thead><tbody>${cRows}</tbody></table><table><thead><tr><th>Дата</th><th>Контрагент</th><th>Операция</th><th class="num">Сумма</th><th></th></tr></thead><tbody>${cOpsRows}</tbody></table></div>
-      <div class="card"><div class="card-header"><div class="card-title">🖥️ Основные средства (ОС) и Амортизация</div></div><div class="form-grid" style="margin-bottom:10px"><div><label>Название</label><input id="os-n" class="input"></div><div><label>Шт</label><input id="os-q" type="number" class="input" value="1"></div><div><label>Цена ₽</label><input id="os-p" type="number" class="input"></div><div><label>Срок мес</label><input id="os-m" type="number" class="input" value="36"></div><div><label>Прошло</label><input id="os-ps" type="number" class="input" value="0"></div><div><label>Где</label><input id="os-r" class="input" value="Цех"></div><div><button class="btn btn-primary" style="width:100%" onclick="p4OsAdd()">+ ОС</button></div></div><table><thead><tr><th>Объект</th><th class="num">Сумма ₽</th><th class="num">Срок</th><th class="num">Остаточная ₽</th><th></th></tr></thead><tbody>${oRows}</tbody></table></div>`;
+      <div class="card" id="fixed-assets-panel"><div class="card-header"><div class="card-title">🖥️ Основные средства (ОС) и Амортизация</div></div>
+        <p>Стоимость = количество × цена за единицу. Месячная норма = стоимость ÷ срок. Остаток рассчитывается по введённым месяцам износа.</p>
+        ${window.__skosReadOnly?'':`<form class="form-grid" onsubmit="p4OsAdd(event)" style="margin:10px 0">
+          ${osField('name','Название','','required')}${osField('qty','Количество',1,'type="number" min="1" step="1" required')}
+          ${osField('price','Цена за единицу, ₽','','type="number" min="0.01" step="0.01" required')}
+          ${osField('months','Срок, мес.',36,'type="number" min="1" step="1" required')}
+          ${osField('passed','Прошло, мес.',0,'type="number" min="0" step="1" required')}
+          ${osField('room','Местоположение','Цех')}
+          <button type="submit" class="btn btn-primary">${activeEdit?'Сохранить изменения':'+ Добавить ОС'}</button>
+          ${activeEdit?'<button type="button" class="btn" onclick="p4OsCancel()">Отмена</button>':''}
+        </form>`}
+        <div class="form-grid" style="margin:10px 0">
+          <label>Поиск по ОС<input type="search" class="input" name="assetSearch" value="${window.esc(assetSearch)}" oninput="p4FilterAssets()"></label>
+          <label>Статус<select class="select" name="assetStatus" onchange="p4FilterAssets()">
+            <option value="all">Все</option><option value="active">Активные</option><option value="archived">Архив</option>
+          </select></label></div>
+        <div style="overflow-x:auto"><table><thead><tr><th>Объект</th><th>Где</th><th class="num">Стоимость, ₽</th>
+        <th class="num">Прошло / срок</th><th class="num">Норма в месяц, ₽</th><th class="num">Остаточная стоимость, ₽</th><th>Статус</th>
+        ${window.__skosReadOnly?'':'<th>Действия</th>'}</tr></thead><tbody>${oRows}<tr data-asset-empty hidden><td colspan="8">Нет записей по выбранному фильтру.</td></tr></tbody></table></div></div>`;
+    box.querySelector('[name=assetStatus]').value = assetStatus;
+    window.p4FilterAssets();
   };
   /* === Часть 10Д-2: Справочники, Настройки юрлиц, Вход и Запуск === */
   window.p4DictSub = sub => { window.ensureStore().dictSub = sub; window.save(); window.renderDictTab(); };

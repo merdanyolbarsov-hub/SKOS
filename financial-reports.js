@@ -39,10 +39,7 @@
     const cash = Object.entries(window.db.initBalances || {}).reduce((sum,[id,amount])=>sum+toRub(id,amount),0) +
       (window.db.dds || []).reduce((sum,entry)=>sum+toRub(entry.wal,entry.amt),0);
     const stock = window.calcStockStats().totalUsd * rate;
-    const fixed = store.osList.reduce((sum,item)=>{
-      const full = num(item.qty || 1)*num(item.price), months = Math.max(1,num(item.months) || 24);
-      return sum + Math.max(0,full - full/months*Math.min(months,num(item.passed)));
-    },0);
+    const fixed = store.osList.reduce((sum,item)=>sum+(item.arch ? 0 : window.fixedAssetAmounts(item).remaining),0);
     const tax = store.taxDebts.reduce((sum,item)=>sum+num(item.debt),0);
     const assets = cash + stock + fixed;
     const rows = [
