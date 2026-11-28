@@ -418,6 +418,23 @@
       return `<tr><td class="bold">${window.esc(on)}</td><td class="num bold">${window.fmtR(os.rev)}</td><td class="num text-red">${window.fmtR(os.ret)}</td><td class="num">${window.fmtR(os.mpFee)}</td><td class="num">${window.fmtR(os.cogs)}</td><td class="num">${window.fmtR(os.taxMonth)}</td><td class="num">${window.fmtR(os.expRub)}</td><td class="num bold ${os.net >= 0 ? 'text-green' : 'text-red'}">${window.fmtR(os.net)}</td><td class="num bold">${window.fmtR(bBal)}</td></tr>`;
     }).join('');
 
+    const assetsBlock = document.getElementById('company-assets');
+    assetsBlock.hidden = window.db.mode !== 'FULL';
+    if (!assetsBlock.hidden) {
+      const assets = window.ensureStore().osList.reduce((totals, asset) => {
+        if (!asset.arch) {
+          const values = window.fixedAssetAmounts(asset);
+          totals.cost += values.full;
+          totals.remaining += values.remaining;
+        }
+        return totals;
+      }, {cost:0, remaining:0});
+      const companyStats = orgF === 'ALL' ? st : window.calcPeriodStats(yr, mo, 'ALL');
+      document.getElementById('company-assets-depreciation').textContent = window.fmtR(companyStats.depMonth);
+      document.getElementById('company-assets-cost').textContent = window.fmtR(assets.cost);
+      document.getElementById('company-assets-remaining').textContent = window.fmtR(assets.remaining);
+    }
+
     document.getElementById('tb-mps').innerHTML = ['WB', 'OZON', 'YM'].map(m => {
       const sub = (window.db.reports || []).filter(r => (yr === 'ALL' || String(r.yr) === yr) && (mo === 'ALL' || String(r.mo) === mo) && (orgF === 'ALL' || r.org === orgF) && r.mp === m);
       const r = sub.reduce((a, b) => a + window.num(b.rev), 0), rt = sub.reduce((a, b) => a + window.num(b.ret), 0), ad = sub.reduce((a, b) => a + window.num(b.ads), 0), lg = sub.reduce((a, b) => a + window.num(b.log), 0), cm = sub.reduce((a, b) => a + window.num(b.com), 0), cg = sub.reduce((a, b) => a + window.num(b.cogs), 0);

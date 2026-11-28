@@ -182,6 +182,7 @@
     cloud.disabled = true;
     const label = cloud.textContent;
     cloud.textContent = 'Облако · отправка…';
+    cloud.setAttribute('aria-busy','true');
     tell('Публикуем базу. Читатель пока видит предыдущую версию.');
     let notice;
     try {
@@ -198,6 +199,7 @@
     } finally {
       publishing = false;
       cloud.textContent = label;
+      cloud.removeAttribute('aria-busy');
       cloud.disabled = role !== 'owner' || window.__skosReadOnly;
     }
     tell(notice);
